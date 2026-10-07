@@ -8,6 +8,7 @@ import { Header } from '../components/Header';
 import { Badge } from '../components/Badge';
 import { ApiService } from '../services/api';
 import { Auction } from '../types/models';
+import { isCurrentUser } from '../auth/session';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'PartDetails'>;
 
@@ -23,7 +24,7 @@ export const PartDetailsScreen: React.FC<Props> = ({ route, navigation }) => {
 
   if (!auction) return null;
 
-  const isWinning = auction.highBidder === 'demo_buyer';
+  const isWinning = isCurrentUser(auction.highBidder);
   const isEnded = auction.status === 'Ended' || auction.status === 'Won' || auction.status === 'Lost';
 
   return (

@@ -29,6 +29,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SearchService.Tests", "test
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BidService.Tests", "tests\BidService.Tests\BidService.Tests.csproj", "{7382C8A5-5318-4CAF-9023-66BECCD643E0}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IdentityService.Tests", "tests\IdentityService.Tests\IdentityService.Tests.csproj", "{31EF3D53-C89B-4730-BEDF-75ACA8FC9003}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -159,6 +161,18 @@ Global
 		{7382C8A5-5318-4CAF-9023-66BECCD643E0}.Release|x64.Build.0 = Release|Any CPU
 		{7382C8A5-5318-4CAF-9023-66BECCD643E0}.Release|x86.ActiveCfg = Release|Any CPU
 		{7382C8A5-5318-4CAF-9023-66BECCD643E0}.Release|x86.Build.0 = Release|Any CPU
+		{31EF3D53-C89B-4730-BEDF-75ACA8FC9003}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{31EF3D53-C89B-4730-BEDF-75ACA8FC9003}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{31EF3D53-C89B-4730-BEDF-75ACA8FC9003}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{31EF3D53-C89B-4730-BEDF-75ACA8FC9003}.Debug|x64.Build.0 = Debug|Any CPU
+		{31EF3D53-C89B-4730-BEDF-75ACA8FC9003}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{31EF3D53-C89B-4730-BEDF-75ACA8FC9003}.Debug|x86.Build.0 = Debug|Any CPU
+		{31EF3D53-C89B-4730-BEDF-75ACA8FC9003}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{31EF3D53-C89B-4730-BEDF-75ACA8FC9003}.Release|Any CPU.Build.0 = Release|Any CPU
+		{31EF3D53-C89B-4730-BEDF-75ACA8FC9003}.Release|x64.ActiveCfg = Release|Any CPU
+		{31EF3D53-C89B-4730-BEDF-75ACA8FC9003}.Release|x64.Build.0 = Release|Any CPU
+		{31EF3D53-C89B-4730-BEDF-75ACA8FC9003}.Release|x86.ActiveCfg = Release|Any CPU
+		{31EF3D53-C89B-4730-BEDF-75ACA8FC9003}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -174,5 +188,6 @@ Global
 		{CC015F78-5A6B-4133-B265-6EF3DE642B69} = {1137BC36-556E-4300-816E-1A9FC6E729CC}
 		{83A87F89-7658-445C-BF16-96DDB08913F1} = {1137BC36-556E-4300-816E-1A9FC6E729CC}
 		{7382C8A5-5318-4CAF-9023-66BECCD643E0} = {1137BC36-556E-4300-816E-1A9FC6E729CC}
+		{31EF3D53-C89B-4730-BEDF-75ACA8FC9003} = {1137BC36-556E-4300-816E-1A9FC6E729CC}
 	EndGlobalSection
 EndGlobal

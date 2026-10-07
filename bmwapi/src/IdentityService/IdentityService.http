@@ -1,0 +1,76 @@
+### Mobile app sign-up / login against the Identity service.
+### In Development the code is also returned as "devOtp" (and always written to the log when email isn't set up).
+
+@id = http://localhost:5001
+@email = test.user@example.com
+@password = Passw0rd!x
+@scope = openid profile auctionApp IdentityServerApi offline_access
+
+### 1. Sign up (username is made from the first name: "Test User" -> "test", "test2", ...)
+POST {{id}}/api/account/register
+Content-Type: application/json
+
+{
+  "fullName": "Test User",
+  "email": "{{email}}",
+  "phoneNumber": "+919876543210",
+  "password": "{{password}}",
+  "acceptTerms": true
+}
+
+### 2. Log in with email + password.
+###    Trusted device (device_token from step 3) -> tokens. Otherwise -> 400 with code OTP_REQUIRED + challengeId.
+POST {{id}}/connect/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=bmw_password&client_id=mobileApp&scope={{scope}}&username={{email}}&password={{password}}&device_id=my-phone
+
+### 3. Enter the emailed code. remember_device=true also returns "deviceToken" (skip the code for 30 days).
+POST {{id}}/connect/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=bmw_otp&client_id=mobileApp&scope={{scope}}&challenge_id=PASTE_CHALLENGE_ID&otp=123456&device_id=my-phone&remember_device=true
+
+### Resend the login code (30 s cooldown)
+POST {{id}}/api/account/otp/resend
+Content-Type: application/json
+
+{ "challengeId": "PASTE_CHALLENGE_ID" }
+
+### The signed-in user
+GET {{id}}/api/account/me
+Authorization: Bearer PASTE_ACCESS_TOKEN
+
+### Refresh ("Remember me"). Refresh tokens are one-time: use the new one each time.
+POST {{id}}/connect/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=refresh_token&client_id=mobileApp&refresh_token=PASTE_REFRESH_TOKEN
+
+### Log out (revoke the refresh token)
+POST {{id}}/connect/revocation
+Content-Type: application/x-www-form-urlencoded
+
+client_id=mobileApp&token=PASTE_REFRESH_TOKEN&token_type_hint=refresh_token
+
+### Forgot password -> emails a code
+POST {{id}}/api/account/forgot-password
+Content-Type: application/json
+
+{ "email": "{{email}}" }
+
+### Reset password (signs out all devices)
+POST {{id}}/api/account/reset-password
+Content-Type: application/json
+
+{ "email": "{{email}}", "otp": "123456", "newPassword": "NewPassw0rd!" }
+
+### Google / Apple: id_token from the phone. Apple also needs the raw nonce.
+POST {{id}}/connect/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=bmw_external&client_id=mobileApp&scope={{scope}}&provider=google&id_token=PASTE_GOOGLE_ID_TOKEN
+
+### The token works everywhere: gateway -> auction service echoes the username
+POST http://localhost:6001/auctions/test
+Authorization: Bearer PASTE_ACCESS_TOKEN

@@ -1,64 +1,118 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
-import { COLORS, SPACING, RADIUS } from '../theme/colors';
+import { COLORS, SPACING } from '../theme/colors';
 import { Header } from '../components/Header';
+import { OtpCodeInput } from '../components/OtpCodeInput';
+import { CheckboxRow } from '../components/CheckboxRow';
+import { Notice } from '../components/Notice';
+import { PrimaryButton } from '../components/PrimaryButton';
+import { useAuth } from '../auth/AuthContext';
+import { useCountdown } from '../hooks/useCountdown';
+import { errorMessage } from '../services/authApi';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Otp'>;
 
 export const OtpScreen: React.FC<Props> = ({ route, navigation }) => {
-  const { phoneNumber } = route.params || { phoneNumber: '+234 803 123 4567' };
-  const [otp, setOtp] = useState('849201');
-  const [timer, setTimer] = useState(45);
+  const { challengeId, maskedEmail, resendAfterSeconds, rememberMe } = route.params;
+  const { verifyOtp, resendOtp } = useAuth();
+  const timer = useCountdown(resendAfterSeconds);
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setTimer(t => (t > 0 ? t - 1 : 0));
-    }, 1000);
-    return () => clearInterval(interval);
-  }, []);
+  const [otp, setOtp] = useState('');
+  const [rememberDevice, setRememberDevice] = useState(true);
+  const [devOtp, setDevOtp] = useState(route.params.devOtp ?? null);
+  const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
+  const [verifying, setVerifying] = useState(false);
+  const [resending, setResending] = useState(false);
 
-  const handleVerify = () => {
-    navigation.navigate('ProfilePreferences');
+  const handleVerify = async (code = otp) => {
+    setInfo(null);
+    if (code.length < 6) {
+      setError('Enter the 6-digit code');
+      return;
+    }
+    setError(null);
+    setVerifying(true);
+    try {
+      await verifyOtp(challengeId, code, rememberDevice, rememberMe);
+      // Signed in: the navigator switches to the marketplace by itself.
+    } catch (err) {
+      setError(errorMessage(err, 'Verification failed. Please try again.'));
+      setOtp('');
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  const handleResend = async () => {
+    if (timer.seconds > 0 || resending) return;
+    setError(null);
+    setInfo(null);
+    setResending(true);
+    try {
+      const res = await resendOtp(challengeId);
+      setOtp('');
+      setDevOtp(res.devOtp ?? null);
+      setInfo('New code sent. Check your email.');
+      timer.restart(res.resendAfterSeconds);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setResending(false);
+    }
   };
 
   return (
     <SafeAreaView style={styles.container}>
       <Header title="Verify OTP" onBack={() => navigation.goBack()} />
 
-      <View style={styles.content}>
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <Text style={styles.heading}>Enter 6-Digit Code</Text>
         <Text style={styles.subheading}>
-          Sent to <Text style={styles.phoneHighlight}>{phoneNumber}</Text>
+          Sent to <Text style={styles.emailHighlight}>{maskedEmail}</Text>
         </Text>
 
-        <View style={styles.otpBox}>
-          <TextInput
-            style={styles.otpInput}
+        {__DEV__ && devOtp ? <Notice tone="info" message={`Test mode: your code is ${devOtp}`} /> : null}
+
+        <View style={styles.otpWrap}>
+          <OtpCodeInput
             value={otp}
-            onChangeText={setOtp}
-            keyboardType="number-pad"
-            maxLength={6}
+            onChange={v => {
+              setOtp(v);
+              if (error) setError(null);
+            }}
+            onComplete={v => handleVerify(v)}
+            error={!!error}
           />
         </View>
 
-        <TouchableOpacity style={styles.verifyBtn} onPress={handleVerify} activeOpacity={0.8}>
-          <Text style={styles.verifyText}>VERIFY & CONTINUE</Text>
-        </TouchableOpacity>
+        {error ? <Notice tone="error" message={error} /> : null}
+        {info ? <Notice tone="success" message={info} /> : null}
+
+        <View style={styles.rememberRow}>
+          <CheckboxRow
+            checked={rememberDevice}
+            onToggle={() => setRememberDevice(v => !v)}
+            label="Remember this device (skip the code for 30 days)"
+          />
+        </View>
+
+        <PrimaryButton label="VERIFY & CONTINUE" onPress={() => handleVerify()} loading={verifying} style={styles.verifyBtn} />
 
         <View style={styles.resendRow}>
           <Text style={styles.resendLabel}>Didn't receive code? </Text>
-          {timer > 0 ? (
-            <Text style={styles.timerText}>Resend in {timer}s</Text>
+          {timer.seconds > 0 ? (
+            <Text style={styles.timerText}>Resend in {timer.seconds}s</Text>
           ) : (
-            <TouchableOpacity onPress={() => setTimer(45)}>
-              <Text style={styles.resendBtn}>Resend Code Now</Text>
+            <TouchableOpacity onPress={handleResend} disabled={resending || verifying}>
+              <Text style={styles.resendBtn}>{resending ? 'Sending…' : 'Resend Code Now'}</Text>
             </TouchableOpacity>
           )}
         </View>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 };
@@ -82,40 +136,23 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     fontSize: 14,
     marginTop: SPACING.xs,
-    marginBottom: SPACING.xl,
+    marginBottom: SPACING.md,
   },
-  phoneHighlight: {
+  emailHighlight: {
     color: COLORS.text,
     fontWeight: '700',
   },
-  otpBox: {
+  otpWrap: {
     width: '100%',
-    backgroundColor: COLORS.surface,
-    borderRadius: RADIUS.lg,
-    borderWidth: 1,
-    borderColor: COLORS.primaryGlow,
-    padding: SPACING.md,
-    marginBottom: SPACING.xl,
+    marginTop: SPACING.lg,
   },
-  otpInput: {
-    color: COLORS.primaryGlow,
-    fontSize: 32,
-    fontWeight: '900',
-    textAlign: 'center',
-    letterSpacing: 12,
+  rememberRow: {
+    width: '100%',
+    marginTop: SPACING.lg,
   },
   verifyBtn: {
     width: '100%',
-    backgroundColor: COLORS.primary,
-    paddingVertical: 14,
-    borderRadius: RADIUS.md,
-    alignItems: 'center',
-  },
-  verifyText: {
-    color: COLORS.text,
-    fontSize: 15,
-    fontWeight: '800',
-    letterSpacing: 1,
+    marginTop: SPACING.xl,
   },
   resendRow: {
     flexDirection: 'row',

@@ -1,7 +1,12 @@
 using System.Globalization;
 using Duende.IdentityServer;
+using Duende.IdentityServer.EntityFramework.Storage;
+using Duende.IdentityServer.EntityFramework.Stores;
 using IdentityService.Data;
+using IdentityService.Grants;
+using IdentityService.Infrastructure;
 using IdentityService.Models;
+using IdentityService.Options;
 using IdentityService.Services;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
@@ -55,8 +60,31 @@ internal static class HostingExtensions
     {
         _ = builder.Services.AddRazorPages();
 
+        var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
         _ = builder.Services.AddDbContext<ApplicationDbContext>(options =>
-            options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+            options.UseNpgsql(connectionString));
+
+        // Mobile app sign-up / login (OTP, trusted devices, Google / Apple). See Controllers/AccountController and Grants/.
+        _ = builder.Services.Configure<OtpOptions>(builder.Configuration.GetSection("Otp"));
+        _ = builder.Services.Configure<TrustedDeviceOptions>(builder.Configuration.GetSection("TrustedDevice"));
+        _ = builder.Services.Configure<FeatureOptions>(builder.Configuration.GetSection("Features"));
+        _ = builder.Services.Configure<SocialAuthOptions>(builder.Configuration.GetSection("SocialAuth"));
+        _ = builder.Services.Configure<EmailOptions>(builder.Configuration.GetSection("Email"));
+        _ = builder.Services.AddScoped<AccountService>();
+        _ = builder.Services.AddScoped<IOtpService, OtpService>();
+        _ = builder.Services.AddScoped<ITrustedDeviceService, TrustedDeviceService>();
+        _ = builder.Services.AddSingleton<IOtpSender, EmailOtpSender>();
+        _ = builder.Services.AddSingleton<ISocialTokenValidator, SocialTokenValidator>();
+        _ = builder.Services.AddSingleton<ILoginChallenges, LoginChallenges>();
+        _ = builder.Services
+            .AddControllers()
+            .ConfigureApiBehaviorOptions(o => o.InvalidModelStateResponseFactory = ValidationResponse.Create);
+        _ = builder.Services.AddAccountRateLimits();
+
+        // Refresh tokens and other grants are kept in Postgres so "Remember me" survives a restart.
+        _ = builder.Services.AddOperationalDbContext(options =>
+            options.ConfigureDbContext = b => b.UseNpgsql(connectionString,
+                sql => sql.MigrationsAssembly(typeof(HostingExtensions).Assembly.GetName().Name)));
 
         _ = builder.Services.AddIdentity<ApplicationUser, IdentityRole>()
             .AddEntityFrameworkStores<ApplicationDbContext>()
@@ -82,7 +110,11 @@ internal static class HostingExtensions
             .AddInMemoryClients(Config.Clients(builder.Configuration))
             .AddAspNetIdentity<ApplicationUser>()
             .AddLicenseSummary()
-            .AddProfileService<CustomProfileService>();
+            .AddProfileService<CustomProfileService>()
+            .AddPersistedGrantStore<PersistedGrantStore>()
+            .AddExtensionGrantValidator<PasswordOtpGrantValidator>()
+            .AddExtensionGrantValidator<OtpGrantValidator>()
+            .AddExtensionGrantValidator<ExternalGrantValidator>();
 
         builder.Services.ConfigureApplicationCookie(options =>
         {
@@ -90,6 +122,9 @@ internal static class HostingExtensions
         });
 
         _ = builder.Services.AddAuthentication();
+
+        // Lets /api/account/me accept this server's own access tokens (scope IdentityServerApi).
+        _ = builder.Services.AddLocalApiAuthentication();
 
         // add `.PersistKeysToâ€¦()` and `.ProtectKeysWithâ€¦()` calls
         // see more at https://docs.duendesoftware.com/general/data-protection
@@ -110,11 +145,13 @@ internal static class HostingExtensions
 
         _ = app.UseStaticFiles();
         _ = app.UseRouting();
+        _ = app.UseRateLimiter();
         _ = app.UseIdentityServer();
         _ = app.UseAuthorization();
 
         _ = app.MapRazorPages()
             .RequireAuthorization();
+        _ = app.MapControllers();
 
         return app;
     }

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CompositeScreenProps } from '@react-navigation/native';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
@@ -10,6 +10,7 @@ import { ApiService } from '../services/api';
 import { Auction } from '../types/models';
 import { AuctionCard } from '../components/AuctionCard';
 import { Badge } from '../components/Badge';
+import { useAuth } from '../auth/AuthContext';
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<MainTabParamList, 'Home'>,
@@ -17,6 +18,7 @@ type Props = CompositeScreenProps<
 >;
 
 export const HomeScreen: React.FC<Props> = ({ navigation }) => {
+  const { user, logout } = useAuth();
   const [auctions, setAuctions] = useState<Auction[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedVehicle, setSelectedVehicle] = useState('All Garage');
@@ -32,6 +34,17 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
     loadData();
   }, []);
 
+  const handleAccountPress = () => {
+    if (!user) {
+      navigation.navigate('Login');
+      return;
+    }
+    Alert.alert('Log out', `Signed in as ${user.email}`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Log out', style: 'destructive', onPress: () => logout() },
+    ]);
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Top Banner Bar */}
@@ -39,6 +52,12 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
         <View>
           <Text style={styles.brandTitle}>OKOH PARTS ⚡</Text>
           <Text style={styles.portSub}>Pickup Port: <Text style={styles.portBold}>Lagos Apapa Port</Text></Text>
+          {/* Signed-in user (tap to log out) or guest (tap to log in) */}
+          <TouchableOpacity onPress={handleAccountPress} hitSlop={8} activeOpacity={0.7}>
+            <Text style={styles.userLine}>
+              👤 {user ? user.fullName : 'Guest'} · <Text style={styles.portBold}>{user ? 'Log out' : 'Log in'}</Text>
+            </Text>
+          </TouchableOpacity>
         </View>
         <TouchableOpacity 
           style={styles.requestBtn} 
@@ -151,6 +170,11 @@ const styles = StyleSheet.create({
   portBold: {
     color: COLORS.primaryGlow,
     fontWeight: '700',
+  },
+  userLine: {
+    color: COLORS.textMuted,
+    fontSize: 11,
+    marginTop: 4,
   },
   requestBtn: {
     backgroundColor: COLORS.primary,

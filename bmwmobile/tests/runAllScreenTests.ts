@@ -1,5 +1,5 @@
 /// <reference types="node" />
-import { 
+import {
   ApiService,
   MOCK_AUCTIONS, 
   MOCK_PURCHASES, 
@@ -7,6 +7,7 @@ import {
   MOCK_CONTAINER_SCHEDULES
 } from '../src/services/api';
 import { Auction, PartRequest, Purchase, ContainerSchedule } from '../src/types/models';
+import { isCurrentUser } from '../src/auth/session';
 
 async function runTests() {
   console.log('\n================================================================');
@@ -127,7 +128,7 @@ async function runTests() {
   assert('Screen 20 (PlannedContainers): Fetches next 3 container arrivals to Nigeria', containers.length >= 3);
 
   // --- Screen 21: My Bids ---
-  const myBidsList = auctions.filter((a: Auction) => a.highBidder === 'demo_buyer' || a.isAutoBidActive);
+  const myBidsList = auctions.filter((a: Auction) => isCurrentUser(a.highBidder) || a.isAutoBidActive);
   assert('Screen 21 (MyBids): Populates active user bids and auto-bid triggers', myBidsList.length > 0);
 
   // --- Screen 22 & 23: My Purchases & Tracking ---

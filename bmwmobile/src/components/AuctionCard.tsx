@@ -3,6 +3,7 @@ import { View, Text, Image, StyleSheet, TouchableOpacity } from 'react-native';
 import { Auction } from '../types/models';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
 import { Badge } from './Badge';
+import { isCurrentUser } from '../auth/session';
 
 interface AuctionCardProps {
   auction: Auction;
@@ -11,7 +12,7 @@ interface AuctionCardProps {
 }
 
 export const AuctionCard: React.FC<AuctionCardProps> = ({ auction, onPress, onBidPress }) => {
-  const isWinning = auction.highBidder === 'demo_buyer';
+  const isWinning = isCurrentUser(auction.highBidder);
   const imageUrl = auction.item.images[0]?.url || 'https://images.unsplash.com/photo-1617814076367-b759c7d7e738?q=80&w=800&auto=format&fit=crop';
 
   return (

@@ -97,6 +97,11 @@ services:
       - IdentityServer__IssuerUri=https://id.carsties.test
       - ClientAppUrl=https://app.carsties.test
       - VIRTUAL_HOST=id.carsties.test
+      # OTP emails (Gmail SMTP). Put the values in a local .env file next to this file (never commit it).
+      # Empty = codes are only written to the identity-svc log.
+      - Email__Username=${EMAIL_USERNAME:-}
+      - Email__Password=${EMAIL_PASSWORD:-}
+      - Email__FromAddress=${EMAIL_FROM:-}
     ports:
       - "5001:80"
     volumes:

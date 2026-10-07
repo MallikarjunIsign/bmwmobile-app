@@ -5,6 +5,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
 import { ApiService } from '../services/api';
+import { currentUsername } from '../auth/session';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'PlaceBidModal'>;
 
@@ -26,7 +27,7 @@ export const PlaceBidModal: React.FC<Props> = ({ route, navigation }) => {
       await ApiService.setAutoBid(auction.id, parseFloat(maxAutoBid) || numericBid + 1000);
     }
     setSubmitting(false);
-    navigation.replace('HighestBidder', { auction: { ...auction, currentHighBid: numericBid, highBidder: 'demo_buyer' } });
+    navigation.replace('HighestBidder', { auction: { ...auction, currentHighBid: numericBid, highBidder: currentUsername() } });
   };
 
   return (

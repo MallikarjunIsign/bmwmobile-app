@@ -2,8 +2,11 @@ import { Auction, Purchase, PartRequest, ContainerSchedule } from './models';
 
 export type RootStackParamList = {
   Splash: undefined;
-  Login: undefined;
-  Otp: { phoneNumber: string };
+  Login: { email?: string; notice?: string } | undefined;
+  SignUp: undefined;
+  Otp: { challengeId: string; maskedEmail: string; resendAfterSeconds: number; devOtp?: string | null; rememberMe: boolean };
+  ForgotPassword: { email?: string } | undefined;
+  ResetPassword: { email: string; resendAfterSeconds: number; devOtp?: string | null };
   ProfilePreferences: undefined;
 
   MainTabs: { screen?: string } | undefined;

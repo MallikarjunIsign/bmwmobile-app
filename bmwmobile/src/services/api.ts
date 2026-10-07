@@ -1,8 +1,10 @@
-import axios from 'axios';
+import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import { Auction, Bid, Purchase, PartRequest, ContainerSchedule, UserProfile } from '../types/models';
+import { config } from '../config';
+import { currentUsername, DEMO_OWNER, getValidAccessToken } from '../auth/session';
 
 // Configured for local dev / GatewayService YARP proxy (http://localhost:6001 / http://10.0.2.2:6001)
-const GATEWAY_URL = 'http://10.0.2.2:6001';
+const GATEWAY_URL = config.GATEWAY_URL;
 
 const client = axios.create({
   baseURL: GATEWAY_URL,
@@ -11,6 +13,38 @@ const client = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+// Signed-in users send their IdentityService access token; guests call the public endpoints only.
+client.interceptors.request.use(async request => {
+  const token = await getValidAccessToken().catch(() => null);
+  if (token) request.headers.Authorization = `Bearer ${token}`;
+  return request;
+});
+
+// Token rejected (expired / revoked): refresh once and retry; if that fails the user is signed out.
+client.interceptors.response.use(undefined, async (error: AxiosError) => {
+  const request = error.config as (InternalAxiosRequestConfig & { _retried?: boolean }) | undefined;
+  if (error.response?.status === 401 && request?.headers?.Authorization && !request._retried) {
+    request._retried = true;
+    const token = await getValidAccessToken(true).catch(() => null);
+    if (token) {
+      request.headers.Authorization = `Bearer ${token}`;
+      return client(request);
+    }
+  }
+  return Promise.reject(error);
+});
+
+// Offline demo data: entries owned by "you" follow whoever is signed in (guests see them as "you").
+let demoOwner = DEMO_OWNER;
+
+export function setDemoOwner(username: string | null) {
+  const next = username ?? DEMO_OWNER;
+  MOCK_AUCTIONS.forEach(a => { if (a.highBidder === demoOwner) a.highBidder = next; });
+  MOCK_PURCHASES.forEach(p => { if (p.buyer === demoOwner) p.buyer = next; });
+  MOCK_PART_REQUESTS.forEach(r => { if (r.user === demoOwner) r.user = next; });
+  demoOwner = next;
+}
 
 // Utility to normalize raw backend DTO (flat AuctionDto or SearchItem) to full mobile Auction object
 export function mapRawDtoToAuction(raw: any): Auction {
@@ -44,7 +78,7 @@ export function mapRawDtoToAuction(raw: any): Auction {
       },
       startingPrice: Number(raw.startingPrice ?? raw.StartingPrice ?? 100),
       currentHighBid: Number(raw.currentHighBid ?? raw.CurrentHighBid ?? raw.startingPrice ?? 100),
-      highBidder: raw.highBidder || raw.winner || raw.Winner || 'demo_buyer',
+      highBidder: raw.highBidder || raw.winner || raw.Winner || '',
       bidCount: Number(raw.bidCount ?? 1),
       auctionEnd: raw.auctionEnd || raw.AuctionEnd || new Date(Date.now() + 86400000).toISOString(),
       status: raw.status || raw.Status || 'Live',
@@ -94,7 +128,7 @@ export function mapRawDtoToAuction(raw: any): Auction {
     },
     startingPrice: Number(raw.startingPrice ?? raw.StartingPrice ?? 100),
     currentHighBid: Number(raw.currentHighBid ?? raw.CurrentHighBid ?? raw.startingPrice ?? 100),
-    highBidder: raw.highBidder || raw.winner || raw.Winner || 'demo_buyer',
+    highBidder: raw.highBidder || raw.winner || raw.Winner || '',
     bidCount: Number(raw.bidCount ?? 1),
     auctionEnd: raw.auctionEnd || raw.AuctionEnd || new Date(Date.now() + 86400000).toISOString(),
     status: raw.status || raw.Status || 'Live',
@@ -130,7 +164,7 @@ export const MOCK_AUCTIONS: Auction[] = [
     },
     startingPrice: 5000,
     currentHighBid: 14500,
-    highBidder: 'demo_buyer',
+    highBidder: DEMO_OWNER,
     bidCount: 28,
     auctionEnd: new Date(Date.now() + 1000 * 60 * 14).toISOString(),
     status: 'EndingSoon',
@@ -190,7 +224,7 @@ export const MOCK_AUCTIONS: Auction[] = [
     },
     startingPrice: 1200,
     currentHighBid: 3100,
-    highBidder: 'demo_buyer',
+    highBidder: DEMO_OWNER,
     bidCount: 19,
     auctionEnd: new Date(Date.now() + 1000 * 60 * 60 * 24).toISOString(),
     status: 'Live',
@@ -205,7 +239,7 @@ export const MOCK_PURCHASES: Purchase[] = [
   {
     id: 'pur-101',
     auctionId: 'auc-bmw-m4-01',
-    buyer: 'demo_buyer',
+    buyer: DEMO_OWNER,
     itemTitle: '2021 BMW M4 Competition S58 Twin-Turbo Engine Assembly',
     winningBidAmount: 14500,
     buyerFee: 435,
@@ -226,7 +260,7 @@ export const MOCK_PURCHASES: Purchase[] = [
 export const MOCK_PART_REQUESTS: PartRequest[] = [
   {
     id: 'pr-801',
-    user: 'demo_buyer',
+    user: DEMO_OWNER,
     make: 'BMW',
     model: 'M3 G80',
     year: 2022,
@@ -351,13 +385,13 @@ export const ApiService = {
     const auction = MOCK_AUCTIONS.find(a => a.id === auctionId);
     if (auction) {
       auction.currentHighBid = amount;
-      auction.highBidder = 'demo_buyer';
+      auction.highBidder = currentUsername();
       auction.bidCount += 1;
     }
     return {
       id: 'bid-' + Date.now(),
       auctionId,
-      bidder: 'demo_buyer',
+      bidder: currentUsername(),
       amount,
       bidTime: new Date().toISOString(),
       isAutoBid: false
@@ -389,7 +423,7 @@ export const ApiService = {
     const newPurchase: Purchase = {
       id: 'pur-' + Date.now(),
       auctionId: params.auctionId,
-      buyer: 'demo_buyer',
+      buyer: currentUsername(),
       itemTitle: auction.title,
       winningBidAmount: auction.currentHighBid,
       buyerFee: auction.currentHighBid * 0.03,
@@ -460,7 +494,7 @@ export const ApiService = {
     }
     const newReq: PartRequest = {
       id: 'pr-' + Date.now(),
-      user: 'demo_buyer',
+      user: currentUsername(),
       make: dto.make,
       model: dto.model,
       year: dto.year,

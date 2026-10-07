@@ -1,72 +1,156 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView, type TextInputInstance } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
-import { COLORS, SPACING, RADIUS } from '../theme/colors';
+import { COLORS, SPACING } from '../theme/colors';
 import { Header } from '../components/Header';
+import { FormInput } from '../components/FormInput';
+import { CheckboxRow } from '../components/CheckboxRow';
+import { Notice } from '../components/Notice';
+import { PrimaryButton } from '../components/PrimaryButton';
+import { SocialButtons } from '../components/SocialButtons';
+import { useAuth } from '../auth/AuthContext';
+import { getRememberedEmail } from '../auth/storage';
+import { errorMessage } from '../services/authApi';
+import { validateEmail } from '../utils/validation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Login'>;
 
-export const LoginScreen: React.FC<Props> = ({ navigation }) => {
-  const [phoneNumber, setPhoneNumber] = useState('+234 803 123 4567');
-  const [password, setPassword] = useState('••••••••');
+export const LoginScreen: React.FC<Props> = ({ navigation, route }) => {
+  const { login, signInWith } = useAuth();
+  const passwordRef = useRef<TextInputInstance>(null);
 
-  const handleLogin = () => {
-    navigation.navigate('Otp', { phoneNumber });
+  const [email, setEmail] = useState(route.params?.email ?? '');
+  const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(true);
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [socialBusy, setSocialBusy] = useState(false);
+
+  // "Remember me" fills in the email from last time (never the password).
+  useEffect(() => {
+    if (route.params?.email) return;
+    getRememberedEmail().then(saved => {
+      if (saved) setEmail(current => current || saved);
+    });
+  }, [route.params?.email]);
+
+  const handleLogin = async () => {
+    setFormError(null);
+    const eErr = validateEmail(email);
+    const pErr = password ? null : 'Enter your password';
+    setEmailError(eErr);
+    setPasswordError(pErr);
+    if (eErr || pErr) return;
+
+    setSubmitting(true);
+    try {
+      const outcome = await login(email, password, rememberMe);
+      if (outcome.otpRequired) {
+        navigation.navigate('Otp', { ...outcome.challenge, rememberMe });
+      }
+      // Trusted device: signed in straight away, the navigator switches to the marketplace.
+    } catch (err) {
+      setFormError(errorMessage(err, 'Login failed. Please try again.'));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleSocial = async (provider: 'google' | 'apple') => {
+    setFormError(null);
+    setSocialBusy(true);
+    try {
+      await signInWith(provider);
+    } catch (err) {
+      setFormError(errorMessage(err));
+    } finally {
+      setSocialBusy(false);
+    }
   };
 
   return (
     <SafeAreaView style={styles.container}>
       <Header title="Welcome Back" subtitle="Sign in to bid & track container shipments" />
 
-      <KeyboardAvoidingView 
-        style={styles.keyboardView} 
+      <KeyboardAvoidingView
+        style={styles.keyboardView}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <View style={styles.form}>
-          <Text style={styles.label}>Phone Number or Email</Text>
-          <View style={styles.inputWrap}>
-            <TextInput
-              style={styles.input}
-              value={phoneNumber}
-              onChangeText={setPhoneNumber}
-              placeholder="+234 800 000 0000"
-              placeholderTextColor={COLORS.textMuted}
-              keyboardType="phone-pad"
-            />
-          </View>
+        <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+          <View style={styles.form}>
+            {route.params?.notice ? <Notice tone="success" message={route.params.notice} /> : null}
 
-          <Text style={styles.label}>Password</Text>
-          <View style={styles.inputWrap}>
-            <TextInput
-              style={styles.input}
+            <FormInput
+              label="Email"
+              value={email}
+              onChangeText={t => {
+                setEmail(t);
+                if (emailError) setEmailError(null);
+              }}
+              placeholder="you@example.com"
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoComplete="email"
+              textContentType="emailAddress"
+              returnKeyType="next"
+              onSubmitEditing={() => passwordRef.current?.focus()}
+              error={emailError}
+            />
+
+            <FormInput
+              ref={passwordRef}
+              label="Password"
               value={password}
-              onChangeText={setPassword}
-              secureTextEntry
+              onChangeText={t => {
+                setPassword(t);
+                if (passwordError) setPasswordError(null);
+              }}
               placeholder="Enter password"
-              placeholderTextColor={COLORS.textMuted}
+              secureToggle
+              autoCapitalize="none"
+              autoComplete="password"
+              textContentType="password"
+              returnKeyType="done"
+              onSubmitEditing={handleLogin}
+              error={passwordError}
             />
+
+            <View style={styles.optionsRow}>
+              <CheckboxRow checked={rememberMe} onToggle={() => setRememberMe(v => !v)} label="Remember me" />
+              <TouchableOpacity onPress={() => navigation.navigate('ForgotPassword', { email: email.trim() })} hitSlop={8}>
+                <Text style={styles.forgotText}>Forgot password?</Text>
+              </TouchableOpacity>
+            </View>
+
+            {formError ? <Notice tone="error" message={formError} /> : null}
+
+            <PrimaryButton
+              label="LOG IN"
+              onPress={handleLogin}
+              loading={submitting}
+              disabled={socialBusy}
+              style={styles.submitBtn}
+            />
+
+            <SocialButtons onGoogle={() => handleSocial('google')} onApple={() => handleSocial('apple')} busy={socialBusy || submitting} />
+
+            <TouchableOpacity style={styles.signUpRow} onPress={() => navigation.navigate('SignUp')} hitSlop={8}>
+              <Text style={styles.signUpText}>
+                New to OKOH Parts? <Text style={styles.signUpLink}>Create an account</Text>
+              </Text>
+            </TouchableOpacity>
           </View>
 
-          <TouchableOpacity style={styles.forgotBtn}>
-            <Text style={styles.forgotText}>Forgot password?</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.submitBtn} onPress={handleLogin} activeOpacity={0.8}>
-            <Text style={styles.submitText}>SEND VERIFICATION OTP</Text>
-          </TouchableOpacity>
-
-          <View style={styles.demoNote}>
-            <Text style={styles.demoText}>💡 Quick Demo: Tap to log in directly into OKOH Parts</Text>
+          <View style={styles.footer}>
+            <TouchableOpacity onPress={() => navigation.navigate('MainTabs')}>
+              <Text style={styles.guestText}>Continue as Guest Visitor →</Text>
+            </TouchableOpacity>
           </View>
-        </View>
-
-        <View style={styles.footer}>
-          <TouchableOpacity onPress={() => navigation.navigate('MainTabs')}>
-            <Text style={styles.guestText}>Continue as Guest Visitor →</Text>
-          </TouchableOpacity>
-        </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -79,34 +163,20 @@ const styles = StyleSheet.create({
   },
   keyboardView: {
     flex: 1,
+  },
+  scroll: {
+    flexGrow: 1,
     padding: SPACING.md,
     justifyContent: 'space-between',
   },
   form: {
-    marginTop: SPACING.lg,
-  },
-  label: {
-    color: COLORS.textSecondary,
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: SPACING.xs,
-    marginTop: SPACING.md,
-  },
-  inputWrap: {
-    backgroundColor: COLORS.card,
-    borderRadius: RADIUS.md,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    paddingHorizontal: SPACING.md,
-  },
-  input: {
-    color: COLORS.text,
-    fontSize: 16,
-    height: 48,
-  },
-  forgotBtn: {
-    alignSelf: 'flex-end',
     marginTop: SPACING.sm,
+  },
+  optionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: SPACING.md,
   },
   forgotText: {
     color: COLORS.primaryGlow,
@@ -114,34 +184,23 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   submitBtn: {
-    backgroundColor: COLORS.primary,
-    paddingVertical: 14,
-    borderRadius: RADIUS.md,
+    marginTop: SPACING.xl,
+  },
+  signUpRow: {
     alignItems: 'center',
-    marginTop: SPACING.xl,
+    marginTop: SPACING.lg,
   },
-  submitText: {
-    color: COLORS.text,
-    fontSize: 15,
-    fontWeight: '800',
-    letterSpacing: 1,
+  signUpText: {
+    color: COLORS.textMuted,
+    fontSize: 14,
   },
-  demoNote: {
-    backgroundColor: COLORS.surface,
-    padding: SPACING.md,
-    borderRadius: RADIUS.md,
-    borderWidth: 1,
-    borderColor: COLORS.borderHighlight,
-    marginTop: SPACING.xl,
-  },
-  demoText: {
-    color: COLORS.textSecondary,
-    fontSize: 13,
-    textAlign: 'center',
+  signUpLink: {
+    color: COLORS.primaryGlow,
+    fontWeight: '700',
   },
   footer: {
     alignItems: 'center',
-    paddingBottom: SPACING.md,
+    paddingVertical: SPACING.lg,
   },
   guestText: {
     color: COLORS.textMuted,

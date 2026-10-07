@@ -1,7 +1,9 @@
 using System.Security.Claims;
+using Duende.IdentityServer.EntityFramework.DbContexts;
 using IdentityModel;
 using IdentityService.Data;
 using IdentityService.Models;
+using IdentityService.Services;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Serilog;
@@ -15,6 +17,19 @@ public class SeedData
         using var scope = app.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         context.Database.Migrate();
+
+        // Refresh tokens and other IdentityServer grants.
+        scope.ServiceProvider.GetRequiredService<PersistedGrantDbContext>().Database.Migrate();
+
+        // Customer / Service Pro roles exist only while Features:RolesEnabled is on.
+        if (app.Configuration.GetValue<bool>("Features:RolesEnabled"))
+        {
+            var roleMgr = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
+            foreach (var role in new[] { AccountService.RoleCustomer, AccountService.RolePro })
+            {
+                if (!roleMgr.RoleExistsAsync(role).Result) roleMgr.CreateAsync(new IdentityRole(role)).Wait();
+            }
+        }
 
         var userMgr = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
 

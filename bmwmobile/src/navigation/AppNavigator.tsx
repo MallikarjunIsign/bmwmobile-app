@@ -11,6 +11,10 @@ import { COLORS } from '../theme/colors';
 import { SplashScreen } from '../screens/SplashScreen';
 import { LoginScreen } from '../screens/LoginScreen';
 import { OtpScreen } from '../screens/OtpScreen';
+import { SignUpScreen } from '../screens/SignUpScreen';
+import { ForgotPasswordScreen } from '../screens/ForgotPasswordScreen';
+import { ResetPasswordScreen } from '../screens/ResetPasswordScreen';
+import { useAuth } from '../auth/AuthContext';
 import { ProfilePreferencesScreen } from '../screens/ProfilePreferencesScreen';
 import { HomeScreen } from '../screens/HomeScreen';
 import { MarketplaceSearchScreen } from '../screens/MarketplaceSearchScreen';
@@ -98,18 +102,34 @@ function MainTabNavigator() {
 }
 
 export function AppNavigator() {
+  const { status } = useAuth();
+
+  // Restoring a remembered session: keep the dark background until we know where to start.
+  if (status === 'loading') return <View style={styles.loading} />;
+
+  const signedIn = status === 'signedIn';
+
   return (
     <NavigationContainer>
       <Stack.Navigator
-        initialRouteName="Splash"
+        // Signing in or out starts a fresh stack: the marketplace when signed in, the splash otherwise.
+        key={status}
+        initialRouteName={signedIn ? 'MainTabs' : 'Splash'}
         screenOptions={{
           headerShown: false,
           contentStyle: { backgroundColor: COLORS.background },
         }}
       >
-        <Stack.Screen name="Splash" component={SplashScreen} />
-        <Stack.Screen name="Login" component={LoginScreen} />
-        <Stack.Screen name="Otp" component={OtpScreen} />
+        {!signedIn && (
+          <Stack.Group>
+            <Stack.Screen name="Splash" component={SplashScreen} />
+            <Stack.Screen name="Login" component={LoginScreen} />
+            <Stack.Screen name="SignUp" component={SignUpScreen} />
+            <Stack.Screen name="Otp" component={OtpScreen} />
+            <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
+            <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} />
+          </Stack.Group>
+        )}
         <Stack.Screen name="ProfilePreferences" component={ProfilePreferencesScreen} />
 
         <Stack.Screen name="MainTabs" component={MainTabNavigator} />
@@ -140,6 +160,10 @@ export function AppNavigator() {
 }
 
 const styles = StyleSheet.create({
+  loading: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+  },
   tabBar: {
     backgroundColor: COLORS.surface,
     borderTopWidth: 1,
