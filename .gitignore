@@ -1,12 +1,11 @@
-# Frontend - Node/Angular
+# Frontend - Node
 **/node_modules/
 **/dist/
-**/.angular/
 **/.cache/
 
-# Backend - Java/Spring Boot
-**/target/
-**/build/
+# Backend - .NET
+**/bin/
+**/obj/
 
 # Environment files
 **/.env

@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+option csharp_namespace = "GrpcAuctionService";
+package auction;
+
+service GrpcAuction {
+  rpc GetAuction (GetAuctionRequest) returns (GrpcAuctionResponse);
+}
+
+message GetAuctionRequest {
+  string auctionId = 1;
+}
+
+message GrpcAuctionModel {
+  string id = 1;
+  string auctionEnd = 2;
+  string seller = 3;
+  int32 reservePrice = 4;
+  bool finished = 5;
+  int32 startingPrice = 6;
+  int32 bidIncrement = 7;
+  // Live, Sold, ReserveNotMet or Unsold
+  string status = 8;
+  // ISO 8601, empty unless status is ReserveNotMet
+  string sellerDecisionDeadline = 9;
+}
+
+message GrpcAuctionResponse {
+  GrpcAuctionModel auction = 1;
+}

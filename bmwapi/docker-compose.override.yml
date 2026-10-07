@@ -1,0 +1,15 @@
+# Local development overrides (merged automatically by `docker compose up`).
+# Lets the Next.js app run with `npm run dev` on http://localhost:3000
+# against the services in Docker. Delete this file to go back to the
+# *.carsties.test setup served through nginx-proxy.
+services:
+  auction-svc:
+    environment:
+      - ImageStorage__PublicBaseUrl=http://localhost:6001
+  identity-svc:
+    environment:
+      - IdentityServer__IssuerUri=http://localhost:5001
+      - ClientAppUrl=http://localhost:3000
+  gateway-svc:
+    environment:
+      - ClientApp=http://localhost:3000
