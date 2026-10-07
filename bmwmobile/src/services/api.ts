@@ -46,6 +46,19 @@ export function setDemoOwner(username: string | null) {
   demoOwner = next;
 }
 
+// Item location and, for "parts near" searches, the distance from the selected location.
+function locationFields(raw: any): Pick<Auction, 'locationName' | 'latitude' | 'longitude' | 'distanceKm'> {
+  return {
+    locationName: raw.locationName ?? raw.LocationName ?? undefined,
+    latitude: typeof raw.latitude === 'number' ? raw.latitude : undefined,
+    longitude: typeof raw.longitude === 'number' ? raw.longitude : undefined,
+    distanceKm: typeof raw.distanceKm === 'number' ? raw.distanceKm : undefined,
+  };
+}
+
+/** The selected location the list is for: only parts within radiusKm, nearest first. */
+export type NearFilter = { latitude: number; longitude: number; radiusKm: number };
+
 // Utility to normalize raw backend DTO (flat AuctionDto or SearchItem) to full mobile Auction object
 export function mapRawDtoToAuction(raw: any): Auction {
   if (!raw) return MOCK_AUCTIONS[0];
@@ -87,7 +100,8 @@ export function mapRawDtoToAuction(raw: any): Auction {
       estimatedArrival: raw.estimatedArrival || raw.container?.estimatedArrivalDate || 'Nov 15, 2026',
       pickupPort: raw.pickupPort || raw.container?.destinationPort || 'Lagos Apapa Port',
       isAutoBidActive: Boolean(raw.isAutoBidActive),
-      userMaxAutoBid: raw.userMaxAutoBid ? Number(raw.userMaxAutoBid) : undefined
+      userMaxAutoBid: raw.userMaxAutoBid ? Number(raw.userMaxAutoBid) : undefined,
+      ...locationFields(raw)
     };
   }
 
@@ -137,7 +151,8 @@ export function mapRawDtoToAuction(raw: any): Auction {
     estimatedArrival: raw.estimatedArrival || raw.container?.estimatedArrivalDate || 'Nov 15, 2026',
     pickupPort: raw.pickupPort || raw.container?.destinationPort || 'Lagos Apapa Port',
     isAutoBidActive: Boolean(raw.isAutoBidActive),
-    userMaxAutoBid: raw.userMaxAutoBid ? Number(raw.userMaxAutoBid) : undefined
+    userMaxAutoBid: raw.userMaxAutoBid ? Number(raw.userMaxAutoBid) : undefined,
+      ...locationFields(raw)
   };
 }
 
@@ -337,9 +352,24 @@ export const MOCK_USER_PROFILE: UserProfile = {
 
 // API Services mapping live endpoints with DTO normalization & fallback
 export const ApiService = {
-  getAuctions: async (searchTerm?: string): Promise<Auction[]> => {
+  getAuctions: async (searchTerm?: string, near?: NearFilter): Promise<Auction[]> => {
     try {
-      if (searchTerm) {
+      if (near) {
+        // SearchService: bounding box + exact distance, each result with distanceKm.
+        const res = await client.get('/search', {
+          params: {
+            searchTerm: searchTerm || undefined,
+            lat: near.latitude,
+            lon: near.longitude,
+            radiusKm: near.radiusKm,
+            orderBy: 'distance',
+            pageSize: 50,
+          },
+        });
+        if (res.data && Array.isArray(res.data.results)) {
+          return res.data.results.map(mapRawDtoToAuction);
+        }
+      } else if (searchTerm) {
         const res = await client.get('/search', { params: { searchTerm } });
         if (res.data && Array.isArray(res.data.results)) {
           return res.data.results.map(mapRawDtoToAuction);

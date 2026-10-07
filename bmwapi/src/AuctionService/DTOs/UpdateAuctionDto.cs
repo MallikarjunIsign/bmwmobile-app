@@ -25,6 +25,11 @@ public class UpdateAuctionDto
 
     public string? ContainerId { get; set; }
 
+    /// <summary>New item location: send Latitude and Longitude together (null = unchanged).</summary>
+    public string? LocationName { get; set; }
+    public double? Latitude { get; set; }
+    public double? Longitude { get; set; }
+
     public int? StartingPrice { get; set; }
     public int? ReservePrice { get; set; }
     public int? BidIncrement { get; set; }

@@ -19,7 +19,9 @@ public class DbInitializer
             FilterableAttributes =
             [
                 "seller", "winner", "status", "auctionEnd", "itemType", "partCategory", "condition",
-                "container.id", "container.destinationCountry", "container.destinationPort"
+                "container.id", "container.destinationCountry", "container.destinationPort",
+                // Bounding-box pre-filter for "parts within X km".
+                "latitude", "longitude"
             ],
             SortableAttributes = ["auctionEnd", "currentHighBid", "createdAt", "updatedAt", "make", "model"]
         });

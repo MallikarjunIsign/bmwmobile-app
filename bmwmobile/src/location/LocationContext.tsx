@@ -3,6 +3,7 @@ import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../auth/AuthContext';
 import { LocationApi } from '../services/locationApi';
+import type { NearFilter } from '../services/api';
 import type { MyLocations, SaveLocationRequest, UserLocation } from '../types/location';
 import { haversineKm, MOVE_THRESHOLD_KM } from '../utils/geo';
 import { getCurrentPosition } from '../utils/gps';
@@ -18,6 +19,8 @@ type LocationContextValue = {
   primary: UserLocation | null;
   /** The location the parts list is filtered by (primary unless the user picked another). */
   selected: UserLocation | null;
+  /** Filter for the parts lists: within the selected location's radius (undefined for guests). */
+  near: NearFilter | undefined;
   select: (id: string) => void;
   reload: () => Promise<void>;
   add: (body: SaveLocationRequest) => Promise<void>;
@@ -119,6 +122,10 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
 
   const primary = data.locations.find(l => l.isPrimary) ?? data.locations[0] ?? null;
   const selected = data.locations.find(l => l.id === selectedId) ?? primary;
+  const near = useMemo<NearFilter | undefined>(
+    () => (selected ? { latitude: selected.latitude, longitude: selected.longitude, radiusKm: selected.radiusKm } : undefined),
+    [selected?.latitude, selected?.longitude, selected?.radiusKm], // eslint-disable-line react-hooks/exhaustive-deps
+  );
 
   const select = useCallback(
     (id: string) => {
@@ -149,6 +156,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
       locations: data.locations,
       primary,
       selected,
+      near,
       select,
       reload,
       add,
@@ -158,7 +166,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
       useCurrentLocation,
       setAutoUpdate,
     }),
-    [status, data, primary, selected, select, reload, add, update, remove, setPrimary, useCurrentLocation, setAutoUpdate],
+    [status, data, primary, selected, near, select, reload, add, update, remove, setPrimary, useCurrentLocation, setAutoUpdate],
   );
 
   return <LocationContext.Provider value={value}>{children}</LocationContext.Provider>;

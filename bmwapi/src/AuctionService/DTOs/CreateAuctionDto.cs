@@ -25,6 +25,11 @@ public class CreateAuctionDto
 
     public string? ContainerId { get; set; }
 
+    /// <summary>Where the item is. Optional: defaults to the seller's primary location (from the sign-in token).</summary>
+    public string? LocationName { get; set; }
+    public double? Latitude { get; set; }
+    public double? Longitude { get; set; }
+
     public int StartingPrice { get; set; }
     /// <summary>Optional; defaults to StartingPrice (no hidden reserve).</summary>
     public int? ReservePrice { get; set; }

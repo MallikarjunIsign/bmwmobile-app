@@ -1,4 +1,5 @@
 using AuctionService.Entities;
+using Contracts;
 
 namespace AuctionService.Validation;
 
@@ -41,6 +42,14 @@ public static class AuctionValidator
         }
 
         if (item.Mileage is < 0) Add("mileage", "Mileage cannot be negative");
+
+        // Location is optional, but when given it needs both coordinates and they must be real.
+        if (item.Latitude is not null || item.Longitude is not null)
+        {
+            if (item.Latitude is null || item.Longitude is null ||
+                !GeoMath.IsValidCoordinate(item.Latitude.Value, item.Longitude.Value))
+                Add("latitude", "Location must have a valid latitude and longitude");
+        }
 
         if (auction.StartingPrice <= 0) Add("startingPrice", "Starting price must be greater than 0");
         if (auction.BidIncrement <= 0) Add("bidIncrement", "Bid increment must be greater than 0");

@@ -40,6 +40,10 @@ public class AuctionDto
     public string? ContainerId { get; set; }
     public ContainerInfo? Container { get; set; }
 
+    public string? LocationName { get; set; }
+    public double? Latitude { get; set; }
+    public double? Longitude { get; set; }
+
     /// <summary>Primary image URL (empty when there are no images).</summary>
     public string ImageUrl { get; set; } = string.Empty;
     /// <summary>Image URLs, primary first.</summary>

@@ -40,6 +40,12 @@ public class Item
     public string? ContainerId { get; set; }
     public Container? Container { get; set; }
 
+    // Where the item is, for "parts within X km". Defaults to the seller's primary location; null for older listings.
+    [MaxLength(120)]
+    public string? LocationName { get; set; }
+    public double? Latitude { get; set; }
+    public double? Longitude { get; set; }
+
     public List<ItemImage> Images { get; set; } = [];
 
     // navigation property

@@ -77,6 +77,12 @@ export interface Auction {
   pickupPort?: string;
   isAutoBidActive?: boolean;
   userMaxAutoBid?: number;
+  /** Where the item is ("Kukatpally, Hyderabad"). */
+  locationName?: string;
+  latitude?: number;
+  longitude?: number;
+  /** Distance from the selected location (only for "parts near" searches). */
+  distanceKm?: number;
 }
 
 export interface Bid {

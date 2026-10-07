@@ -10,7 +10,9 @@ public class DbInitializer
     public static void InitDb(WebApplication app)
     {
         using var scope = app.Services.CreateScope();
-        var seededIds = SeedData(scope.ServiceProvider.GetRequiredService<AuctionDbContext>(), app);
+        var context = scope.ServiceProvider.GetRequiredService<AuctionDbContext>();
+        var seededIds = SeedData(context, app);
+        var locatedIds = seededIds.Count == 0 ? BackfillSeedLocations(context, app) : [];
 
         // Tell the other services (BidService schedules each auction's end, SearchService indexes it)
         // about the seed data once Wolverine is running.
@@ -18,6 +20,66 @@ public class DbInitializer
         {
             app.Lifetime.ApplicationStarted.Register(() => _ = PublishSeededAuctions(app, seededIds));
         }
+
+        // Demo items that were seeded before items had a location: SearchService needs the new snapshot.
+        if (locatedIds.Count > 0)
+        {
+            app.Lifetime.ApplicationStarted.Register(() => _ = PublishSeededAuctions(app, locatedIds, updated: true));
+        }
+    }
+
+    /// <summary>
+    /// Where each demo item is: spread over India, the USA and Nigeria so "parts within X km" can be tested.
+    /// Several are around Hyderabad at different distances (5–20 km) to try the radius chips.
+    /// </summary>
+    private static readonly Dictionary<string, (string Name, double Lat, double Lon)> SeedLocations = new()
+    {
+        ["ford-gt"] = ("Hyderabad", 17.3850, 78.4867),
+        ["bmw-x1"] = ("Secunderabad, Hyderabad", 17.4399, 78.4983),
+        ["audi-a4-alloy-wheels"] = ("Kukatpally, Hyderabad", 17.4849, 78.4138),
+        ["ford-mustang"] = ("Gachibowli, Hyderabad", 17.4401, 78.3489),
+        ["bmw-3-series-brake-discs"] = ("Shamshabad, Hyderabad", 17.2403, 78.4294),
+        ["bugatti-veyron"] = ("Bangalore", 12.9716, 77.5946),
+        ["mercedes-slk"] = ("Delhi", 28.6139, 77.2090),
+        ["ferrari-spider"] = ("Mumbai", 19.0760, 72.8777),
+        ["ferrari-f430"] = ("New York", 40.7128, -74.0060),
+        ["audi-r8"] = ("Los Angeles", 34.0522, -118.2437),
+        ["audi-tt"] = ("Houston", 29.7604, -95.3698),
+        ["ford-model-t"] = ("Chicago", 41.8781, -87.6298),
+        ["toyota-hilux-front-bumper"] = ("Lagos", 6.5244, 3.3792),
+        ["honda-civic-alternator"] = ("Ikeja, Lagos", 6.6018, 3.3515),
+        ["ford-ranger-led-headlight"] = ("Abuja", 9.0765, 7.3986),
+        ["vw-golf-gearbox"] = ("Port Harcourt", 4.8156, 7.0498),
+    };
+
+    private static void ApplySeedLocation(Item item)
+    {
+        if (!SeedLocations.TryGetValue(item.Id, out var location)) return;
+        item.LocationName = location.Name;
+        item.Latitude = location.Lat;
+        item.Longitude = location.Lon;
+    }
+
+    /// <summary>Gives the demo items seeded before this change their location (only those still without one).</summary>
+    private static List<string> BackfillSeedLocations(AuctionDbContext context, WebApplication app)
+    {
+        if (app.Environment.IsEnvironment("Test")) return [];
+
+        var ids = SeedLocations.Keys.ToList();
+        var auctions = context.Auctions.Include(x => x.Item)
+            .Where(x => ids.Contains(x.Id) && x.Item.Latitude == null)
+            .ToList();
+        if (auctions.Count == 0) return [];
+
+        foreach (var auction in auctions)
+        {
+            ApplySeedLocation(auction.Item);
+            auction.UpdatedAt = DateTime.UtcNow;
+        }
+
+        context.SaveChanges();
+        Console.WriteLine($"Added locations to {auctions.Count} demo auctions");
+        return auctions.Select(x => x.Id).ToList();
     }
 
     private static List<string> SeedData(AuctionDbContext context, WebApplication app)
@@ -149,6 +211,8 @@ public class DbInitializer
                 "Rebuilt 02Q 6-speed manual for the 2.0 TDI Golf Mk7. New synchros and bearings, 6 month warranty.")
         };
 
+        foreach (var auction in auctions) ApplySeedLocation(auction.Item);
+
         context.Auctions.AddRange(auctions);
 
         context.SaveChanges();
@@ -223,7 +287,7 @@ public class DbInitializer
         IsPrimary = true
     };
 
-    private static async Task PublishSeededAuctions(WebApplication app, List<string> ids)
+    private static async Task PublishSeededAuctions(WebApplication app, List<string> ids, bool updated = false)
     {
         try
         {
@@ -237,10 +301,11 @@ public class DbInitializer
 
             foreach (var auction in auctions)
             {
-                await bus.PublishAsync(mapper.ToCreated(auction));
+                if (updated) await bus.PublishAsync(mapper.ToUpdated(auction));
+                else await bus.PublishAsync(mapper.ToCreated(auction));
             }
 
-            Console.WriteLine($"Published AuctionCreated for {auctions.Count} seeded auctions");
+            Console.WriteLine($"Published {(updated ? "AuctionUpdated" : "AuctionCreated")} for {auctions.Count} seeded auctions");
         }
         catch (Exception e)
         {

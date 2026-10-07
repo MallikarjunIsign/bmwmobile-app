@@ -39,6 +39,11 @@ public abstract class AuctionSnapshot
 
     public ContainerInfo? Container { get; set; }
 
+    /// <summary>Where the item is (null for older listings). SearchService uses it for "parts within X km".</summary>
+    public string? LocationName { get; set; }
+    public double? Latitude { get; set; }
+    public double? Longitude { get; set; }
+
     /// <summary>Primary image URL (empty when the item has no images yet).</summary>
     public string ImageUrl { get; set; } = string.Empty;
     /// <summary>All image URLs, primary first.</summary>

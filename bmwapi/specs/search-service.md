@@ -45,9 +45,19 @@ None — SearchService has no authenticated write endpoints; it only builds its 
 | `partCategory` | `Body`, `Engine`, … `WheelsAndTyres`, … | `partCategory` |
 | `condition` | `New` / `Used` / `Refurbished` | `condition` |
 | `destination` | port or country | `container.destinationPort` or `container.destinationCountry` |
-| `orderBy` | `make` / `new` / `endingSoon` | sort |
+| `orderBy` | `make` / `new` / `endingSoon` / `distance` | sort (`distance` = nearest first, only with `lat`/`lon`) |
+| `lat`, `lon`, `radiusKm` | coordinates; radius in km (default 50, max 500) | items within the radius (see below) |
 
 All filter values are quoted and escaped before being put into the Meilisearch filter expression.
+
+### Parts within X km
+
+With `lat` and `lon` (both required and valid, otherwise `400`) the search only returns items whose `latitude`/`longitude` are within `radiusKm`:
+1. Meilisearch pre-filters with a bounding box (`Contracts.GeoMath.BoundingBox`) on the filterable `latitude`/`longitude` attributes, together with every other filter and the text search (up to 1000 candidates).
+2. The exact Haversine distance (`Contracts.GeoMath.HaversineKm`) removes the box's corners; each result gets `distanceKm` (1 decimal).
+3. Paging is applied after the distance check, so `totalCount`/`pageCount` are exact.
+
+Items without a location (older listings) never match a radius search. Without `lat`/`lon` the search works exactly as before (no `distanceKm`).
 
 ## Events emitted
 

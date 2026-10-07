@@ -69,6 +69,7 @@ public class AuctionsController(AuctionDbContext context, IDbContextOutbox<Aucti
     {
         var seller = User.Identity?.Name ?? throw new Exception("User has not been authenticated");
         var auction = AuctionMapper.ToEntity(createAuctionDto, seller);
+        SellerLocation.ApplyDefault(auction.Item, User);
 
         var invalid = await ValidateAsync(auction, requireFutureEnd: true);
         if (invalid != null) return invalid;

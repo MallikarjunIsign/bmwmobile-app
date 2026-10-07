@@ -4,6 +4,7 @@ import { Auction } from '../types/models';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
 import { Badge } from './Badge';
 import { isCurrentUser } from '../auth/session';
+import { formatDistance } from '../utils/geo';
 
 interface AuctionCardProps {
   auction: Auction;
@@ -43,6 +44,15 @@ export const AuctionCard: React.FC<AuctionCardProps> = ({ auction, onPress, onBi
           <Text style={styles.metaPill}>Seller: {auction.seller}</Text>
         </View>
 
+        {/* Distance from the selected location */}
+        {auction.distanceKm !== undefined || auction.locationName ? (
+          <Text style={styles.distanceText} numberOfLines={1}>
+            📍 {auction.distanceKm !== undefined ? <Text style={styles.distanceBold}>{formatDistance(auction.distanceKm)} away</Text> : null}
+            {auction.distanceKm !== undefined && auction.locationName ? ' · ' : ''}
+            {auction.locationName ?? ''}
+          </Text>
+        ) : null}
+
         {/* Pricing & Bids */}
         <View style={styles.priceContainer}>
           <View>
@@ -81,6 +91,15 @@ export const AuctionCard: React.FC<AuctionCardProps> = ({ auction, onPress, onBi
 };
 
 const styles = StyleSheet.create({
+  distanceText: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    marginBottom: SPACING.sm,
+  },
+  distanceBold: {
+    color: COLORS.primaryGlow,
+    fontWeight: '800',
+  },
   card: {
     backgroundColor: COLORS.surface,
     borderRadius: RADIUS.lg,

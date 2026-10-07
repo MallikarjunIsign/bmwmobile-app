@@ -1,6 +1,9 @@
+import { mapRawDtoToAuction } from '../src/services/api';
 import {
   countryFromPhone,
   DEFAULT_RADIUS_KM,
+  formatDistance,
+  noPartsNearMessage,
   haversineKm,
   locationChipLabel,
   locationIcon,
@@ -33,5 +36,25 @@ describe('geo helpers', () => {
     expect(locationIcon({ label: 'Current location', isCurrentLocation: true })).toBe('📡');
     expect(locationIcon({ label: 'Work', isCurrentLocation: false })).toBe('💼');
     expect(radiusSummary(10, 'Bangalore')).toBe('Show parts within 10 km of Bangalore');
+  });
+
+  test('"12 km away" and the empty-state message', () => {
+    expect(formatDistance(0)).toBe('< 1 km');
+    expect(formatDistance(8.5)).toBe('8.5 km');
+    expect(formatDistance(9.0)).toBe('9 km');
+    expect(formatDistance(12.4)).toBe('12 km');
+    expect(noPartsNearMessage({ label: 'Home', radiusKm: 25 })).toBe('No parts within 25 km of Home – try a bigger radius.');
+  });
+
+  test('search results keep location and distance', () => {
+    const a = mapRawDtoToAuction({
+      id: 'ford-gt', make: 'Ford', model: 'GT', year: 2020, seller: 'bob',
+      locationName: 'Hyderabad', latitude: 17.385, longitude: 78.4867, distanceKm: 13.5,
+    });
+    expect(a.locationName).toBe('Hyderabad');
+    expect(a.distanceKm).toBe(13.5);
+    expect(a.highBidder).toBe('');
+    const old = mapRawDtoToAuction({ id: 'x', make: 'BMW', model: 'X1', seller: 'alice' });
+    expect(old.distanceKm).toBeUndefined();
   });
 });

@@ -37,6 +37,16 @@ export function locationChipLabel(l: Pick<UserLocation, 'label' | 'placeName' | 
   return `${parts.join(' · ')} · ${l.radiusKm} km`;
 }
 
+/** "< 1 km", "8.5 km", "12 km". */
+export function formatDistance(km: number): string {
+  if (km < 1) return '< 1 km';
+  return km < 10 ? `${km.toFixed(1).replace(/\.0$/, '')} km` : `${Math.round(km)} km`;
+}
+
+/** "No parts within 25 km of Home – try a bigger radius." */
+export const noPartsNearMessage = (l: Pick<UserLocation, 'label' | 'radiusKm'>) =>
+  `No parts within ${l.radiusKm} km of ${l.label} – try a bigger radius.`;
+
 /** The line under the radius chips. */
 export const radiusSummary = (radiusKm: number, placeName?: string | null) =>
   placeName

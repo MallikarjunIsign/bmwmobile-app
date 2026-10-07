@@ -71,10 +71,17 @@ Checked by `Validation/AuctionValidator` after create and after applying an upda
 | `StartingPrice` > 0, `BidIncrement` > 0, `ReservePrice` ≥ `StartingPrice` (omitted/0 reserve = `StartingPrice`, i.e. no hidden reserve) | all |
 | `AuctionEnd` in the future (on create, or when an update changes it) | all |
 | `ContainerId` (optional) must reference an existing container | all |
+| Item location (optional): `Latitude` and `Longitude` together and valid (not 0,0) | all |
+
+### Item location
+
+`Item.LocationName`, `Latitude`, `Longitude` (nullable, migration `ItemLocation`) say where the item is, for "parts within X km". On create, a request without a location gets the seller's primary location from the access token (claims `location_name`, `location_lat`, `location_lon`, issued by IdentityService). Relist copies it; update changes it only when sent. It is part of `AuctionDto` and of the `AuctionCreated` / `AuctionUpdated` snapshot, so SearchService indexes it.
 
 ## Seed data
 
 When the database is empty (and the environment isn't `Test`) `DbInitializer` seeds 2 containers (`MSCU1234567` Jebel Ali → Nhava Sheva, in transit; `MAEU7654321` Yokohama → Durban, loading), 10 vehicles and 6 parts (4 of them linked to the containers), each with one `ItemImage` using an absolute external URL (seed data only). After the app has started it publishes **AuctionCreated** for every seeded auction so BidService schedules their end and SearchService indexes them.
+
+Each demo item has a location spread over India, the USA and Nigeria (five around Hyderabad at 0–20 km from each other to try the radius chips; Bangalore, Delhi, Mumbai, New York, Los Angeles, Houston, Chicago, Lagos, Ikeja, Abuja, Port Harcourt). A database seeded before item locations existed gets these locations filled in once at startup, followed by **AuctionUpdated** for those items.
 
 ## Events emitted
 

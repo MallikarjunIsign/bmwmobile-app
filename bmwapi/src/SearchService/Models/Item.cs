@@ -39,6 +39,17 @@ public class Item
 
     public ContainerInfo? Container { get; set; }
 
+    // Where the item is (null for older listings). Filterable, for "parts within X km".
+    public string? LocationName { get; set; }
+    public double? Latitude { get; set; }
+    public double? Longitude { get; set; }
+
     public string ImageUrl { get; set; } = string.Empty;
     public List<string> Images { get; set; } = [];
+}
+
+/// <summary>A search hit plus its distance from the searcher (only when lat/lon were given).</summary>
+public class SearchResultItem : Item
+{
+    public double? DistanceKm { get; set; }
 }

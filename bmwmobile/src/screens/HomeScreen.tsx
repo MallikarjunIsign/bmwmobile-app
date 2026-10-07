@@ -12,6 +12,8 @@ import { AuctionCard } from '../components/AuctionCard';
 import { Badge } from '../components/Badge';
 import { useAuth } from '../auth/AuthContext';
 import { LocationSelector } from '../components/LocationSelector';
+import { useLocations } from '../location/LocationContext';
+import { noPartsNearMessage } from '../utils/geo';
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<MainTabParamList, 'Home'>,
@@ -20,20 +22,23 @@ type Props = CompositeScreenProps<
 
 export const HomeScreen: React.FC<Props> = ({ navigation }) => {
   const { user, logout } = useAuth();
+  const { selected, near } = useLocations();
   const [auctions, setAuctions] = useState<Auction[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedVehicle, setSelectedVehicle] = useState('All Garage');
 
+  // Signed-in users see the parts within their selected location's radius; guests see everything.
   const loadData = async () => {
     setLoading(true);
-    const data = await ApiService.getAuctions();
+    const data = await ApiService.getAuctions(undefined, near);
     setAuctions(data);
     setLoading(false);
   };
 
   useEffect(() => {
     loadData();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [near]);
 
   const handleAccountPress = () => {
     if (!user) {
@@ -131,6 +136,17 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
             onBidPress={() => navigation.navigate('PlaceBidModal', { auction: item })}
           />
         ))}
+
+        {/* Nothing within the selected radius */}
+        {!loading && selected && auctions.length === 0 ? (
+          <View style={styles.noneNear}>
+            <Text style={styles.noneNearIcon}>📍</Text>
+            <Text style={styles.noneNearText}>{noPartsNearMessage(selected)}</Text>
+            <TouchableOpacity onPress={() => navigation.navigate('ManageLocations')}>
+              <Text style={styles.seeAll}>Change location or radius →</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
 
         {/* Quick Custom Request Floating CTA */}
         <View style={styles.partRequestBox}>
@@ -276,6 +292,25 @@ const styles = StyleSheet.create({
   },
   locationBar: {
     marginBottom: SPACING.md,
+  },
+  noneNear: {
+    alignItems: 'center',
+    backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.lg,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: SPACING.lg,
+    marginBottom: SPACING.md,
+    gap: SPACING.sm,
+  },
+  noneNearIcon: {
+    fontSize: 28,
+  },
+  noneNearText: {
+    color: COLORS.text,
+    fontSize: 15,
+    fontWeight: '700',
+    textAlign: 'center',
   },
   sectionRow: {
     flexDirection: 'row',

@@ -9,6 +9,9 @@ import { COLORS, SPACING, RADIUS } from '../theme/colors';
 import { ApiService } from '../services/api';
 import { Auction } from '../types/models';
 import { AuctionCard } from '../components/AuctionCard';
+import { LocationSelector } from '../components/LocationSelector';
+import { useLocations } from '../location/LocationContext';
+import { noPartsNearMessage } from '../utils/geo';
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<MainTabParamList, 'Marketplace'>,
@@ -19,22 +22,25 @@ const CATEGORIES = ['All', 'Engines', 'Headlights', 'Bumpers', 'Transmission', '
 const BMW_MODELS = ['All Models', 'M4 Competition', '330i G20', 'X5 xDrive', 'M3 CS'];
 
 export const MarketplaceSearchScreen: React.FC<Props> = ({ navigation }) => {
+  const { selected, near } = useLocations();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [selectedModel, setSelectedModel] = useState('All Models');
   const [auctions, setAuctions] = useState<Auction[]>([]);
   const [loading, setLoading] = useState(false);
 
+  // Signed-in users search within the selected location's radius; guests search everywhere.
   const fetchResults = async () => {
     setLoading(true);
-    const data = await ApiService.getAuctions(searchTerm);
+    const data = await ApiService.getAuctions(searchTerm, near);
     setAuctions(data);
     setLoading(false);
   };
 
   useEffect(() => {
     fetchResults();
-  }, [searchTerm, selectedCategory, selectedModel]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchTerm, selectedCategory, selectedModel, near]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -56,6 +62,13 @@ export const MarketplaceSearchScreen: React.FC<Props> = ({ navigation }) => {
           ) : null}
         </View>
       </View>
+
+      {/* Which saved location the results are for (signed-in users) */}
+      {selected ? (
+        <View style={styles.locationBar}>
+          <LocationSelector onManage={() => navigation.navigate('ManageLocations')} />
+        </View>
+      ) : null}
 
       {/* Category Pills */}
       <View style={styles.pillsWrap}>
@@ -93,8 +106,10 @@ export const MarketplaceSearchScreen: React.FC<Props> = ({ navigation }) => {
 
       {/* Results Header */}
       <View style={styles.resultsHeader}>
-        <Text style={styles.resultsCount}>{auctions.length} BMW Part Auctions Found</Text>
-        <Text style={styles.sortLabel}>Sort: Ending Soonest ▾</Text>
+        <Text style={styles.resultsCount}>
+          {auctions.length} BMW Part Auctions Found{selected ? ` within ${selected.radiusKm} km` : ''}
+        </Text>
+        <Text style={styles.sortLabel}>{selected ? 'Sort: Nearest First' : 'Sort: Ending Soonest ▾'}</Text>
       </View>
 
       {/* Auction List */}
@@ -113,7 +128,18 @@ export const MarketplaceSearchScreen: React.FC<Props> = ({ navigation }) => {
           <View style={styles.empty}>
             <Text style={styles.emptyIcon}>🔍</Text>
             <Text style={styles.emptyTitle}>No Matching Auctions</Text>
-            <Text style={styles.emptyDesc}>We couldn't find active auctions matching "{searchTerm}".</Text>
+            <Text style={styles.emptyDesc}>
+              {selected && !loading
+                ? searchTerm
+                  ? `No parts matching "${searchTerm}" within ${selected.radiusKm} km of ${selected.label} – try a bigger radius.`
+                  : noPartsNearMessage(selected)
+                : `We couldn't find active auctions matching "${searchTerm}".`}
+            </Text>
+            {selected ? (
+              <TouchableOpacity onPress={() => navigation.navigate('ManageLocations')}>
+                <Text style={styles.changeLocation}>📍 Change location or radius →</Text>
+              </TouchableOpacity>
+            ) : null}
             <TouchableOpacity 
               style={styles.requestRedirectBtn}
               onPress={() => navigation.navigate('OrderPartRequest', { prefillPart: searchTerm })}
@@ -161,6 +187,18 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     fontSize: 16,
     padding: 4,
+  },
+  locationBar: {
+    paddingHorizontal: SPACING.md,
+    paddingTop: SPACING.sm,
+    paddingBottom: SPACING.xs,
+    backgroundColor: COLORS.surface,
+  },
+  changeLocation: {
+    color: COLORS.primaryGlow,
+    fontSize: 13,
+    fontWeight: '700',
+    marginBottom: SPACING.lg,
   },
   pillsWrap: {
     backgroundColor: COLORS.surface,

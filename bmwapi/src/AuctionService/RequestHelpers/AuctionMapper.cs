@@ -48,6 +48,9 @@ public class AuctionMapper(ImageUrlBuilder urls)
             Quantity = item.Quantity,
             ContainerId = item.ContainerId,
             Container = item.Container is null ? null : ToContainerInfo(item.Container),
+            LocationName = item.LocationName,
+            Latitude = item.Latitude,
+            Longitude = item.Longitude,
             ImageUrl = images.Count > 0 ? urls.Build(images[0].Url) : string.Empty,
             Images = images.Select(x => urls.Build(x.Url)).ToList(),
             ImageItems = images.Select(x => new ItemImageDto
@@ -101,6 +104,9 @@ public class AuctionMapper(ImageUrlBuilder urls)
         target.Condition = dto.Condition;
         target.Quantity = dto.Quantity;
         target.Container = dto.Container;
+        target.LocationName = dto.LocationName;
+        target.Latitude = dto.Latitude;
+        target.Longitude = dto.Longitude;
         target.ImageUrl = dto.ImageUrl;
         target.Images = dto.Images;
 
@@ -145,7 +151,10 @@ public class AuctionMapper(ImageUrlBuilder urls)
                 PartCategory = dto.PartCategory,
                 Condition = dto.Condition,
                 Quantity = dto.ItemType == ItemType.Part ? dto.Quantity ?? 1 : null,
-                ContainerId = Clean(dto.ContainerId)
+                ContainerId = Clean(dto.ContainerId),
+                LocationName = Clean(dto.LocationName),
+                Latitude = dto.Latitude,
+                Longitude = dto.Longitude
             }
         };
 
@@ -185,7 +194,10 @@ public class AuctionMapper(ImageUrlBuilder urls)
                 PartCategory = item.PartCategory,
                 Condition = item.Condition,
                 Quantity = item.Quantity,
-                ContainerId = item.ContainerId
+                ContainerId = item.ContainerId,
+                LocationName = item.LocationName,
+                Latitude = item.Latitude,
+                Longitude = item.Longitude
             }
         };
     }
@@ -210,6 +222,12 @@ public class AuctionMapper(ImageUrlBuilder urls)
         if (dto.Quantity is not null) item.Quantity = dto.Quantity;
         // Only the FK changes here; the controller reloads the Container navigation afterwards.
         if (dto.ContainerId is not null) item.ContainerId = Clean(dto.ContainerId);
+        if (dto.Latitude is not null || dto.Longitude is not null)
+        {
+            item.Latitude = dto.Latitude;
+            item.Longitude = dto.Longitude;
+        }
+        if (dto.LocationName is not null) item.LocationName = Clean(dto.LocationName);
 
         if (dto.StartingPrice is not null) auction.StartingPrice = dto.StartingPrice.Value;
         if (dto.BidIncrement is not null) auction.BidIncrement = dto.BidIncrement.Value;
