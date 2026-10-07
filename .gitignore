@@ -1,0 +1,26 @@
+# Frontend - Node/Angular
+**/node_modules/
+**/dist/
+**/.angular/
+**/.cache/
+
+# Backend - Java/Spring Boot
+**/target/
+**/build/
+
+# Environment files
+**/.env
+**/.env.*
+!**/.env.example
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
