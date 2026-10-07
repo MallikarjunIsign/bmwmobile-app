@@ -3,6 +3,7 @@ import { View, Text, StyleSheet } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RootStackParamList, MainTabParamList } from '../types/navigation';
 import { COLORS } from '../theme/colors';
 
@@ -45,12 +46,16 @@ const TabIcon = ({ icon, label, focused }: { icon: string; label: string; focuse
 );
 
 function MainTabNavigator() {
+  // Keep the bar's 64px look and add room for the system navigation bar (edge-to-edge).
+  const insets = useSafeAreaInsets();
   return (
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
-        tabBarStyle: styles.tabBar,
+        tabBarStyle: [styles.tabBar, { height: 64 + insets.bottom, paddingBottom: 6 + insets.bottom }],
         tabBarShowLabel: false,
+        // React Navigation 7 sizes the icon box to the icon; let our icon+label use the full tab width.
+        tabBarIconStyle: styles.tabIconBox,
       }}
     >
       <Tab.Screen 
@@ -142,6 +147,10 @@ const styles = StyleSheet.create({
     height: 64,
     paddingBottom: 6,
     paddingTop: 6,
+  },
+  tabIconBox: {
+    width: '100%',
+    height: '100%',
   },
   tabItem: {
     alignItems: 'center',

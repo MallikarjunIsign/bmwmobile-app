@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, StyleSheet, SafeAreaView, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
@@ -52,7 +53,7 @@ export const HighestBidderScreen: React.FC<Props> = ({ route, navigation }) => {
 
         <TouchableOpacity 
           style={styles.primaryBtn} 
-          onPress={() => navigation.navigate('MainTabs', { screen: 'MyBids' })}
+          onPress={() => navigation.navigate('MainTabs', { screen: 'MyBids' }, { pop: true })}
           activeOpacity={0.8}
         >
           <Text style={styles.primaryBtnText}>VIEW MY ACTIVE BIDS</Text>
@@ -60,7 +61,7 @@ export const HighestBidderScreen: React.FC<Props> = ({ route, navigation }) => {
 
         <TouchableOpacity 
           style={styles.secondaryBtn} 
-          onPress={() => navigation.navigate('MainTabs', { screen: 'Home' })}
+          onPress={() => navigation.navigate('MainTabs', { screen: 'Home' }, { pop: true })}
           activeOpacity={0.8}
         >
           <Text style={styles.secondaryBtnText}>Back to Dashboard</Text>

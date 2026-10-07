@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, StyleSheet, SafeAreaView, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
@@ -64,7 +65,7 @@ export const PaymentConfirmedScreen: React.FC<Props> = ({ route, navigation }) =
 
         <TouchableOpacity 
           style={styles.secondaryBtn}
-          onPress={() => navigation.navigate('MainTabs', { screen: 'MyPurchases' })}
+          onPress={() => navigation.navigate('MainTabs', { screen: 'MyPurchases' }, { pop: true })}
         >
           <Text style={styles.secondaryText}>Go to My Purchases</Text>
         </TouchableOpacity>

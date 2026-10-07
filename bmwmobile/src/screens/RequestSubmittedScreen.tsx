@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, StyleSheet, SafeAreaView, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
@@ -46,7 +47,7 @@ export const RequestSubmittedScreen: React.FC<Props> = ({ route, navigation }) =
 
         <TouchableOpacity 
           style={styles.containerBtn}
-          onPress={() => navigation.navigate('PlannedContainers')}
+          onPress={() => navigation.navigate('PlannedContainers', undefined, { pop: true })}
           activeOpacity={0.8}
         >
           <Text style={styles.containerText}>VIEW PLANNED CONTAINERS SCHEDULE →</Text>
@@ -54,7 +55,7 @@ export const RequestSubmittedScreen: React.FC<Props> = ({ route, navigation }) =
 
         <TouchableOpacity 
           style={styles.secondaryBtn}
-          onPress={() => navigation.navigate('MainTabs', { screen: 'Home' })}
+          onPress={() => navigation.navigate('MainTabs', { screen: 'Home' }, { pop: true })}
         >
           <Text style={styles.secondaryText}>Return to Home Dashboard</Text>
         </TouchableOpacity>

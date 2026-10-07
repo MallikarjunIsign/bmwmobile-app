@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import { 
   ApiService,
   MOCK_AUCTIONS, 

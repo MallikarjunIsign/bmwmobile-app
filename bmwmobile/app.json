@@ -1,16 +1,4 @@
 {
-  "expo": {
-    "name": "OKOH Parts",
-    "slug": "bmwmobile",
-    "version": "1.0.0",
-    "orientation": "portrait",
-    "userInterfaceStyle": "dark",
-    "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "com.okoh.bmwmobile"
-    },
-    "android": {
-      "package": "com.okoh.bmwmobile"
-    }
-  }
+  "name": "BidMyWork",
+  "displayName": "OKOH Parts"
 }

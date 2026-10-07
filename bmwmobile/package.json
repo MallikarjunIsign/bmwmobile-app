@@ -2,34 +2,46 @@
   "name": "bmwmobile",
   "version": "1.0.0",
   "description": "OKOH Parts - BMW Auction & Logistics Cross-Platform React Native App",
-  "main": "index.js",
+  "private": true,
   "scripts": {
-    "start": "expo start",
-    "android": "expo run:android",
-    "ios": "expo run:ios",
-    "web": "expo start --web"
+    "android": "react-native run-android",
+    "ios": "react-native run-ios",
+    "lint": "eslint .",
+    "start": "react-native start",
+    "test": "jest"
   },
   "dependencies": {
-    "@react-navigation/bottom-tabs": "^6.6.1",
-    "@react-navigation/native": "^6.1.18",
-    "@react-navigation/native-stack": "^6.10.1",
+    "@react-navigation/bottom-tabs": "^7.4.0",
+    "@react-navigation/native": "^7.5.0",
+    "@react-navigation/native-stack": "^7.20.0",
     "axios": "^1.7.9",
-    "expo": "~51.0.0",
-    "expo-status-bar": "~1.12.1",
-    "react": "18.2.0",
-    "react-native": "0.74.5",
-    "react-native-safe-area-context": "4.10.5",
-    "react-native-screens": "~3.31.1",
-    "react-native-vector-icons": "^10.2.0"
+    "react": "19.2.3",
+    "react-native": "0.87.1",
+    "react-native-safe-area-context": "^5.5.2",
+    "react-native-screens": "^4.28.0"
   },
   "devDependencies": {
-    "@babel/core": "^7.20.0",
-    "@types/jest": "^30.0.0",
-    "@types/react": "~18.2.45",
-    "@types/react-native": "^0.73.0",
-    "jest": "^30.5.2",
-    "ts-jest": "^29.4.14",
-    "typescript": "^5.3.3"
+    "@babel/core": "^7.25.2",
+    "@babel/preset-env": "^7.25.3",
+    "@babel/runtime": "^7.25.0",
+    "@react-native-community/cli": "20.2.0",
+    "@react-native-community/cli-platform-android": "20.2.0",
+    "@react-native-community/cli-platform-ios": "20.2.0",
+    "@react-native/babel-preset": "0.87.1",
+    "@react-native/eslint-config": "0.87.1",
+    "@react-native/jest-preset": "0.87.1",
+    "@react-native/metro-config": "0.87.1",
+    "@react-native/typescript-config": "0.87.1",
+    "@types/jest": "^29.5.13",
+    "@types/react": "^19.2.0",
+    "@types/react-test-renderer": "^19.1.0",
+    "eslint": "^8.19.0",
+    "jest": "^29.6.3",
+    "prettier": "2.8.8",
+    "react-test-renderer": "19.2.3",
+    "typescript": "^6.0.3"
   },
-  "private": true
+  "engines": {
+    "node": ">= 22.11.0"
+  }
 }
