@@ -60,9 +60,37 @@ None.
 
 **Seed data**: on first run (only if no users exist), creates `alice` (AliceSmith@example.com) and `bob` (BobSmith@example.com), both password `Pass123$`, with a `name` claim of "Alice Smith" / "Bob Smith".
 
+## User locations
+
+Like Home / Work in food-delivery apps. Each user has up to 10 locations (`UserLocations` table): `Label` (Home / Work / Other / custom), `PlaceName`, `Latitude`, `Longitude`, `RadiusKm` (5–200, default 50), `CountryCode`, `IsPrimary`, `IsCurrentLocation`. `AspNetUsers.AutoUpdatePrimaryLocation` (default true) is the "Auto-update primary from my current location" switch.
+
+**Rules**
+- Exactly one primary location (a filtered unique index). The first saved location becomes primary.
+- Auto-update on: the primary is the "Current location" row, moved to the phone's GPS when the app opens and the phone moved more than 1 km.
+- Choosing a primary by hand (`/primary`, or adding with `makePrimary`) turns auto-update off and removes the GPS row, so GPS never overwrites the choice. "Use my current location" (`/current` with `explicit=true`) turns it back on.
+- Saved places never change by themselves. The primary can't be deleted.
+- GPS points are named after the nearest catalog city: the city within 40 km, "Near {city}" within 150 km, otherwise "Current location" (exact coordinates are kept).
+
+**City catalog** (built in, no maps API): India (Hyderabad, Bangalore, Delhi, Mumbai, Chennai, Pune popular + 14 more), USA (10 cities), Nigeria (9 cities). Distances use the shared `Contracts.GeoMath` (Haversine + bounding box).
+
+|Method|Path|Notes|
+|---|---|---|
+|GET|`/api/locations/popular-cities?country=IN\|US\|NG`|6 popular cities (anonymous)|
+|GET|`/api/locations/cities?q=&country=`|Search all three countries, given country first (anonymous)|
+|GET|`/api/locations/nearest-city?lat=&lon=`|Name for a GPS point (anonymous)|
+|GET|`/api/me/locations`|`{ autoUpdatePrimary, locations[] }`, primary first|
+|POST|`/api/me/locations`|Add `{ label, placeName, latitude, longitude, radiusKm, countryCode, makePrimary }`|
+|PUT|`/api/me/locations/{id}`|Edit (GPS row: radius only)|
+|DELETE|`/api/me/locations/{id}`|Not the primary (409 `PRIMARY_CANNOT_BE_DELETED`)|
+|POST|`/api/me/locations/{id}/primary`|Manual primary, auto-update off|
+|PUT|`/api/me/locations/current`|`{ latitude, longitude, radiusKm?, explicit }` — phone GPS → primary|
+|PUT|`/api/me/locations/settings`|`{ autoUpdatePrimary }`|
+
+The `/api/me/*` endpoints need an access token with the `IdentityServerApi` scope. Every change returns the full updated list. `UserDto.hasLocation` tells the app whether to show "Set your location".
+
 ## API Endpoints
 
-The mobile account endpoints under `/api/account` (see "Mobile app sign-in"). Otherwise exposes IdentityServer's standard OIDC protocol endpoints (`/connect/authorize`, `/connect/token`, `/connect/userinfo`, `/connect/endsession`, discovery document, etc.) plus authenticated Razor Pages for account/consent/device/CIBA flows.
+The mobile account endpoints under `/api/account` (see "Mobile app sign-in") and the location endpoints (see "User locations"). Otherwise exposes IdentityServer's standard OIDC protocol endpoints (`/connect/authorize`, `/connect/token`, `/connect/userinfo`, `/connect/endsession`, discovery document, etc.) plus authenticated Razor Pages for account/consent/device/CIBA flows.
 
 ## Models
 

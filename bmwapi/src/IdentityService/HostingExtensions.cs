@@ -70,7 +70,9 @@ internal static class HostingExtensions
         _ = builder.Services.Configure<FeatureOptions>(builder.Configuration.GetSection("Features"));
         _ = builder.Services.Configure<SocialAuthOptions>(builder.Configuration.GetSection("SocialAuth"));
         _ = builder.Services.Configure<EmailOptions>(builder.Configuration.GetSection("Email"));
+        _ = builder.Services.Configure<LocationOptions>(builder.Configuration.GetSection("Location"));
         _ = builder.Services.AddScoped<AccountService>();
+        _ = builder.Services.AddScoped<LocationService>();
         _ = builder.Services.AddScoped<IOtpService, OtpService>();
         _ = builder.Services.AddScoped<ITrustedDeviceService, TrustedDeviceService>();
         _ = builder.Services.AddSingleton<IOtpSender, EmailOtpSender>();

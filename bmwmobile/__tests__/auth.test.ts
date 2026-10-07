@@ -54,7 +54,7 @@ describe('current user (replaces demo_buyer)', () => {
       accessToken: 'a',
       accessTokenExpiresAt: Date.now() + 3600_000,
       refreshToken: 'r',
-      user: { id: '1', username: 'mallikarjun', fullName: 'Mallikarjun R', email: 'm@example.com', phoneNumber: null, role: 'user', emailVerified: true },
+      user: { id: '1', username: 'mallikarjun', fullName: 'Mallikarjun R', email: 'm@example.com', phoneNumber: null, role: 'user', emailVerified: true, hasLocation: true },
     });
     expect(currentUsername()).toBe('mallikarjun');
     expect(isCurrentUser('mallikarjun')).toBe(true);

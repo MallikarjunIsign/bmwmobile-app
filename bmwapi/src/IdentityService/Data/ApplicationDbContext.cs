@@ -13,6 +13,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
 
     public DbSet<OtpCode> OtpCodes => Set<OtpCode>();
     public DbSet<TrustedDevice> TrustedDevices => Set<TrustedDevice>();
+    public DbSet<UserLocation> UserLocations => Set<UserLocation>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -29,6 +30,17 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
             o.Property(x => x.CodeHash).HasMaxLength(64);
             o.HasIndex(x => new { x.UserId, x.Purpose, x.CreatedAt });
             o.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<UserLocation>(l =>
+        {
+            l.Property(x => x.Label).HasMaxLength(40);
+            l.Property(x => x.PlaceName).HasMaxLength(120);
+            l.Property(x => x.CountryCode).HasMaxLength(2);
+            l.HasIndex(x => x.UserId);
+            // At most one primary location per user.
+            l.HasIndex(x => x.UserId).IsUnique().HasFilter("\"IsPrimary\" = true").HasDatabaseName("IX_UserLocations_UserId_Primary");
+            l.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
         builder.Entity<TrustedDevice>(d =>

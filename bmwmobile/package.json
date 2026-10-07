@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "@invertase/react-native-apple-authentication": "^2.5.1",
+    "@react-native-async-storage/async-storage": "^3.1.1",
+    "@react-native-community/geolocation": "^3.4.0",
     "@react-native-google-signin/google-signin": "^16.1.5",
     "@react-navigation/bottom-tabs": "^7.4.0",
     "@react-navigation/native": "^7.5.0",

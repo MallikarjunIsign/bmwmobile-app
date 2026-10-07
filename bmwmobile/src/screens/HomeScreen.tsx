@@ -11,6 +11,7 @@ import { Auction } from '../types/models';
 import { AuctionCard } from '../components/AuctionCard';
 import { Badge } from '../components/Badge';
 import { useAuth } from '../auth/AuthContext';
+import { LocationSelector } from '../components/LocationSelector';
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<MainTabParamList, 'Home'>,
@@ -106,6 +107,13 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
             ))}
           </ScrollView>
         </View>
+
+        {/* Which saved location the parts list is for (signed-in users) */}
+        {user ? (
+          <View style={styles.locationBar}>
+            <LocationSelector onManage={() => navigation.navigate('ManageLocations')} />
+          </View>
+        ) : null}
 
         {/* Live Auctions Ticker Section */}
         <View style={styles.sectionRow}>
@@ -265,6 +273,9 @@ const styles = StyleSheet.create({
   filterTextActive: {
     color: COLORS.text,
     fontWeight: '800',
+  },
+  locationBar: {
+    marginBottom: SPACING.md,
   },
   sectionRow: {
     flexDirection: 'row',

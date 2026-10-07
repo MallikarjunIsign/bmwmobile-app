@@ -23,6 +23,20 @@ jest.mock('@react-native-google-signin/google-signin', () => ({
   statusCodes: {},
 }));
 
+jest.mock('@react-native-async-storage/async-storage', () => ({
+  __esModule: true,
+  default: { getItem: jest.fn(async () => null), setItem: jest.fn(async () => undefined), removeItem: jest.fn(async () => undefined) },
+}));
+
+jest.mock('@react-native-community/geolocation', () => ({
+  __esModule: true,
+  default: {
+    setRNConfiguration: jest.fn(),
+    requestAuthorization: jest.fn(),
+    getCurrentPosition: jest.fn((_ok, fail) => fail({ code: 1, PERMISSION_DENIED: 1, TIMEOUT: 3 })),
+  },
+}));
+
 jest.mock('@invertase/react-native-apple-authentication', () => ({
   __esModule: true,
   default: { isSupported: false, Operation: {}, Scope: {}, Error: {}, performRequest: jest.fn() },

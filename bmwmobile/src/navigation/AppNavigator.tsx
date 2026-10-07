@@ -15,6 +15,9 @@ import { SignUpScreen } from '../screens/SignUpScreen';
 import { ForgotPasswordScreen } from '../screens/ForgotPasswordScreen';
 import { ResetPasswordScreen } from '../screens/ResetPasswordScreen';
 import { useAuth } from '../auth/AuthContext';
+import { useLocations } from '../location/LocationContext';
+import { SetLocationScreen } from '../screens/SetLocationScreen';
+import { ManageLocationsScreen } from '../screens/ManageLocationsScreen';
 import { ProfilePreferencesScreen } from '../screens/ProfilePreferencesScreen';
 import { HomeScreen } from '../screens/HomeScreen';
 import { MarketplaceSearchScreen } from '../screens/MarketplaceSearchScreen';
@@ -103,11 +106,26 @@ function MainTabNavigator() {
 
 export function AppNavigator() {
   const { status } = useAuth();
-
-  // Restoring a remembered session: keep the dark background until we know where to start.
-  if (status === 'loading') return <View style={styles.loading} />;
+  const locations = useLocations();
 
   const signedIn = status === 'signedIn';
+
+  // Restoring a remembered session / loading the user's locations: keep the dark background.
+  if (status === 'loading' || (signedIn && (locations.status === 'idle' || locations.status === 'loading'))) {
+    return <View style={styles.loading} />;
+  }
+
+  // First login without any location: "Set your location" once, before the marketplace.
+  const needsLocation = signedIn && locations.status === 'ready' && locations.locations.length === 0;
+  if (needsLocation) {
+    return (
+      <NavigationContainer>
+        <Stack.Navigator key="onboarding" screenOptions={{ headerShown: false, contentStyle: { backgroundColor: COLORS.background } }}>
+          <Stack.Screen name="SetLocation" component={SetLocationScreen} initialParams={{ mode: 'onboarding' }} options={{ gestureEnabled: false }} />
+        </Stack.Navigator>
+      </NavigationContainer>
+    );
+  }
 
   return (
     <NavigationContainer>
@@ -120,6 +138,12 @@ export function AppNavigator() {
           contentStyle: { backgroundColor: COLORS.background },
         }}
       >
+        {signedIn && (
+          <Stack.Group>
+            <Stack.Screen name="SetLocation" component={SetLocationScreen} />
+            <Stack.Screen name="ManageLocations" component={ManageLocationsScreen} />
+          </Stack.Group>
+        )}
         {!signedIn && (
           <Stack.Group>
             <Stack.Screen name="Splash" component={SplashScreen} />

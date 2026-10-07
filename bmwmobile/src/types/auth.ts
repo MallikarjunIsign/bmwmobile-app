@@ -10,6 +10,8 @@ export interface AuthUser {
   /** 'user' while roles are switched off (Identity Features:RolesEnabled = false). */
   role: UserRole | 'user';
   emailVerified: boolean;
+  /** False until the first location is saved ("Set your location" is shown once). */
+  hasLocation: boolean;
 }
 
 /** Tokens from IdentityService (/connect/token). */

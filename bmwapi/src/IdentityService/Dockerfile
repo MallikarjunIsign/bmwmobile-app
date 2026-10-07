@@ -8,6 +8,7 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 COPY ["src/IdentityService/IdentityService.csproj", "src/IdentityService/"]
+COPY ["src/Contracts/Contracts.csproj", "src/Contracts/"]
 RUN dotnet restore "src/IdentityService/IdentityService.csproj"
 COPY . .
 WORKDIR "/src/src/IdentityService"

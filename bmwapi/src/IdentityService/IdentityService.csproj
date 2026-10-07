@@ -26,6 +26,10 @@
         <PackageReference Include="Serilog.AspNetCore" Version="9.0.0" />
     </ItemGroup>
     <ItemGroup>
+      <!-- Shared GeoMath (distance / bounding box), also used by AuctionService and SearchService. -->
+      <ProjectReference Include="..\Contracts\Contracts.csproj" />
+    </ItemGroup>
+    <ItemGroup>
       <Content Include="..\..\.dockerignore">
         <Link>.dockerignore</Link>
       </Content>

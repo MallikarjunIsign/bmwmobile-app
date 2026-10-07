@@ -13,4 +13,10 @@ public class ApplicationUser : IdentityUser
 
     public DateTime? CreatedAt { get; set; }
     public DateTime? LastLoginAt { get; set; }
+
+    /// <summary>
+    /// "Auto-update primary from my current location". On: the app moves the primary location
+    /// to the phone's GPS position. Choosing a primary by hand turns it off.
+    /// </summary>
+    public bool AutoUpdatePrimaryLocation { get; set; } = true;
 }

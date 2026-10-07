@@ -28,7 +28,9 @@ public record UserDto(
     string Email,
     string? PhoneNumber,
     string Role,
-    bool EmailVerified);
+    bool EmailVerified,
+    // False until the user has saved a location (the app then shows "Set your location" once).
+    bool HasLocation);
 
 public record OtpSentResponse(string Message, int ResendAfterSeconds, string? DevOtp = null);
 

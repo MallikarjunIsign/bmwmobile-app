@@ -8,6 +8,8 @@ export type RootStackParamList = {
   ForgotPassword: { email?: string } | undefined;
   ResetPassword: { email: string; resendAfterSeconds: number; devOtp?: string | null };
   ProfilePreferences: undefined;
+  SetLocation: { mode: 'onboarding' } | { mode: 'add' } | { mode: 'edit'; locationId: string } | undefined;
+  ManageLocations: undefined;
 
   MainTabs: { screen?: string } | undefined;
 

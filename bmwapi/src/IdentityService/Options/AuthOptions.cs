@@ -25,6 +25,20 @@ public class FeatureOptions
     public bool RolesEnabled { get; set; }
 }
 
+public class LocationOptions
+{
+    public int MinRadiusKm { get; set; } = 5;
+    public int MaxRadiusKm { get; set; } = 200;
+    public int DefaultRadiusKm { get; set; } = 50;
+    public int MaxLocationsPerUser { get; set; } = 10;
+
+    /// <summary>GPS moves smaller than this don't change the primary location (avoids constant updates).</summary>
+    public double MoveThresholdKm { get; set; } = 1;
+
+    /// <summary>Missing radius → default; anything outside Min..Max is pulled back into range.</summary>
+    public int ClampRadius(int? radiusKm) => Math.Clamp(radiusKm ?? DefaultRadiusKm, MinRadiusKm, MaxRadiusKm);
+}
+
 public class SocialAuthOptions
 {
     /// <summary>Google OAuth client IDs (Web, Android, iOS) whose ID tokens are accepted.</summary>

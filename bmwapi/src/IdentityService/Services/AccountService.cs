@@ -19,6 +19,7 @@ public class AccountService(
     ITrustedDeviceService devices,
     ILoginChallenges challenges,
     IPersistedGrantService grants,
+    LocationService locations,
     IOptions<OtpOptions> otpOptions,
     IOptions<FeatureOptions> features,
     IHostEnvironment env,
@@ -185,7 +186,8 @@ public class AccountService(
             user.Email ?? string.Empty,
             user.PhoneNumber,
             await GetRoleAsync(user),
-            user.EmailConfirmed);
+            user.EmailConfirmed,
+            await locations.HasAnyAsync(user.Id, CancellationToken.None));
     }
 
     /// <summary>"customer" / "pro" when roles are on, otherwise everyone is "user".</summary>
