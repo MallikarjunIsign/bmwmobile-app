@@ -11,7 +11,7 @@ import { PrimaryButton } from '../components/PrimaryButton';
 import { useLocations } from '../location/LocationContext';
 import { errorMessage } from '../services/authApi';
 import type { UserLocation } from '../types/location';
-import { locationIcon } from '../utils/geo';
+import { formatRadius, locationIcon } from '../utils/geo';
 import { GpsError } from '../utils/gps';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ManageLocations'>;
@@ -97,7 +97,7 @@ export const ManageLocationsScreen: React.FC<Props> = ({ navigation }) => {
                   {l.isPrimary ? <Badge label="PRIMARY" variant="primary" size="sm" /> : null}
                 </View>
                 <Text style={styles.place} numberOfLines={1}>
-                  {l.placeName} · {l.radiusKm} km
+                  {l.placeName} · {formatRadius(l.radiusKm, l.countryCode)}
                 </Text>
               </View>
             </View>

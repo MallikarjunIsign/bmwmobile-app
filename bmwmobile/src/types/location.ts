@@ -1,4 +1,4 @@
-export type CountryCode = 'IN' | 'US' | 'NG';
+export type CountryCode = 'IN' | 'US' | 'NG' | 'IE';
 
 export interface City {
   name: string;

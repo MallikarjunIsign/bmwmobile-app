@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, Modal, StyleSheet, ScrollView } from 'rea
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
 import { useLocations } from '../location/LocationContext';
-import { locationChipLabel, locationIcon } from '../utils/geo';
+import { formatRadius, locationChipLabel, locationIcon } from '../utils/geo';
 
 interface LocationSelectorProps {
   onManage: () => void;
@@ -51,7 +51,7 @@ export const LocationSelector: React.FC<LocationSelectorProps> = ({ onManage }) 
                         {l.label}
                         {l.isPrimary ? <Text style={styles.primaryTag}>  ★ PRIMARY</Text> : null}
                       </Text>
-                      <Text style={styles.rowPlace}>{l.placeName} · {l.radiusKm} km</Text>
+                      <Text style={styles.rowPlace}>{l.placeName} · {formatRadius(l.radiusKm, l.countryCode)}</Text>
                     </View>
                     <Text style={[styles.radio, active && styles.radioActive]}>{active ? '●' : '○'}</Text>
                   </TouchableOpacity>

@@ -6,10 +6,13 @@ import { RootStackParamList } from '../types/navigation';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
 import { Header } from '../components/Header';
 import { ApiService } from '../services/api';
+import { useCurrencyLabel, useMoney } from '../location/useMoney';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'OrderPartRequest'>;
 
 export const OrderPartRequestScreen: React.FC<Props> = ({ route, navigation }) => {
+  const money = useMoney();
+  const currencyLabel = useCurrencyLabel();
   const { prefillMake, prefillModel, prefillPart } = route.params || {};
 
   const [make, setMake] = useState(prefillMake || 'BMW');
@@ -62,7 +65,7 @@ export const OrderPartRequestScreen: React.FC<Props> = ({ route, navigation }) =
         <Text style={styles.label}>ADDITIONAL SPECIFICATIONS / NOTES</Text>
         <TextInput style={[styles.input, { height: 70 }]} value={specs} onChangeText={setSpecs} multiline />
 
-        <Text style={styles.label}>MAXIMUM BUDGET CEILING ($ USD)</Text>
+        <Text style={styles.label}>MAXIMUM BUDGET CEILING ({currencyLabel})</Text>
         <TextInput style={styles.input} value={maxBudget} onChangeText={setMaxBudget} keyboardType="numeric" />
 
         <Text style={styles.label}>TARGET NIGERIAN CLEARING PORT</Text>

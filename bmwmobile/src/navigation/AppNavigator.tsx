@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -109,6 +109,9 @@ export function AppNavigator() {
   const locations = useLocations();
 
   const signedIn = status === 'signedIn';
+  // After a logout (or an expired session) the user goes straight back to Login, not the splash.
+  const hadSession = useRef(false);
+  if (signedIn) hadSession.current = true;
 
   // Restoring a remembered session / loading the user's locations: keep the dark background.
   if (status === 'loading' || (signedIn && (locations.status === 'idle' || locations.status === 'loading'))) {
@@ -130,21 +133,44 @@ export function AppNavigator() {
   return (
     <NavigationContainer>
       <Stack.Navigator
-        // Signing in or out starts a fresh stack: the marketplace when signed in, the splash otherwise.
+        // Signing in or out starts a fresh stack: the marketplace when signed in, otherwise the splash
+        // (first start) or Login (after logging out). There is no guest access to the marketplace.
         key={status}
-        initialRouteName={signedIn ? 'MainTabs' : 'Splash'}
+        initialRouteName={signedIn ? 'MainTabs' : hadSession.current ? 'Login' : 'Splash'}
         screenOptions={{
           headerShown: false,
           contentStyle: { backgroundColor: COLORS.background },
         }}
       >
-        {signedIn && (
+        {signedIn ? (
           <Stack.Group>
+            <Stack.Screen name="MainTabs" component={MainTabNavigator} />
             <Stack.Screen name="SetLocation" component={SetLocationScreen} />
             <Stack.Screen name="ManageLocations" component={ManageLocationsScreen} />
+            <Stack.Screen name="ProfilePreferences" component={ProfilePreferencesScreen} />
+
+            <Stack.Screen name="PartDetails" component={PartDetailsScreen} />
+            <Stack.Screen 
+              name="PlaceBidModal" 
+              component={PlaceBidModal} 
+              options={{ presentation: 'modal' }}
+            />
+            <Stack.Screen name="HighestBidder" component={HighestBidderScreen} />
+            <Stack.Screen name="Outbid" component={OutbidScreen} />
+            <Stack.Screen name="EndingSoon" component={EndingSoonScreen} />
+            <Stack.Screen name="AuctionWon" component={AuctionWonScreen} />
+            <Stack.Screen name="AuctionLost" component={AuctionLostScreen} />
+
+            <Stack.Screen name="CompletePurchase" component={CompletePurchaseScreen} />
+            <Stack.Screen name="PaymentConfirmed" component={PaymentConfirmedScreen} />
+            <Stack.Screen name="PickupReceive" component={PickupReceiveScreen} />
+
+            <Stack.Screen name="PartUnavailable" component={PartUnavailableScreen} />
+            <Stack.Screen name="OrderPartRequest" component={OrderPartRequestScreen} />
+            <Stack.Screen name="RequestSubmitted" component={RequestSubmittedScreen} />
+            <Stack.Screen name="PlannedContainers" component={PlannedContainersScreen} />
           </Stack.Group>
-        )}
-        {!signedIn && (
+        ) : (
           <Stack.Group>
             <Stack.Screen name="Splash" component={SplashScreen} />
             <Stack.Screen name="Login" component={LoginScreen} />
@@ -154,30 +180,6 @@ export function AppNavigator() {
             <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} />
           </Stack.Group>
         )}
-        <Stack.Screen name="ProfilePreferences" component={ProfilePreferencesScreen} />
-
-        <Stack.Screen name="MainTabs" component={MainTabNavigator} />
-
-        <Stack.Screen name="PartDetails" component={PartDetailsScreen} />
-        <Stack.Screen 
-          name="PlaceBidModal" 
-          component={PlaceBidModal} 
-          options={{ presentation: 'modal' }}
-        />
-        <Stack.Screen name="HighestBidder" component={HighestBidderScreen} />
-        <Stack.Screen name="Outbid" component={OutbidScreen} />
-        <Stack.Screen name="EndingSoon" component={EndingSoonScreen} />
-        <Stack.Screen name="AuctionWon" component={AuctionWonScreen} />
-        <Stack.Screen name="AuctionLost" component={AuctionLostScreen} />
-
-        <Stack.Screen name="CompletePurchase" component={CompletePurchaseScreen} />
-        <Stack.Screen name="PaymentConfirmed" component={PaymentConfirmedScreen} />
-        <Stack.Screen name="PickupReceive" component={PickupReceiveScreen} />
-
-        <Stack.Screen name="PartUnavailable" component={PartUnavailableScreen} />
-        <Stack.Screen name="OrderPartRequest" component={OrderPartRequestScreen} />
-        <Stack.Screen name="RequestSubmitted" component={RequestSubmittedScreen} />
-        <Stack.Screen name="PlannedContainers" component={PlannedContainersScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

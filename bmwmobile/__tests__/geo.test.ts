@@ -3,6 +3,10 @@ import {
   countryFromPhone,
   DEFAULT_RADIUS_KM,
   formatDistance,
+  formatMoney,
+  formatRadius,
+  nearestRadiusKm,
+  radiusOptionsKm,
   noPartsNearMessage,
   haversineKm,
   locationChipLabel,
@@ -27,12 +31,13 @@ describe('geo helpers', () => {
     expect(countryFromPhone('+919876543210')).toBe('IN');
     expect(countryFromPhone('+12015550123')).toBe('US');
     expect(countryFromPhone('+2348031234567')).toBe('NG');
+    expect(countryFromPhone('+353851234567')).toBe('IE');
     expect(countryFromPhone(null)).toBe('IN');
   });
 
   test('chip labels and icons', () => {
-    expect(locationChipLabel({ label: 'Home', placeName: 'Hyderabad', radiusKm: 25 })).toBe('Home · Hyderabad · 25 km');
-    expect(locationChipLabel({ label: 'Lagos', placeName: 'Lagos', radiusKm: 50 })).toBe('Lagos · 50 km');
+    expect(locationChipLabel({ label: 'Home', placeName: 'Hyderabad', radiusKm: 25, countryCode: 'IN' })).toBe('Home · Hyderabad · 25 km');
+    expect(locationChipLabel({ label: 'Lagos', placeName: 'Lagos', radiusKm: 50, countryCode: 'NG' })).toBe('Lagos · 50 km');
     expect(locationIcon({ label: 'Current location', isCurrentLocation: true })).toBe('📡');
     expect(locationIcon({ label: 'Work', isCurrentLocation: false })).toBe('💼');
     expect(radiusSummary(10, 'Bangalore')).toBe('Show parts within 10 km of Bangalore');
@@ -43,7 +48,30 @@ describe('geo helpers', () => {
     expect(formatDistance(8.5)).toBe('8.5 km');
     expect(formatDistance(9.0)).toBe('9 km');
     expect(formatDistance(12.4)).toBe('12 km');
-    expect(noPartsNearMessage({ label: 'Home', radiusKm: 25 })).toBe('No parts within 25 km of Home – try a bigger radius.');
+    expect(noPartsNearMessage({ label: 'Home', radiusKm: 25, countryCode: null })).toBe('No parts within 25 km of Home – try a bigger radius.');
+  });
+
+  test('miles in the USA, km elsewhere', () => {
+    expect(radiusOptionsKm('US')).toEqual([8, 16, 40, 80, 161]);
+    expect(radiusOptionsKm('US').map(km => formatRadius(km, 'US'))).toEqual(['5 mi', '10 mi', '25 mi', '50 mi', '100 mi']);
+    expect(radiusOptionsKm('IE')).toEqual([5, 10, 25, 50, 100, 200]);
+    expect(formatRadius(25, 'IE')).toBe('25 km');
+    expect(nearestRadiusKm(50, 'US')).toBe(40);
+    expect(nearestRadiusKm(40, 'IN')).toBe(50);
+    expect(formatDistance(0.5, 'US')).toBe('< 1 mi');
+    expect(formatDistance(16.09, 'US')).toBe('10 mi');
+    expect(formatDistance(12.4, 'NG')).toBe('12 km');
+    expect(locationChipLabel({ label: 'Home', placeName: 'Chicago', radiusKm: 40, countryCode: 'US' })).toBe('Home · Chicago · 25 mi');
+    expect(radiusSummary(80, 'Houston', 'US')).toBe('Show parts within 50 mi of Houston');
+  });
+
+  test('currency follows the country', () => {
+    expect(formatMoney(1500, 'US')).toBe('$1,500');
+    expect(formatMoney(1500, 'IE')).toBe('€1,500');
+    expect(formatMoney(1500, 'NG')).toBe('₦1,500');
+    expect(formatMoney(1500, 'IN')).toBe('₹1,500');
+    expect(formatMoney(45, 'IE', 2)).toBe('€45.00');
+    expect(formatMoney(300, null)).toBe('₹300');
   });
 
   test('search results keep location and distance', () => {

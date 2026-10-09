@@ -5,10 +5,12 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
 import { Badge } from '../components/Badge';
+import { useMoney } from '../location/useMoney';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'HighestBidder'>;
 
 export const HighestBidderScreen: React.FC<Props> = ({ route, navigation }) => {
+  const money = useMoney();
   const { auction } = route.params;
 
   return (
@@ -24,7 +26,7 @@ export const HighestBidderScreen: React.FC<Props> = ({ route, navigation }) => {
 
         <View style={styles.card}>
           <Text style={styles.cardLabel}>YOUR CONFIRMED HIGHEST BID</Text>
-          <Text style={styles.bidAmount}>${auction.currentHighBid.toLocaleString()}</Text>
+          <Text style={styles.bidAmount}>{money(auction.currentHighBid)}</Text>
 
           <View style={styles.row}>
             <Text style={styles.key}>Status:</Text>
@@ -32,7 +34,7 @@ export const HighestBidderScreen: React.FC<Props> = ({ route, navigation }) => {
           </View>
           <View style={styles.row}>
             <Text style={styles.key}>Auto-Bid Protection:</Text>
-            <Text style={styles.val}>Active (Ceiling: ${auction.userMaxAutoBid?.toLocaleString() || '$16,000'})</Text>
+            <Text style={styles.val}>Active (Ceiling: {money(auction.userMaxAutoBid ?? 16000)})</Text>
           </View>
           <View style={styles.row}>
             <Text style={styles.key}>Target Shipment Container:</Text>

@@ -5,10 +5,12 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
 import { Badge } from '../components/Badge';
+import { useMoney } from '../location/useMoney';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AuctionLost'>;
 
 export const AuctionLostScreen: React.FC<Props> = ({ route, navigation }) => {
+  const money = useMoney();
   const { auction } = route.params;
 
   return (
@@ -24,7 +26,7 @@ export const AuctionLostScreen: React.FC<Props> = ({ route, navigation }) => {
 
         <View style={styles.card}>
           <Text style={styles.desc}>
-            This auction ended at <Text style={styles.bold}>${auction.currentHighBid.toLocaleString()}</Text>.
+            This auction ended at <Text style={styles.bold}>{money(auction.currentHighBid)}</Text>.
             Don't worry! You can submit a custom part order for the upcoming German container schedule with zero extra fee.
           </Text>
         </View>

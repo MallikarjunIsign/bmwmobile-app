@@ -4,9 +4,9 @@ import { currentUsername, DEMO_OWNER, isCurrentUser, setSession } from '../src/a
 
 const country = (code: string) => PHONE_COUNTRIES.find(c => c.code === code)!;
 
-describe('phone numbers (India, USA, Nigeria)', () => {
-  test('India is the default and only these three countries are offered', () => {
-    expect(PHONE_COUNTRIES.map(c => c.dialCode)).toEqual(['+91', '+1', '+234']);
+describe('phone numbers (India, USA, Nigeria, Ireland)', () => {
+  test('India is the default and only these four countries are offered', () => {
+    expect(PHONE_COUNTRIES.map(c => c.dialCode)).toEqual(['+91', '+1', '+234', '+353']);
   });
 
   test('valid numbers become E.164', () => {
@@ -16,6 +16,8 @@ describe('phone numbers (India, USA, Nigeria)', () => {
     expect(toE164(country('US'), '201-555-0123')).toBe('+12015550123');
     expect(validatePhone(country('NG'), '0803 123 4567')).toBeNull();
     expect(toE164(country('NG'), '0803 123 4567')).toBe('+2348031234567');
+    expect(validatePhone(country('IE'), '085 123 4567')).toBeNull();
+    expect(toE164(country('IE'), '085 123 4567')).toBe('+353851234567');
   });
 
   test('wrong lengths and prefixes are rejected', () => {
@@ -23,6 +25,8 @@ describe('phone numbers (India, USA, Nigeria)', () => {
     expect(validatePhone(country('IN'), '1234567890')).toMatch(/Indian/);
     expect(validatePhone(country('NG'), '6031234567')).toMatch(/Nigerian/);
     expect(validatePhone(country('US'), '')).toMatch(/Enter/);
+    expect(validatePhone(country('IE'), '12 345 6789')).toMatch(/Irish/);
+    expect(validatePhone(country('IE'), '85 123 456')).toMatch(/9-digit/);
   });
 });
 

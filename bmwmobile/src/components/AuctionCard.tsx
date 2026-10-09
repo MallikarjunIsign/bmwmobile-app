@@ -5,6 +5,8 @@ import { COLORS, SPACING, RADIUS } from '../theme/colors';
 import { Badge } from './Badge';
 import { isCurrentUser } from '../auth/session';
 import { formatDistance } from '../utils/geo';
+import { useMoney } from '../location/useMoney';
+import { useLocations } from '../location/LocationContext';
 
 interface AuctionCardProps {
   auction: Auction;
@@ -13,6 +15,8 @@ interface AuctionCardProps {
 }
 
 export const AuctionCard: React.FC<AuctionCardProps> = ({ auction, onPress, onBidPress }) => {
+  const money = useMoney();
+  const { country } = useLocations();
   const isWinning = isCurrentUser(auction.highBidder);
   const imageUrl = auction.item.images[0]?.url || 'https://images.unsplash.com/photo-1617814076367-b759c7d7e738?q=80&w=800&auto=format&fit=crop';
 
@@ -47,7 +51,7 @@ export const AuctionCard: React.FC<AuctionCardProps> = ({ auction, onPress, onBi
         {/* Distance from the selected location */}
         {auction.distanceKm !== undefined || auction.locationName ? (
           <Text style={styles.distanceText} numberOfLines={1}>
-            📍 {auction.distanceKm !== undefined ? <Text style={styles.distanceBold}>{formatDistance(auction.distanceKm)} away</Text> : null}
+            📍 {auction.distanceKm !== undefined ? <Text style={styles.distanceBold}>{formatDistance(auction.distanceKm, country)} away</Text> : null}
             {auction.distanceKm !== undefined && auction.locationName ? ' · ' : ''}
             {auction.locationName ?? ''}
           </Text>
@@ -57,7 +61,7 @@ export const AuctionCard: React.FC<AuctionCardProps> = ({ auction, onPress, onBi
         <View style={styles.priceContainer}>
           <View>
             <Text style={styles.priceLabel}>Current Highest Bid</Text>
-            <Text style={styles.priceValue}>${auction.currentHighBid.toLocaleString()}</Text>
+            <Text style={styles.priceValue}>{money(auction.currentHighBid)}</Text>
           </View>
           <View style={styles.bidCountBadge}>
             <Text style={styles.bidCountText}>{auction.bidCount} Bids</Text>

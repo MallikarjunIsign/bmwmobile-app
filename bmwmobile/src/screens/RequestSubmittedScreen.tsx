@@ -5,10 +5,12 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
 import { Badge } from '../components/Badge';
+import { useMoney } from '../location/useMoney';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'RequestSubmitted'>;
 
 export const RequestSubmittedScreen: React.FC<Props> = ({ route, navigation }) => {
+  const money = useMoney();
   const { request } = route.params;
 
   return (
@@ -41,7 +43,7 @@ export const RequestSubmittedScreen: React.FC<Props> = ({ route, navigation }) =
           </View>
           <View style={styles.row}>
             <Text style={styles.key}>Max Budget Ceiling:</Text>
-            <Text style={styles.val}>${request.maxBudget.toLocaleString()}</Text>
+            <Text style={styles.val}>{money(request.maxBudget)}</Text>
           </View>
         </View>
 

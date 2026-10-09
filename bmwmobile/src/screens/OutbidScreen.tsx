@@ -5,10 +5,12 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
 import { Badge } from '../components/Badge';
+import { useMoney } from '../location/useMoney';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Outbid'>;
 
 export const OutbidScreen: React.FC<Props> = ({ route, navigation }) => {
+  const money = useMoney();
   const { auction } = route.params;
 
   return (
@@ -24,16 +26,16 @@ export const OutbidScreen: React.FC<Props> = ({ route, navigation }) => {
 
         <View style={styles.card}>
           <Text style={styles.cardLabel}>NEW HIGHEST BID IN MARKETPLACE</Text>
-          <Text style={styles.bidAmount}>${auction.currentHighBid.toLocaleString()}</Text>
+          <Text style={styles.bidAmount}>{money(auction.currentHighBid)}</Text>
           <Text style={styles.bidderText}>Bid by: <Text style={styles.boldText}>autoworks_lagos</Text></Text>
 
           <View style={styles.row}>
             <Text style={styles.key}>Your Previous Highest Bid:</Text>
-            <Text style={styles.val}>${(auction.currentHighBid - 200).toLocaleString()}</Text>
+            <Text style={styles.val}>{money((auction.currentHighBid - 200))}</Text>
           </View>
           <View style={styles.row}>
             <Text style={styles.key}>Suggested Counter Bid:</Text>
-            <Text style={styles.valCounter}>${(auction.currentHighBid + 250).toLocaleString()}</Text>
+            <Text style={styles.valCounter}>{money((auction.currentHighBid + 250))}</Text>
           </View>
         </View>
 
@@ -42,7 +44,7 @@ export const OutbidScreen: React.FC<Props> = ({ route, navigation }) => {
           onPress={() => navigation.navigate('PlaceBidModal', { auction })}
           activeOpacity={0.8}
         >
-          <Text style={styles.counterText}>PLACE COUNTER BID NOW (${(auction.currentHighBid + 250).toLocaleString()})</Text>
+          <Text style={styles.counterText}>PLACE COUNTER BID NOW ({money((auction.currentHighBid + 250))})</Text>
         </TouchableOpacity>
 
         <TouchableOpacity 

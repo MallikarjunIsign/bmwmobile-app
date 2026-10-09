@@ -34,14 +34,6 @@ export const SplashScreen: React.FC<Props> = ({ navigation }) => {
         >
           <Text style={styles.primaryBtnText}>ENTER MARKETPLACE</Text>
         </TouchableOpacity>
-
-        <TouchableOpacity 
-          style={styles.secondaryBtn} 
-          onPress={() => navigation.navigate('ProfilePreferences')}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.secondaryBtnText}>Set Pickup Port & Garage</Text>
-        </TouchableOpacity>
       </View>
     </SafeAreaView>
   );
@@ -128,18 +120,5 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '900',
     letterSpacing: 1,
-  },
-  secondaryBtn: {
-    backgroundColor: COLORS.card,
-    paddingVertical: SPACING.md,
-    borderRadius: RADIUS.md,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.borderHighlight,
-  },
-  secondaryBtnText: {
-    color: COLORS.textSecondary,
-    fontSize: 14,
-    fontWeight: '700',
   },
 });

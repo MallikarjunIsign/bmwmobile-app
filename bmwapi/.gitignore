@@ -485,3 +485,6 @@ $RECYCLE.BIN/
 k8s/config/app-secrets.yml
 # Uploaded item images (AuctionService local image storage)
 src/AuctionService/uploads/
+
+# Local run logs from start-backend.sh
+.run/

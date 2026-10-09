@@ -13,6 +13,7 @@ public class DbInitializer
         var context = scope.ServiceProvider.GetRequiredService<AuctionDbContext>();
         var seededIds = SeedData(context, app);
         var locatedIds = seededIds.Count == 0 ? BackfillSeedLocations(context, app) : [];
+        if (seededIds.Count == 0) seededIds = AddIrelandParts(context, app);
 
         // Tell the other services (BidService schedules each auction's end, SearchService indexes it)
         // about the seed data once Wolverine is running.
@@ -29,7 +30,7 @@ public class DbInitializer
     }
 
     /// <summary>
-    /// Where each demo item is: spread over India, the USA and Nigeria so "parts within X km" can be tested.
+    /// Where each demo item is: spread over India, the USA, Nigeria and Ireland so "parts within X km" can be tested.
     /// Several are around Hyderabad at different distances (5–20 km) to try the radius chips.
     /// </summary>
     private static readonly Dictionary<string, (string Name, double Lat, double Lon)> SeedLocations = new()
@@ -50,7 +51,39 @@ public class DbInitializer
         ["honda-civic-alternator"] = ("Ikeja, Lagos", 6.6018, 3.3515),
         ["ford-ranger-led-headlight"] = ("Abuja", 9.0765, 7.3986),
         ["vw-golf-gearbox"] = ("Port Harcourt", 4.8156, 7.0498),
+        ["bmw-5-series-headlight"] = ("Dublin", 53.3498, -6.2603),
+        ["vw-passat-alloy-wheels"] = ("Cork", 51.8985, -8.4756),
     };
+
+    /// <summary>The Irish demo parts (added later): also added to an existing database that doesn't have them yet.</summary>
+    private static List<Auction> IrelandParts(DateTime now) =>
+    [
+        Part("bmw-5-series-headlight", "tom", now.AddDays(9), 350, 500, 25,
+            "LED headlight (right)", "63117214962", PartCategory.Lighting, ItemCondition.Used, 1,
+            "BMW", "5 Series", 2017, 2020, null,
+            "https://upload.wikimedia.org/wikipedia/commons/2/29/Car_headlamp.png",
+            "Right-hand LED headlight from a G30 5 Series. Clear lens, all mounting tabs intact, fully working."),
+        Part("vw-passat-alloy-wheels", "tom", now.AddDays(12), 450, 700, 25,
+            "17\" alloy wheels (set of 4)", "3G0601025", PartCategory.WheelsAndTyres, ItemCondition.Used, 4,
+            "Volkswagen", "Passat", 2015, 2022, null,
+            "https://thumb.wikimedia.org/wikipedia/commons/thumb/b/bb/Wheel%2C_IAA_2017%2C_Frankfurt_%281Y7A3040%29.jpg/960px-Wheel%2C_IAA_2017%2C_Frankfurt_%281Y7A3040%29.jpg",
+            "Set of four 17\" alloys, 7J x 17 ET40. Light kerb marks on one wheel, no buckles. Tyres not included."),
+    ];
+
+    private static List<string> AddIrelandParts(AuctionDbContext context, WebApplication app)
+    {
+        if (app.Environment.IsEnvironment("Test")) return [];
+
+        var existing = context.Auctions.Select(x => x.Id).ToHashSet();
+        var missing = IrelandParts(DateTime.UtcNow).Where(x => !existing.Contains(x.Id)).ToList();
+        if (missing.Count == 0) return [];
+
+        foreach (var auction in missing) ApplySeedLocation(auction.Item);
+        context.Auctions.AddRange(missing);
+        context.SaveChanges();
+        Console.WriteLine($"Added {missing.Count} Irish demo auctions");
+        return missing.Select(x => x.Id).ToList();
+    }
 
     private static void ApplySeedLocation(Item item)
     {
@@ -210,6 +243,8 @@ public class DbInitializer
                 "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/2e/Manual_transmission_in_2nd-gear.jpg/960px-Manual_transmission_in_2nd-gear.jpg",
                 "Rebuilt 02Q 6-speed manual for the 2.0 TDI Golf Mk7. New synchros and bearings, 6 month warranty.")
         };
+
+        auctions.AddRange(IrelandParts(now));
 
         foreach (var auction in auctions) ApplySeedLocation(auction.Item);
 

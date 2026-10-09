@@ -11,7 +11,7 @@ public record CityCountry(string Code, string Name, IReadOnlyList<City> Cities, 
 public record NearestPlace(string Name, string? CountryCode, double DistanceKm, string? CityName);
 
 /// <summary>
-/// Built-in city list (India, USA, Nigeria) for the location screens and for naming GPS points.
+/// Built-in city list (India, USA, Nigeria, Ireland) for the location screens and for naming GPS points.
 /// Free and offline — no maps API.
 /// </summary>
 public static class CityCatalog
@@ -80,6 +80,19 @@ public static class CityCatalog
             C("NG", "Enugu", 6.4584, 7.5464),
             C("NG", "Abeokuta", 7.1475, 3.3619),
         ], PopularCount: 6),
+        ["IE"] = new CityCountry("IE", "Ireland",
+        [
+            C("IE", "Dublin", 53.3498, -6.2603),
+            C("IE", "Cork", 51.8985, -8.4756),
+            C("IE", "Galway", 53.2707, -9.0568),
+            C("IE", "Limerick", 52.6638, -8.6267),
+            C("IE", "Waterford", 52.2593, -7.1101),
+            C("IE", "Kilkenny", 52.6541, -7.2448),
+            C("IE", "Drogheda", 53.7179, -6.3561),
+            C("IE", "Dundalk", 54.0090, -6.4049),
+            C("IE", "Sligo", 54.2766, -8.4761),
+            C("IE", "Athlone", 53.4239, -7.9407),
+        ], PopularCount: 6),
     };
 
     private static IEnumerable<City> AllCities => Countries.Values.SelectMany(c => c.Cities);
@@ -90,7 +103,7 @@ public static class CityCatalog
     public static IReadOnlyList<City> Popular(CityCountry country) => country.Cities.Take(country.PopularCount).ToList();
 
     /// <summary>
-    /// Cities in all three countries matching <paramref name="query"/> (case-insensitive):
+    /// Cities in all four countries matching <paramref name="query"/> (case-insensitive):
     /// names starting with it first, then the given country first, then names containing it.
     /// </summary>
     public static IReadOnlyList<City> Search(string? query, string? preferCountry = null, int limit = 10)

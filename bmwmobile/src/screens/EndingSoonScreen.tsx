@@ -5,10 +5,12 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
 import { Badge } from '../components/Badge';
+import { useMoney } from '../location/useMoney';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'EndingSoon'>;
 
 export const EndingSoonScreen: React.FC<Props> = ({ route, navigation }) => {
+  const money = useMoney();
   const { auction } = route.params;
 
   return (
@@ -25,14 +27,14 @@ export const EndingSoonScreen: React.FC<Props> = ({ route, navigation }) => {
         <View style={styles.card}>
           <Text style={styles.label}>LIVE COUNTDOWN</Text>
           <Text style={styles.timer}>14m : 28s</Text>
-          <Text style={styles.currentBid}>Current High Bid: ${auction.currentHighBid.toLocaleString()}</Text>
+          <Text style={styles.currentBid}>Current High Bid: {money(auction.currentHighBid)}</Text>
         </View>
 
         <TouchableOpacity 
           style={styles.bidBtn}
           onPress={() => navigation.navigate('PlaceBidModal', { auction })}
         >
-          <Text style={styles.bidText}>PLACE LAST-MINUTE BID (${(auction.currentHighBid + 250).toLocaleString()})</Text>
+          <Text style={styles.bidText}>PLACE LAST-MINUTE BID ({money((auction.currentHighBid + 250))})</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>

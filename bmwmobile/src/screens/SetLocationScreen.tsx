@@ -15,7 +15,7 @@ import { useLocations } from '../location/LocationContext';
 import { LocationApi } from '../services/locationApi';
 import { errorMessage } from '../services/authApi';
 import type { City, CountryCode, PickedPlace } from '../types/location';
-import { countryFromPhone, DEFAULT_RADIUS_KM, LABEL_OPTIONS, RADIUS_OPTIONS_KM, radiusSummary } from '../utils/geo';
+import { COUNTRY_CODES, countryFromPhone, DEFAULT_RADIUS_KM, formatRadius, LABEL_OPTIONS, nearestRadiusKm, radiusOptionsKm, radiusSummary, REGIONS } from '../utils/geo';
 import { getCurrentPosition, GpsError } from '../utils/gps';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'SetLocation'>;
@@ -47,7 +47,7 @@ export const SetLocationScreen: React.FC<Props> = ({ navigation, route }) => {
   const [radiusKm, setRadiusKm] = useState<number>(editing?.radiusKm ?? DEFAULT_RADIUS_KM);
   const [makePrimary, setMakePrimary] = useState(false);
 
-  // Popular chips follow GPS / phone country: India, USA or Nigeria.
+  // Popular chips follow GPS / phone country: India, USA, Nigeria or Ireland.
   const [country, setCountry] = useState<CountryCode>(editing?.countryCode ?? countryFromPhone(user?.phoneNumber));
   const [popular, setPopular] = useState<City[]>([]);
   const [popularLoading, setPopularLoading] = useState(true);
@@ -73,7 +73,7 @@ export const SetLocationScreen: React.FC<Props> = ({ navigation, route }) => {
     };
   }, [country]);
 
-  // City search (India, USA, Nigeria), debounced; late answers are ignored.
+  // City search (India, USA, Nigeria, Ireland), debounced; late answers are ignored.
   useEffect(() => {
     const q = query.trim();
     if (!q) {
@@ -117,6 +117,13 @@ export const SetLocationScreen: React.FC<Props> = ({ navigation, route }) => {
     }
   };
 
+  // km everywhere except the USA (miles): follows the picked place, else the country tab.
+  const unitCountry = place?.countryCode ?? country;
+  const radiusOptions = useMemo(() => radiusOptionsKm(unitCountry), [unitCountry]);
+  useEffect(() => {
+    setRadiusKm(r => (radiusOptions.includes(r) ? r : nearestRadiusKm(r, unitCountry)));
+  }, [radiusOptions, unitCountry]);
+
   const finalLabel = label === 'Custom' ? customLabel.trim() || 'Other' : label;
 
   const handleSave = async () => {
@@ -156,7 +163,7 @@ export const SetLocationScreen: React.FC<Props> = ({ navigation, route }) => {
   const title = mode === 'onboarding' ? 'Set Your Location' : mode === 'add' ? 'Add Location' : 'Edit Location';
   const subtitle = mode === 'onboarding' ? "We'll show BMW parts near you" : 'Saved places never move by themselves';
   const popularTitle = useMemo(
-    () => `POPULAR CITIES · ${country === 'IN' ? 'INDIA' : country === 'US' ? 'USA' : 'NIGERIA'}`,
+    () => `POPULAR CITIES · ${REGIONS[country].name.toUpperCase()}`,
     [country],
   );
 
@@ -220,10 +227,10 @@ export const SetLocationScreen: React.FC<Props> = ({ navigation, route }) => {
                   </View>
                 )}
                 <View style={styles.countryRow}>
-                  {(['IN', 'US', 'NG'] as CountryCode[]).map(c => (
+                  {COUNTRY_CODES.map(c => (
                     <TouchableOpacity key={c} onPress={() => setCountry(c)} hitSlop={6}>
                       <Text style={[styles.countryLink, country === c && styles.countryLinkActive]}>
-                        {c === 'IN' ? '🇮🇳 India' : c === 'US' ? '🇺🇸 USA' : '🇳🇬 Nigeria'}
+                        {REGIONS[c].flag} {REGIONS[c].name}
                       </Text>
                     </TouchableOpacity>
                   ))}
@@ -269,11 +276,11 @@ export const SetLocationScreen: React.FC<Props> = ({ navigation, route }) => {
           <View style={styles.section}>
             <Text style={styles.sectionHeader}>SEARCH RADIUS</Text>
             <View style={styles.chips}>
-              {RADIUS_OPTIONS_KM.map(km => (
-                <Chip key={km} label={`${km} km`} selected={radiusKm === km} onPress={() => setRadiusKm(km)} />
+              {radiusOptions.map(km => (
+                <Chip key={km} label={formatRadius(km, unitCountry)} selected={radiusKm === km} onPress={() => setRadiusKm(km)} />
               ))}
             </View>
-            <Text style={styles.summary}>{radiusSummary(radiusKm, place?.name)}</Text>
+            <Text style={styles.summary}>{radiusSummary(radiusKm, place?.name, unitCountry)}</Text>
           </View>
 
           {mode === 'add' ? (
@@ -363,6 +370,7 @@ const styles = StyleSheet.create({
   },
   countryRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: SPACING.md,
     marginTop: SPACING.xs,
   },

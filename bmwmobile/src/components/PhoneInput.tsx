@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, Modal, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
-import { PHONE_COUNTRIES, PhoneCountry, digitsOnly, maxLength } from '../utils/phone';
+import { PHONE_COUNTRIES, PhoneCountry, maxLength, nationalDigits } from '../utils/phone';
 
 interface PhoneInputProps {
   country: PhoneCountry;
@@ -12,16 +12,13 @@ interface PhoneInputProps {
   error?: string | null;
 }
 
-/** Mobile number with a country code picker (India, USA, Nigeria). */
+/** Mobile number with a country code picker (India, USA, Nigeria, Ireland). */
 export const PhoneInput: React.FC<PhoneInputProps> = ({ country, onCountryChange, value, onChangeText, error }) => {
   const insets = useSafeAreaInsets();
   const [open, setOpen] = useState(false);
 
-  // Nigerian numbers are often typed with a leading 0 (0803...), which isn't part of +234.
-  const clean = (text: string, c: PhoneCountry) => {
-    const digits = c.code === 'NG' ? digitsOnly(text).replace(/^0/, '') : digitsOnly(text);
-    return digits.slice(0, maxLength(c));
-  };
+  // Nigerian and Irish numbers are often typed with a leading 0, which isn't part of +234 / +353.
+  const clean = (text: string, c: PhoneCountry) => nationalDigits(c, text).slice(0, maxLength(c));
 
   return (
     <View>

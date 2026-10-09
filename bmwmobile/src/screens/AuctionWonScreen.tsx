@@ -5,10 +5,12 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
 import { Badge } from '../components/Badge';
+import { useMoney } from '../location/useMoney';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AuctionWon'>;
 
 export const AuctionWonScreen: React.FC<Props> = ({ route, navigation }) => {
+  const money = useMoney();
   const { auction } = route.params;
 
   return (
@@ -24,7 +26,7 @@ export const AuctionWonScreen: React.FC<Props> = ({ route, navigation }) => {
 
         <View style={styles.card}>
           <Text style={styles.label}>WINNING BID TOTAL</Text>
-          <Text style={styles.amount}>${auction.currentHighBid.toLocaleString()}</Text>
+          <Text style={styles.amount}>{money(auction.currentHighBid)}</Text>
 
           <View style={styles.row}>
             <Text style={styles.key}>Assigned Container:</Text>

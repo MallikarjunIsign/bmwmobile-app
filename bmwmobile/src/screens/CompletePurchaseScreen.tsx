@@ -6,10 +6,12 @@ import { RootStackParamList } from '../types/navigation';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
 import { Header } from '../components/Header';
 import { ApiService, MOCK_AUCTIONS } from '../services/api';
+import { useMoney } from '../location/useMoney';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CompletePurchase'>;
 
 export const CompletePurchaseScreen: React.FC<Props> = ({ route, navigation }) => {
+  const money = useMoney();
   const { auctionId, auction: initialAuction } = route.params;
   const auction = initialAuction || MOCK_AUCTIONS[0];
 
@@ -48,11 +50,11 @@ export const CompletePurchaseScreen: React.FC<Props> = ({ route, navigation }) =
 
           <View style={styles.row}>
             <Text style={styles.key}>Winning Auction Bid:</Text>
-            <Text style={styles.val}>${winningBid.toLocaleString()}</Text>
+            <Text style={styles.val}>{money(winningBid)}</Text>
           </View>
           <View style={styles.row}>
             <Text style={styles.key}>OKOH Clearing Fee (3%):</Text>
-            <Text style={styles.val}>${buyerFee.toFixed(2)}</Text>
+            <Text style={styles.val}>{money(buyerFee, 2)}</Text>
           </View>
         </View>
 
@@ -70,7 +72,7 @@ export const CompletePurchaseScreen: React.FC<Props> = ({ route, navigation }) =
           <View style={{ flex: 1 }}>
             <View style={styles.optionHeader}>
               <Text style={styles.optionTitle}>Free Port Pickup Pass</Text>
-              <Text style={styles.freeBadge}>FREE ($0)</Text>
+              <Text style={styles.freeBadge}>FREE ({money(0)})</Text>
             </View>
             <Text style={styles.optionSub}>Pick up directly at customs warehouse in {pickupPort} with QR pass.</Text>
           </View>
@@ -87,7 +89,7 @@ export const CompletePurchaseScreen: React.FC<Props> = ({ route, navigation }) =
           <View style={{ flex: 1 }}>
             <View style={styles.optionHeader}>
               <Text style={styles.optionTitle}>Doorstep Dispatch Delivery</Text>
-              <Text style={styles.priceTag}>+$45.00</Text>
+              <Text style={styles.priceTag}>+{money(45, 2)}</Text>
             </View>
             <Text style={styles.optionSub}>Flat rate dispatch to your garage or workshop in Nigeria.</Text>
           </View>
@@ -138,7 +140,7 @@ export const CompletePurchaseScreen: React.FC<Props> = ({ route, navigation }) =
         <View style={styles.totalCard}>
           <View style={styles.totalRow}>
             <Text style={styles.totalLabel}>TOTAL AMOUNT DUE:</Text>
-            <Text style={styles.totalValue}>${totalCost.toLocaleString()}</Text>
+            <Text style={styles.totalValue}>{money(totalCost)}</Text>
           </View>
         </View>
 
@@ -149,7 +151,7 @@ export const CompletePurchaseScreen: React.FC<Props> = ({ route, navigation }) =
           activeOpacity={0.8}
         >
           <Text style={styles.payText}>
-            {submitting ? 'PROCESSING ORDER...' : `CONFIRM PAYMENT ($${totalCost.toLocaleString()})`}
+            {submitting ? 'PROCESSING ORDER...' : `CONFIRM PAYMENT (${money(totalCost)})`}
           </Text>
         </TouchableOpacity>
       </ScrollView>

@@ -6,10 +6,12 @@ import { RootStackParamList } from '../types/navigation';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
 import { Header } from '../components/Header';
 import { ApiService, MOCK_PURCHASES } from '../services/api';
+import { useMoney } from '../location/useMoney';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'PickupReceive'>;
 
 export const PickupReceiveScreen: React.FC<Props> = ({ route, navigation }) => {
+  const money = useMoney();
   const { purchase: initialPurchase } = route.params;
   const purchase = initialPurchase || MOCK_PURCHASES[0];
 
@@ -63,7 +65,7 @@ export const PickupReceiveScreen: React.FC<Props> = ({ route, navigation }) => {
           </View>
           <View style={styles.row}>
             <Text style={styles.key}>Total Paid:</Text>
-            <Text style={styles.valSuccess}>${purchase.totalAmount.toLocaleString()}</Text>
+            <Text style={styles.valSuccess}>{money(purchase.totalAmount)}</Text>
           </View>
           <View style={styles.row}>
             <Text style={styles.key}>Current Status:</Text>

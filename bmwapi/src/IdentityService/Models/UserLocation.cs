@@ -21,7 +21,7 @@ public class UserLocation
     public double Longitude { get; set; }
     public int RadiusKm { get; set; }
 
-    /// <summary>IN / US / NG when known (for the popular-city chips).</summary>
+    /// <summary>IN / US / NG / IE when known (for the popular-city chips).</summary>
     public string? CountryCode { get; set; }
 
     public bool IsPrimary { get; set; }

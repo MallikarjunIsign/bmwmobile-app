@@ -4,8 +4,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../auth/AuthContext';
 import { LocationApi } from '../services/locationApi';
 import type { NearFilter } from '../services/api';
-import type { MyLocations, SaveLocationRequest, UserLocation } from '../types/location';
-import { haversineKm, MOVE_THRESHOLD_KM } from '../utils/geo';
+import type { CountryCode, MyLocations, SaveLocationRequest, UserLocation } from '../types/location';
+import { countryFromPhone, haversineKm, MOVE_THRESHOLD_KM } from '../utils/geo';
 import { getCurrentPosition } from '../utils/gps';
 
 type LocationStatus = 'idle' | 'loading' | 'ready' | 'error';
@@ -21,6 +21,8 @@ type LocationContextValue = {
   selected: UserLocation | null;
   /** Filter for the parts lists: within the selected location's radius (undefined for guests). */
   near: NearFilter | undefined;
+  /** Country of the selected location (else the phone number's): decides km/miles and the currency. */
+  country: CountryCode;
   select: (id: string) => void;
   reload: () => Promise<void>;
   add: (body: SaveLocationRequest) => Promise<void>;
@@ -127,6 +129,8 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     [selected?.latitude, selected?.longitude, selected?.radiusKm], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
+  const country = selected?.countryCode ?? countryFromPhone(user?.phoneNumber);
+
   const select = useCallback(
     (id: string) => {
       setSelectedId(id);
@@ -157,6 +161,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
       primary,
       selected,
       near,
+      country,
       select,
       reload,
       add,
@@ -166,7 +171,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
       useCurrentLocation,
       setAutoUpdate,
     }),
-    [status, data, primary, selected, near, select, reload, add, update, remove, setPrimary, useCurrentLocation, setAutoUpdate],
+    [status, data, primary, selected, near, country, select, reload, add, update, remove, setPrimary, useCurrentLocation, setAutoUpdate],
   );
 
   return <LocationContext.Provider value={value}>{children}</LocationContext.Provider>;

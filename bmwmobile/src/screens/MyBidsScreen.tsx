@@ -8,6 +8,7 @@ import { MainTabParamList, RootStackParamList } from '../types/navigation';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
 import { MOCK_AUCTIONS } from '../services/api';
 import { AuctionCard } from '../components/AuctionCard';
+import { useMoney } from '../location/useMoney';
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<MainTabParamList, 'MyBids'>,
@@ -15,6 +16,7 @@ type Props = CompositeScreenProps<
 >;
 
 export const MyBidsScreen: React.FC<Props> = ({ navigation }) => {
+  const money = useMoney();
   const [activeTab, setActiveTab] = useState<'Active' | 'Won' | 'Ended'>('Active');
 
   const activeBids = MOCK_AUCTIONS;
@@ -66,7 +68,7 @@ export const MyBidsScreen: React.FC<Props> = ({ navigation }) => {
             >
               <View style={{ flex: 1 }}>
                 <Text style={styles.outbidTitle}>⚠️ OUTBID ALERT: 2019 BMW 330i LaserLight</Text>
-                <Text style={styles.outbidSub}>Current bid: $2,450 by autoworks_lagos. Tap to counter bid.</Text>
+                <Text style={styles.outbidSub}>Current bid: {money(2450)} by autoworks_lagos. Tap to counter bid.</Text>
               </View>
               <Text style={styles.outbidArrow}>Outbid →</Text>
             </TouchableOpacity>
@@ -85,7 +87,7 @@ export const MyBidsScreen: React.FC<Props> = ({ navigation }) => {
         {activeTab === 'Won' && (
           <View style={styles.wonCard}>
             <Text style={styles.wonTitle}>🎉 AUCTION WON: 2021 BMW M4 Engine Assembly</Text>
-            <Text style={styles.wonAmount}>Winning Bid: $14,500</Text>
+            <Text style={styles.wonAmount}>Winning Bid: {money(14500)}</Text>
             <Text style={styles.wonPort}>Destination: Lagos Apapa Port (Container MSCU7821940)</Text>
 
             <TouchableOpacity 
@@ -100,7 +102,7 @@ export const MyBidsScreen: React.FC<Props> = ({ navigation }) => {
         {activeTab === 'Ended' && (
           <View style={styles.endedCard}>
             <Text style={styles.endedTitle}>2020 BMW X3 M-Sport Steering Wheel</Text>
-            <Text style={styles.endedStatus}>Ended • Sold for $850</Text>
+            <Text style={styles.endedStatus}>Ended • Sold for {money(850)}</Text>
             <TouchableOpacity 
               style={styles.reorderBtn}
               onPress={() => navigation.navigate('OrderPartRequest', { prefillPart: 'BMW X3 M Steering Wheel' })}

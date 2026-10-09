@@ -5,10 +5,12 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
 import { Badge } from '../components/Badge';
+import { useMoney } from '../location/useMoney';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'PaymentConfirmed'>;
 
 export const PaymentConfirmedScreen: React.FC<Props> = ({ route, navigation }) => {
+  const money = useMoney();
   const { purchase } = route.params;
 
   return (
@@ -39,7 +41,7 @@ export const PaymentConfirmedScreen: React.FC<Props> = ({ route, navigation }) =
           </View>
           <View style={styles.row}>
             <Text style={styles.key}>Total Paid:</Text>
-            <Text style={styles.valSuccess}>${purchase.totalAmount.toLocaleString()}</Text>
+            <Text style={styles.valSuccess}>{money(purchase.totalAmount)}</Text>
           </View>
           <View style={styles.row}>
             <Text style={styles.key}>Assigned Container:</Text>

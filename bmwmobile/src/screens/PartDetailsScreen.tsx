@@ -9,10 +9,12 @@ import { Badge } from '../components/Badge';
 import { ApiService } from '../services/api';
 import { Auction } from '../types/models';
 import { isCurrentUser } from '../auth/session';
+import { useMoney } from '../location/useMoney';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'PartDetails'>;
 
 export const PartDetailsScreen: React.FC<Props> = ({ route, navigation }) => {
+  const money = useMoney();
   const { auctionId, auction: initialAuction } = route.params;
   const [auction, setAuction] = useState<Auction | undefined>(initialAuction);
 
@@ -53,7 +55,7 @@ export const PartDetailsScreen: React.FC<Props> = ({ route, navigation }) => {
           <View style={styles.priceStrip}>
             <View>
               <Text style={styles.priceLabel}>Current Highest Bid</Text>
-              <Text style={styles.priceValue}>${auction.currentHighBid.toLocaleString()}</Text>
+              <Text style={styles.priceValue}>{money(auction.currentHighBid)}</Text>
             </View>
             <View style={styles.bidBadge}>
               <Text style={styles.bidText}>{auction.bidCount} Bids Placed</Text>
@@ -65,7 +67,7 @@ export const PartDetailsScreen: React.FC<Props> = ({ route, navigation }) => {
             <View style={styles.winningBanner}>
               <Text style={styles.winningText}>✓ You are currently the HIGHEST BIDDER</Text>
               {auction.isAutoBidActive && (
-                <Text style={styles.autoBidText}>⚡ Auto-Bid Protection Active up to ${auction.userMaxAutoBid?.toLocaleString()}</Text>
+                <Text style={styles.autoBidText}>⚡ Auto-Bid Protection Active up to {money(auction.userMaxAutoBid ?? 0)}</Text>
               )}
             </View>
           ) : null}
@@ -127,7 +129,7 @@ export const PartDetailsScreen: React.FC<Props> = ({ route, navigation }) => {
             style={styles.bidBarBtn} 
             onPress={() => navigation.navigate('PlaceBidModal', { auction })}
           >
-            <Text style={styles.bidBarText}>PLACE BID NOW (${(auction.currentHighBid + 250).toLocaleString()})</Text>
+            <Text style={styles.bidBarText}>PLACE BID NOW ({money((auction.currentHighBid + 250))})</Text>
           </TouchableOpacity>
         )}
       </View>

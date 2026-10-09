@@ -8,7 +8,7 @@ using static Duende.IdentityServer.IdentityServerConstants;
 
 namespace IdentityService.Controllers;
 
-/// <summary>City list (India, USA, Nigeria) for the location screens. Built in and free — no maps API.</summary>
+/// <summary>City list (India, USA, Nigeria, Ireland) for the location screens. Built in and free — no maps API.</summary>
 [ApiController]
 [AllowAnonymous]
 [Route("api/locations")]
@@ -16,7 +16,7 @@ namespace IdentityService.Controllers;
 [Produces("application/json")]
 public class LocationsController : ControllerBase
 {
-    /// <summary>The six cities shown as quick-pick chips for a country (IN default, US, NG).</summary>
+    /// <summary>The six cities shown as quick-pick chips for a country (IN default, US, NG, IE).</summary>
     [HttpGet("popular-cities")]
     [ProducesResponseType(typeof(PopularCitiesResponse), StatusCodes.Status200OK)]
     public ActionResult<PopularCitiesResponse> PopularCities([FromQuery] string? country = null)
@@ -26,7 +26,7 @@ public class LocationsController : ControllerBase
         return Ok(new PopularCitiesResponse(c.Code, c.Name, CityCatalog.Popular(c).Select(ToDto).ToList()));
     }
 
-    /// <summary>Up to 10 cities in all three countries (names starting with the text first).</summary>
+    /// <summary>Up to 10 cities in all four countries (names starting with the text first).</summary>
     [HttpGet("cities")]
     [ProducesResponseType(typeof(IReadOnlyList<CityDto>), StatusCodes.Status200OK)]
     public ActionResult<IReadOnlyList<CityDto>> Cities([FromQuery] string? q, [FromQuery] string? country = null) =>

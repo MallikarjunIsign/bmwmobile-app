@@ -13,5 +13,7 @@ test('app starts on the Splash screen', async () => {
     .flat()
     .join(' ');
   expect(texts).toContain('ENTER MARKETPLACE');
-  expect(texts).toContain('Set Pickup Port & Garage');
+  // No way into the marketplace without signing in.
+  expect(texts).not.toContain('Set Pickup Port & Garage');
+  expect(texts).not.toContain('Guest');
 });

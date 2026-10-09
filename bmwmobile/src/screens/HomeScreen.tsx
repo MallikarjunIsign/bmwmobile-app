@@ -13,7 +13,7 @@ import { Badge } from '../components/Badge';
 import { useAuth } from '../auth/AuthContext';
 import { LocationSelector } from '../components/LocationSelector';
 import { useLocations } from '../location/LocationContext';
-import { noPartsNearMessage } from '../utils/geo';
+import { countryName, noPartsNearMessage } from '../utils/geo';
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<MainTabParamList, 'Home'>,
@@ -27,7 +27,7 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
   const [loading, setLoading] = useState(false);
   const [selectedVehicle, setSelectedVehicle] = useState('All Garage');
 
-  // Signed-in users see the parts within their selected location's radius; guests see everything.
+  // The parts within the selected location's radius.
   const loadData = async () => {
     setLoading(true);
     const data = await ApiService.getAuctions(undefined, near);
@@ -41,10 +41,7 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
   }, [near]);
 
   const handleAccountPress = () => {
-    if (!user) {
-      navigation.navigate('Login');
-      return;
-    }
+    if (!user) return;
     Alert.alert('Log out', `Signed in as ${user.email}`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Log out', style: 'destructive', onPress: () => logout() },
@@ -55,15 +52,21 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
     <SafeAreaView style={styles.container}>
       {/* Top Banner Bar */}
       <View style={styles.topHeader}>
-        <View>
+        <View style={styles.headerLeft}>
           <Text style={styles.brandTitle}>OKOH PARTS ⚡</Text>
-          <Text style={styles.portSub}>Pickup Port: <Text style={styles.portBold}>Lagos Apapa Port</Text></Text>
-          {/* Signed-in user (tap to log out) or guest (tap to log in) */}
+          {/* Signed-in user (tap to log out), then the location the parts are shown for */}
           <TouchableOpacity onPress={handleAccountPress} hitSlop={8} activeOpacity={0.7}>
-            <Text style={styles.userLine}>
-              👤 {user ? user.fullName : 'Guest'} · <Text style={styles.portBold}>{user ? 'Log out' : 'Log in'}</Text>
+            <Text style={styles.userLine} numberOfLines={1}>
+              👤 {user?.fullName} · <Text style={styles.linkBold}>Log out</Text>
             </Text>
           </TouchableOpacity>
+          {selected ? (
+            <TouchableOpacity onPress={() => navigation.navigate('ManageLocations')} hitSlop={8} activeOpacity={0.7}>
+              <Text style={styles.locationLine} numberOfLines={1}>
+                📍 {[selected.placeName, countryName(selected.countryCode)].filter(Boolean).join(', ')}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
         <TouchableOpacity 
           style={styles.requestBtn} 
@@ -113,12 +116,10 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
           </ScrollView>
         </View>
 
-        {/* Which saved location the parts list is for (signed-in users) */}
-        {user ? (
-          <View style={styles.locationBar}>
-            <LocationSelector onManage={() => navigation.navigate('ManageLocations')} />
-          </View>
-        ) : null}
+        {/* Which saved location the parts list is for */}
+        <View style={styles.locationBar}>
+          <LocationSelector onManage={() => navigation.navigate('ManageLocations')} />
+        </View>
 
         {/* Live Auctions Ticker Section */}
         <View style={styles.sectionRow}>
@@ -180,25 +181,30 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
   },
+  headerLeft: {
+    flex: 1,
+    marginRight: SPACING.sm,
+  },
   brandTitle: {
     color: COLORS.text,
     fontSize: 18,
     fontWeight: '900',
     letterSpacing: 1,
   },
-  portSub: {
-    color: COLORS.textMuted,
-    fontSize: 11,
-    marginTop: 2,
-  },
-  portBold: {
+  linkBold: {
     color: COLORS.primaryGlow,
     fontWeight: '700',
   },
   userLine: {
+    color: COLORS.text,
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 4,
+  },
+  locationLine: {
     color: COLORS.textMuted,
     fontSize: 11,
-    marginTop: 4,
+    marginTop: 3,
   },
   requestBtn: {
     backgroundColor: COLORS.primary,

@@ -75,6 +75,7 @@ public class CityCatalogTests
     [InlineData(null, "Hyderabad,Bangalore,Delhi,Mumbai,Chennai,Pune")]
     [InlineData("US", "New York,Los Angeles,Chicago,Houston,Phoenix,Dallas")]
     [InlineData("ng", "Lagos,Abuja,Kano,Ibadan,Port Harcourt,Benin City")]
+    [InlineData("IE", "Dublin,Cork,Galway,Limerick,Waterford,Kilkenny")]
     public void Popular_IsFirstSixInOrder(string? country, string expected)
     {
         Assert.True(CityCatalog.TryGetCountry(country, out var c));
@@ -88,6 +89,7 @@ public class CityCatalogTests
     [InlineData(17.4849, 78.4138, "Hyderabad", "IN")]   // Kukatpally
     [InlineData(6.6018, 3.3515, "Lagos", "NG")]         // Ikeja
     [InlineData(40.7306, -73.9352, "New York", "US")]   // Brooklyn
+    [InlineData(53.2895, -6.1350, "Dublin", "IE")]      // Dún Laoghaire
     public void Describe_CloseToACity_UsesItsName(double lat, double lon, string name, string country)
     {
         var place = CityCatalog.Describe(lat, lon);
@@ -126,6 +128,7 @@ public class CityCatalogTests
     {
         Assert.Equal("Abeokuta", CityCatalog.Search("a", "NG").First().Name);
         Assert.Equal("Ahmedabad", CityCatalog.Search("a", "IN").First().Name);
+        Assert.Equal("Athlone", CityCatalog.Search("a", "IE").First().Name);
     }
 }
 

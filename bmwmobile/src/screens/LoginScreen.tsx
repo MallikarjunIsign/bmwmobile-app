@@ -144,12 +144,6 @@ export const LoginScreen: React.FC<Props> = ({ navigation, route }) => {
               </Text>
             </TouchableOpacity>
           </View>
-
-          <View style={styles.footer}>
-            <TouchableOpacity onPress={() => navigation.navigate('MainTabs')}>
-              <Text style={styles.guestText}>Continue as Guest Visitor →</Text>
-            </TouchableOpacity>
-          </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -167,7 +161,6 @@ const styles = StyleSheet.create({
   scroll: {
     flexGrow: 1,
     padding: SPACING.md,
-    justifyContent: 'space-between',
   },
   form: {
     marginTop: SPACING.sm,
@@ -197,14 +190,5 @@ const styles = StyleSheet.create({
   signUpLink: {
     color: COLORS.primaryGlow,
     fontWeight: '700',
-  },
-  footer: {
-    alignItems: 'center',
-    paddingVertical: SPACING.lg,
-  },
-  guestText: {
-    color: COLORS.textMuted,
-    fontSize: 14,
-    fontWeight: '600',
   },
 });

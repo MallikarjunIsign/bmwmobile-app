@@ -9,6 +9,7 @@ import { COLORS, SPACING, RADIUS } from '../theme/colors';
 import { ApiService } from '../services/api';
 import { Purchase } from '../types/models';
 import { Badge } from '../components/Badge';
+import { useMoney } from '../location/useMoney';
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<MainTabParamList, 'MyPurchases'>,
@@ -16,6 +17,7 @@ type Props = CompositeScreenProps<
 >;
 
 export const MyPurchasesScreen: React.FC<Props> = ({ navigation }) => {
+  const money = useMoney();
   const [purchases, setPurchases] = useState<Purchase[]>([]);
 
   useEffect(() => {
@@ -44,7 +46,7 @@ export const MyPurchasesScreen: React.FC<Props> = ({ navigation }) => {
               <View style={styles.cardHeaderCol}>
                 <Badge label={item.shippingStatus} variant="success" size="sm" />
                 <Text style={styles.itemTitle} numberOfLines={2}>{item.itemTitle}</Text>
-                <Text style={styles.totalPaid}>Paid Total: ${item.totalAmount.toLocaleString()}</Text>
+                <Text style={styles.totalPaid}>Paid Total: {money(item.totalAmount)}</Text>
               </View>
             </View>
 

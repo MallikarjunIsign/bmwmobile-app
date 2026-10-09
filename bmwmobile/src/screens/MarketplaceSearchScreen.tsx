@@ -11,7 +11,7 @@ import { Auction } from '../types/models';
 import { AuctionCard } from '../components/AuctionCard';
 import { LocationSelector } from '../components/LocationSelector';
 import { useLocations } from '../location/LocationContext';
-import { noPartsNearMessage } from '../utils/geo';
+import { formatRadius, noPartsNearMessage } from '../utils/geo';
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<MainTabParamList, 'Marketplace'>,
@@ -107,7 +107,7 @@ export const MarketplaceSearchScreen: React.FC<Props> = ({ navigation }) => {
       {/* Results Header */}
       <View style={styles.resultsHeader}>
         <Text style={styles.resultsCount}>
-          {auctions.length} BMW Part Auctions Found{selected ? ` within ${selected.radiusKm} km` : ''}
+          {auctions.length} BMW Part Auctions Found{selected ? ` within ${formatRadius(selected.radiusKm, selected.countryCode)}` : ''}
         </Text>
         <Text style={styles.sortLabel}>{selected ? 'Sort: Nearest First' : 'Sort: Ending Soonest ▾'}</Text>
       </View>
@@ -131,7 +131,7 @@ export const MarketplaceSearchScreen: React.FC<Props> = ({ navigation }) => {
             <Text style={styles.emptyDesc}>
               {selected && !loading
                 ? searchTerm
-                  ? `No parts matching "${searchTerm}" within ${selected.radiusKm} km of ${selected.label} – try a bigger radius.`
+                  ? `No parts matching "${searchTerm}" within ${formatRadius(selected.radiusKm, selected.countryCode)} of ${selected.label} – try a bigger radius.`
                   : noPartsNearMessage(selected)
                 : `We couldn't find active auctions matching "${searchTerm}".`}
             </Text>

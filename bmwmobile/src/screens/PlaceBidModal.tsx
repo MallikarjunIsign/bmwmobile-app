@@ -6,10 +6,13 @@ import { RootStackParamList } from '../types/navigation';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
 import { ApiService } from '../services/api';
 import { currentUsername } from '../auth/session';
+import { useCurrencyLabel, useMoney } from '../location/useMoney';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'PlaceBidModal'>;
 
 export const PlaceBidModal: React.FC<Props> = ({ route, navigation }) => {
+  const money = useMoney();
+  const currencyLabel = useCurrencyLabel();
   const { auction } = route.params;
   const minBid = auction.currentHighBid + 250;
   const [bidAmount, setBidAmount] = useState(minBid.toString());
@@ -45,8 +48,8 @@ export const PlaceBidModal: React.FC<Props> = ({ route, navigation }) => {
         {/* Current High Bid summary */}
         <View style={styles.currentSummary}>
           <Text style={styles.summaryLabel}>Current Highest Bid</Text>
-          <Text style={styles.summaryValue}>${auction.currentHighBid.toLocaleString()}</Text>
-          <Text style={styles.minIncrement}>Minimum Next Bid: ${minBid.toLocaleString()}</Text>
+          <Text style={styles.summaryValue}>{money(auction.currentHighBid)}</Text>
+          <Text style={styles.minIncrement}>Minimum Next Bid: {money(minBid)}</Text>
         </View>
 
         {/* Instant Increment Quick Chips */}
@@ -59,14 +62,14 @@ export const PlaceBidModal: React.FC<Props> = ({ route, navigation }) => {
               onPress={() => setBidAmount(val.toString())}
             >
               <Text style={[styles.quickChipText, parseFloat(bidAmount) === val && styles.quickChipTextActive]}>
-                ${val.toLocaleString()}
+                {money(val)}
               </Text>
             </TouchableOpacity>
           ))}
         </View>
 
         {/* Custom Bid Input */}
-        <Text style={styles.label}>YOUR BID AMOUNT ($ USD)</Text>
+        <Text style={styles.label}>YOUR BID AMOUNT ({currencyLabel})</Text>
         <View style={styles.inputWrap}>
           <Text style={styles.currencySymbol}>$</Text>
           <TextInput
@@ -108,11 +111,11 @@ export const PlaceBidModal: React.FC<Props> = ({ route, navigation }) => {
         <View style={styles.breakdown}>
           <View style={styles.breakRow}>
             <Text style={styles.breakKey}>Winning Bid Amount:</Text>
-            <Text style={styles.breakVal}>${numericBid.toLocaleString()}</Text>
+            <Text style={styles.breakVal}>{money(numericBid)}</Text>
           </View>
           <View style={styles.breakRow}>
             <Text style={styles.breakKey}>OKOH Buyer Clearing Fee (3%):</Text>
-            <Text style={styles.breakVal}>${buyerFee.toFixed(2)}</Text>
+            <Text style={styles.breakVal}>{money(buyerFee, 2)}</Text>
           </View>
           <View style={styles.breakRow}>
             <Text style={styles.breakKey}>Est. Container Ocean Shipping:</Text>
@@ -120,7 +123,7 @@ export const PlaceBidModal: React.FC<Props> = ({ route, navigation }) => {
           </View>
           <View style={[styles.breakRow, styles.totalRow]}>
             <Text style={styles.totalKey}>TOTAL ESTIMATED COST:</Text>
-            <Text style={styles.totalVal}>${(numericBid + buyerFee).toLocaleString()}</Text>
+            <Text style={styles.totalVal}>{money((numericBid + buyerFee))}</Text>
           </View>
         </View>
 
@@ -131,7 +134,7 @@ export const PlaceBidModal: React.FC<Props> = ({ route, navigation }) => {
           activeOpacity={0.8}
         >
           <Text style={styles.confirmText}>
-            {submitting ? 'CONFIRMING BID...' : `CONFIRM BID OF $${numericBid.toLocaleString()}`}
+            {submitting ? 'CONFIRMING BID...' : `CONFIRM BID OF ${money(numericBid)}`}
           </Text>
         </TouchableOpacity>
       </ScrollView>
