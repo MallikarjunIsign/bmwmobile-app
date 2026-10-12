@@ -1,5 +1,5 @@
 # bmwmobile
-bidmywork mobile code – OKOH Parts app (React Native CLI 0.87, TypeScript).
+bidmywork mobile code – BidMyParts app (React Native CLI 0.87, TypeScript).
 
 ## Requirements
 - Node 22.11+
@@ -29,7 +29,8 @@ npm run lint
 ```
 
 ## Notes
-- Package / bundle id: `com.bidmywork.app`. Display name: "OKOH Parts".
+- Package / bundle id: `com.bidmywork.app` (kept on purpose: changing it breaks the Google sign-in OAuth client and existing installs). Display name: "BidMyParts".
+- Feature switches are in `src/config.ts` (`FEATURES`). `containers: false` hides all container / port logistics.
 - Debug builds are signed with the standard React Native `android/app/debug.keystore`
   (SHA-1 `5E:8F:16:06:2E:A3:CD:2C:4A:0D:54:78:76:BA:A6:F3:8C:AB:F6:25`, registered for Google sign-in).
 - Release signing reads `BIDMYWORK_UPLOAD_*` values from `~/.gradle/gradle.properties` (never commit them).

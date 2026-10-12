@@ -23,7 +23,29 @@ public class Auction
     public EndReason? EndReason { get; set; }
     // Set while Status = ReserveNotMet: the seller can accept the high bid until this time.
     public DateTime? SellerDecisionDeadline { get; set; }
+    /// <summary>Accepted bids so far (from BidPlaced).</summary>
+    public int BidCount { get; set; }
+    /// <summary>The seller's contact (from the sign-in token), only ever shown to the buyer after a sale.</summary>
+    [MaxLength(200)]
+    public string? SellerEmail { get; set; }
+    [MaxLength(30)]
+    public string? SellerPhone { get; set; }
+    /// <summary>The seller's display name (the "name" claim), shown on cards; null on older listings.</summary>
+    [MaxLength(100)]
+    public string? SellerName { get; set; }
+    public SaleType SaleType { get; set; } = SaleType.Auction;
+    /// <summary>The seller's rating (copied from SellerRatings when it changes), for cards, details and search.</summary>
+    public double? SellerRatingAverage { get; set; }
+    public int SellerRatingCount { get; set; }
+    /// <summary>FixedPrice: units bought so far. A concurrency token, so two buyers can't take the last unit.</summary>
+    [ConcurrencyCheck]
+    public int QuantitySold { get; set; }
     public required Item Item { get; set; }
+
+    /// <summary>FixedPrice: units listed (parts: the quantity, vehicles: 1).</summary>
+    public int QuantityListed => Item.ItemType == ItemType.Vehicle ? 1 : Math.Max(Item.Quantity ?? 1, 1);
+
+    public int QuantityAvailable => SaleType == SaleType.FixedPrice ? Math.Max(QuantityListed - QuantitySold, 0) : 0;
 
     public bool HasReservePrice() => ReservePrice > StartingPrice;
 

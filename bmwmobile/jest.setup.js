@@ -23,6 +23,19 @@ jest.mock('@react-native-google-signin/google-signin', () => ({
   statusCodes: {},
 }));
 
+// Firebase isn't configured in tests: push is simply off.
+jest.mock('@react-native-firebase/app', () => ({ getApps: () => [] }));
+jest.mock('@react-native-firebase/messaging', () => ({
+  AuthorizationStatus: { AUTHORIZED: 1, PROVISIONAL: 2 },
+  getMessaging: jest.fn(),
+  getToken: jest.fn(),
+  onTokenRefresh: jest.fn(() => () => undefined),
+  requestPermission: jest.fn(),
+  getInitialNotification: jest.fn(async () => null),
+  onNotificationOpenedApp: jest.fn(() => () => undefined),
+  setBackgroundMessageHandler: jest.fn(),
+}));
+
 jest.mock('@react-native-async-storage/async-storage', () => ({
   __esModule: true,
   default: { getItem: jest.fn(async () => null), setItem: jest.fn(async () => undefined), removeItem: jest.fn(async () => undefined) },
@@ -42,3 +55,9 @@ jest.mock('@invertase/react-native-apple-authentication', () => ({
   default: { isSupported: false, Operation: {}, Scope: {}, Error: {}, performRequest: jest.fn() },
   AppleButton: () => null,
 }));
+
+jest.mock('react-native-image-picker', () => ({
+  launchCamera: jest.fn(async () => ({ didCancel: true })),
+  launchImageLibrary: jest.fn(async () => ({ didCancel: true })),
+}));
+

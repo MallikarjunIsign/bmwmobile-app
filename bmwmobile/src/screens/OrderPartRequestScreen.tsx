@@ -5,105 +5,147 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
 import { Header } from '../components/Header';
-import { ApiService } from '../services/api';
-import { useCurrencyLabel, useMoney } from '../location/useMoney';
+import { Notice } from '../components/Notice';
+import { ApiService, ServerError } from '../services/api';
+import { useCurrencyLabel } from '../location/useMoney';
+import { useLocations } from '../location/LocationContext';
+import { FEATURES } from '../config';
+import { formatRadius } from '../utils/geo';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'OrderPartRequest'>;
 
+/**
+ * Custom order: "There are no parts available for this search – create a custom order and get notified when the
+ * part is available". Pre-filled from the search; saved with the buyer's automatic location and radius so only
+ * listings nearby trigger the notification.
+ */
 export const OrderPartRequestScreen: React.FC<Props> = ({ route, navigation }) => {
-  const money = useMoney();
   const currencyLabel = useCurrencyLabel();
-  const { prefillMake, prefillModel, prefillPart } = route.params || {};
+  const { location, country } = useLocations();
+  const { prefillMake, prefillModel, prefillPart, prefillYear, prefillPartNumber, searchText } = route.params || {};
 
-  const [make, setMake] = useState(prefillMake || 'BMW');
-  const [model, setModel] = useState(prefillModel || 'M3 CS / 330i G20');
-  const [year, setYear] = useState('2021');
-  const [partName, setPartName] = useState(prefillPart || 'S58 Engine Wiring Harness & ECU');
-  const [vin, setVin] = useState('WBS83AY050FP92014');
-  const [specs, setSpecs] = useState('Grade A original OEM part from Germany. No cracks.');
-  const [maxBudget, setMaxBudget] = useState('2500');
+  const [partName, setPartName] = useState(prefillPart || searchText || '');
+  const [partNumber, setPartNumber] = useState(prefillPartNumber || '');
+  const [make, setMake] = useState(prefillMake || '');
+  const [model, setModel] = useState(prefillModel || '');
+  const [year, setYear] = useState(prefillYear ? String(prefillYear) : '');
+  const [specs, setSpecs] = useState('');
+  const [maxBudget, setMaxBudget] = useState('');
   const [preferredPort, setPreferredPort] = useState('Lagos Apapa Port');
-  const [checkingFeasibility, setCheckingFeasibility] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async () => {
-    setCheckingFeasibility(true);
-    const request = await ApiService.createPartRequest({
-      make,
-      model,
-      year: parseInt(year, 10) || 2021,
-      partName,
-      vin,
-      specs,
-      maxBudget: parseFloat(maxBudget) || 2500,
-      preferredPort,
-    });
-    setCheckingFeasibility(false);
-    navigation.replace('RequestSubmitted', { request });
+    if (!partName.trim() && !partNumber.trim()) {
+      setError('Tell us which part you need (a part name or a part number).');
+      return;
+    }
+    const yearValue = year.trim() ? parseInt(year, 10) : 0;
+    if (year.trim() && (Number.isNaN(yearValue) || yearValue < 1900 || yearValue > new Date().getFullYear() + 1)) {
+      setError('Enter a valid year, or leave it empty for any year.');
+      return;
+    }
+
+    setSubmitting(true);
+    setError(null);
+    try {
+      const request = await ApiService.createPartRequest({
+        searchText: searchText || undefined,
+        partName: partName.trim() || undefined,
+        partNumber: partNumber.trim() || undefined,
+        make: make.trim() || undefined,
+        model: model.trim() || undefined,
+        year: yearValue || undefined,
+        specs: specs.trim() || undefined,
+        maxBudget: parseFloat(maxBudget) || undefined,
+        // Only listings within the buyer's radius will match (country-wide when the location is unknown).
+        locationName: location?.city ?? undefined,
+        countryCode: location?.countryCode ?? country,
+        latitude: location?.latitude,
+        longitude: location?.longitude,
+        radiusKm: location?.radiusKm,
+      });
+      navigation.replace('RequestSubmitted', { request });
+    } catch (err) {
+      setError(err instanceof ServerError ? err.message : "Your custom order couldn't be saved. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
     <SafeAreaView style={styles.container}>
-      <Header title="Order a Custom BMW Part" subtitle="Instant German sourcing & container feasibility" onBack={() => navigation.goBack()} />
+      <Header
+        title="Create a Custom Order"
+        subtitle="We'll notify you when a matching part is listed"
+        onBack={() => navigation.goBack()}
+      />
 
-      <ScrollView contentContainerStyle={styles.scroll}>
-        {/* Form Fields */}
-        <Text style={styles.label}>BMW VEHICLE MAKE</Text>
-        <TextInput style={styles.input} value={make} onChangeText={setMake} />
+      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+        {searchText ? <Text style={styles.searchedFor}>You searched for “{searchText}”</Text> : null}
 
-        <Text style={styles.label}>BMW MODEL & TRIM</Text>
-        <TextInput style={styles.input} value={model} onChangeText={setModel} />
+        <Text style={styles.label}>PART YOU NEED</Text>
+        <TextInput style={styles.input} value={partName} onChangeText={setPartName} placeholder="e.g. Front bumper" placeholderTextColor={COLORS.textMuted} />
 
-        <Text style={styles.label}>MODEL YEAR</Text>
-        <TextInput style={styles.input} value={year} onChangeText={setYear} keyboardType="numeric" />
+        <Text style={styles.label}>PART NUMBER (OPTIONAL)</Text>
+        <TextInput style={styles.input} value={partNumber} onChangeText={setPartNumber} autoCapitalize="characters" placeholder="e.g. 52119-0K935" placeholderTextColor={COLORS.textMuted} />
 
-        <Text style={styles.label}>PART NAME & DESCRIPTION</Text>
-        <TextInput style={styles.input} value={partName} onChangeText={setPartName} />
+        <Text style={styles.label}>VEHICLE MAKE (OPTIONAL)</Text>
+        <TextInput style={styles.input} value={make} onChangeText={setMake} placeholder="Any make" placeholderTextColor={COLORS.textMuted} />
 
-        <Text style={styles.label}>VEHICLE VIN NUMBER (OPTIONAL)</Text>
-        <TextInput style={styles.input} value={vin} onChangeText={setVin} placeholder="17-Digit VIN" placeholderTextColor={COLORS.textMuted} />
+        <Text style={styles.label}>MODEL (OPTIONAL)</Text>
+        <TextInput style={styles.input} value={model} onChangeText={setModel} placeholder="Any model" placeholderTextColor={COLORS.textMuted} />
 
-        <Text style={styles.label}>ADDITIONAL SPECIFICATIONS / NOTES</Text>
-        <TextInput style={[styles.input, { height: 70 }]} value={specs} onChangeText={setSpecs} multiline />
+        <Text style={styles.label}>YEAR (OPTIONAL)</Text>
+        <TextInput style={styles.input} value={year} onChangeText={setYear} keyboardType="number-pad" placeholder="Any year" placeholderTextColor={COLORS.textMuted} />
 
-        <Text style={styles.label}>MAXIMUM BUDGET CEILING ({currencyLabel})</Text>
+        <Text style={styles.label}>NOTES (OPTIONAL)</Text>
+        <TextInput style={[styles.input, styles.multiline]} value={specs} onChangeText={setSpecs} multiline placeholder="Condition, colour, anything else" placeholderTextColor={COLORS.textMuted} />
+
+        <Text style={styles.label}>MAXIMUM BUDGET ({currencyLabel}, OPTIONAL)</Text>
         <TextInput style={styles.input} value={maxBudget} onChangeText={setMaxBudget} keyboardType="numeric" />
 
-        <Text style={styles.label}>TARGET NIGERIAN CLEARING PORT</Text>
-        <View style={styles.portRow}>
-          {['Lagos Apapa Port', 'Lagos Tin Can', 'Onne Port'].map(p => (
-            <TouchableOpacity 
-              key={p} 
-              style={[styles.portChip, preferredPort.includes(p) && styles.portChipActive]}
-              onPress={() => setPreferredPort(p)}
-            >
-              <Text style={[styles.portText, preferredPort.includes(p) && styles.portTextActive]}>{p}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+        {/* Container ports (hidden while FEATURES.containers is off) */}
+        {FEATURES.containers ? (
+          <>
+            <Text style={styles.label}>TARGET NIGERIAN CLEARING PORT</Text>
+            <View style={styles.portRow}>
+              {['Lagos Apapa Port', 'Lagos Tin Can', 'Onne Port'].map(p => (
+                <TouchableOpacity 
+                  key={p} 
+                  style={[styles.portChip, preferredPort.includes(p) && styles.portChipActive]}
+                  onPress={() => setPreferredPort(p)}
+                >
+                  <Text style={[styles.portText, preferredPort.includes(p) && styles.portTextActive]}>{p}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </>
+        ) : null}
 
-        {/* Feasibility Schedule Info Box */}
         <View style={styles.feasibilityBox}>
-          <Text style={styles.feaTitle}>⚡ INSTANT CONTAINER FEASIBILITY CHECK</Text>
+          <Text style={styles.feaTitle}>🔔 GET NOTIFIED</Text>
           <Text style={styles.feaText}>
-            Our system will automatically check space cutoff for Container <Text style={styles.bold}>CN-2026-09</Text> leaving Bremerhaven.
+            {location
+              ? `When a matching part is listed within ${formatRadius(location.radiusKm, country)}${location.city ? ` of ${location.city}` : ''}, we'll let you know.`
+              : "When a matching part is listed, we'll let you know."}
           </Text>
         </View>
+
+        {error ? <Notice tone="error" message={error} /> : null}
 
         <TouchableOpacity 
           style={styles.submitBtn} 
           onPress={handleSubmit} 
-          disabled={checkingFeasibility}
+          disabled={submitting}
           activeOpacity={0.8}
         >
-          <Text style={styles.submitText}>
-            {checkingFeasibility ? 'CHECKING FEASIBILITY & SUBMITTING...' : 'CHECK FEASIBILITY & SUBMIT REQUEST'}
-          </Text>
+          <Text style={styles.submitText}>{submitting ? 'CREATING ORDER...' : 'CREATE CUSTOM ORDER'}</Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
 };
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -120,6 +162,16 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     marginTop: SPACING.md,
     marginBottom: SPACING.xs,
+  },
+  searchedFor: {
+    color: COLORS.textSecondary,
+    fontSize: 13,
+    fontStyle: 'italic',
+  },
+  multiline: {
+    height: 70,
+    textAlignVertical: 'top',
+    paddingTop: SPACING.sm,
   },
   input: {
     backgroundColor: COLORS.surface,
@@ -183,6 +235,7 @@ const styles = StyleSheet.create({
   },
   submitBtn: {
     backgroundColor: COLORS.primary,
+    marginTop: SPACING.lg,
     paddingVertical: 16,
     borderRadius: RADIUS.md,
     alignItems: 'center',

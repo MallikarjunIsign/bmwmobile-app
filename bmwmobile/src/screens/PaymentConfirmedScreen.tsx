@@ -6,6 +6,7 @@ import { RootStackParamList } from '../types/navigation';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
 import { Badge } from '../components/Badge';
 import { useMoney } from '../location/useMoney';
+import { FEATURES } from '../config';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'PaymentConfirmed'>;
 
@@ -24,7 +25,8 @@ export const PaymentConfirmedScreen: React.FC<Props> = ({ route, navigation }) =
 
         <Text style={styles.title}>{purchase.itemTitle}</Text>
 
-        {/* QR Code Pass Card */}
+        {/* QR Code Pass Card (hidden while FEATURES.containers is off) */}
+        {FEATURES.containers ? (
         <View style={styles.qrCard}>
           <Text style={styles.qrHeader}>CUSTOMS PORT PICKUP PASS CODE</Text>
           <View style={styles.qrBox}>
@@ -32,6 +34,7 @@ export const PaymentConfirmedScreen: React.FC<Props> = ({ route, navigation }) =
             <Text style={styles.qrInstruction}>Present this pass at {purchase.pickupPort} warehouse</Text>
           </View>
         </View>
+        ) : null}
 
         {/* Order Details */}
         <View style={styles.detailsCard}>
@@ -43,6 +46,8 @@ export const PaymentConfirmedScreen: React.FC<Props> = ({ route, navigation }) =
             <Text style={styles.key}>Total Paid:</Text>
             <Text style={styles.valSuccess}>{money(purchase.totalAmount)}</Text>
           </View>
+          {FEATURES.containers ? (
+          <>
           <View style={styles.row}>
             <Text style={styles.key}>Assigned Container:</Text>
             <Text style={styles.val}>{purchase.containerNumber || 'CN-2026-09'}</Text>
@@ -51,9 +56,11 @@ export const PaymentConfirmedScreen: React.FC<Props> = ({ route, navigation }) =
             <Text style={styles.key}>Pickup Port Location:</Text>
             <Text style={styles.val}>{purchase.pickupPort}</Text>
           </View>
+          </>
+          ) : null}
           <View style={styles.row}>
             <Text style={styles.key}>Receiving Method:</Text>
-            <Text style={styles.val}>{purchase.deliveryOption === 'PortPickup' ? 'Free Port Warehouse Pickup' : 'Doorstep Dispatch'}</Text>
+            <Text style={styles.val}>{purchase.deliveryOption === 'PortPickup' ? (FEATURES.containers ? 'Free Port Warehouse Pickup' : 'Pickup') : 'Doorstep Dispatch'}</Text>
           </View>
         </View>
 
@@ -62,7 +69,7 @@ export const PaymentConfirmedScreen: React.FC<Props> = ({ route, navigation }) =
           onPress={() => navigation.navigate('PickupReceive', { purchase })}
           activeOpacity={0.8}
         >
-          <Text style={styles.trackText}>VIEW FULL QR PASS & PICKUP STATUS →</Text>
+          <Text style={styles.trackText}>{FEATURES.containers ? 'VIEW FULL QR PASS & PICKUP STATUS →' : 'MARK AS RECEIVED & RATE →'}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity 

@@ -6,6 +6,7 @@ import { RootStackParamList } from '../types/navigation';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
 import { Header } from '../components/Header';
 import { BuyerType, PickupPort, VehicleInfo } from '../types/models';
+import { FEATURES } from '../config';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ProfilePreferences'>;
 
@@ -36,7 +37,7 @@ export const ProfilePreferencesScreen: React.FC<Props> = ({ navigation }) => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <Header title="Profile & Preferences" subtitle="Customize pickup ports & BMW garage" />
+      <Header title="Profile & Preferences" subtitle={FEATURES.containers ? 'Customize pickup ports & BMW garage' : 'Your buyer profile & garage'} />
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {/* Section 1: Buyer Type */}
@@ -55,7 +56,9 @@ export const ProfilePreferencesScreen: React.FC<Props> = ({ navigation }) => {
           ))}
         </View>
 
-        {/* Section 2: Preferred Nigerian Pickup Port */}
+        {/* Section 2: Preferred Nigerian Pickup Port (hidden while FEATURES.containers is off) */}
+        {FEATURES.containers ? (
+        <>
         <Text style={styles.sectionTitle}>2. PREFERRED NIGERIAN PICKUP PORT</Text>
         <Text style={styles.sectionSub}>Containers with won parts will default to this clearing port.</Text>
         
@@ -79,6 +82,8 @@ export const ProfilePreferencesScreen: React.FC<Props> = ({ navigation }) => {
             );
           })}
         </View>
+        </>
+        ) : null}
 
         {/* Section 3: Garage Vehicles */}
         <Text style={styles.sectionTitle}>3. YOUR BMW GARAGE</Text>
@@ -113,9 +118,9 @@ export const ProfilePreferencesScreen: React.FC<Props> = ({ navigation }) => {
         </TouchableOpacity>
 
         {/* Section 4: Notifications */}
-        <Text style={styles.sectionTitle}>4. AUCTION & CONTAINER ALERTS</Text>
+        <Text style={styles.sectionTitle}>4. AUCTION ALERTS</Text>
         <View style={styles.switchRow}>
-          <Text style={styles.switchLabel}>Container Port Customs Cutoff SMS Alerts</Text>
+          <Text style={styles.switchLabel}>{FEATURES.containers ? 'Container Port Customs Cutoff SMS Alerts' : 'SMS alerts when I am outbid'}</Text>
           <Switch 
             value={smsAlerts} 
             onValueChange={setSmsAlerts}

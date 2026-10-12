@@ -35,6 +35,9 @@ public static class SearchEndpoints
         string? partCategory,
         string? condition,
         string? destination,
+        string? make,
+        string? model,
+        string? country,
         double? lat,
         double? lon,
         double? radiusKm,
@@ -79,6 +82,14 @@ public static class SearchEndpoints
             filters.Add($"partCategory = {Quote(partCategory)}");
         if (!string.IsNullOrEmpty(condition))
             filters.Add($"condition = {Quote(condition)}");
+        // Marketplace pills (category / make / model) combine with each other and with the search text.
+        if (!string.IsNullOrEmpty(make))
+            filters.Add($"make = {Quote(make)}");
+        if (!string.IsNullOrEmpty(model))
+            filters.Add($"model = {Quote(model)}");
+        // Country-wide (the user's location is off): listings inside the country, by their coordinates.
+        if (!near && CountryFilter(country) is { } countryFilter)
+            filters.Add(countryFilter);
         if (!string.IsNullOrEmpty(destination))
             filters.Add($"(container.destinationCountry = {Quote(destination)} OR container.destinationPort = {Quote(destination)})");
 
@@ -110,6 +121,56 @@ public static class SearchEndpoints
             results = result.Hits,
             pageCount = result.TotalPages,
             totalCount = result.TotalHits
+        });
+    }
+
+    public record FilterOption(string Value, int Count);
+    public record ModelOption(string Make, string Model, int Count);
+
+    /// <summary>
+    /// The Marketplace pills: the categories and the make/model combinations that have live listings (within the
+    /// radius when lat/lon are given), most listings first. Selecting a pill sends partCategory / make + model to
+    /// GET /api/search.
+    /// </summary>
+    public static async Task<IResult> GetFilterOptions(MeilisearchClient client, double? lat, double? lon,
+        double? radiusKm, string? country, int top = 10)
+    {
+        var near = lat is not null || lon is not null;
+        if (near && (lat is null || lon is null || !GeoMath.IsValidCoordinate(lat.Value, lon.Value)))
+            return Results.BadRequest(new { message = "lat and lon must both be valid coordinates" });
+
+        var now = DateTime.UtcNow;
+        var filters = new List<string> { $"status = \"Live\" AND auctionEnd > \"{now:o}\"" };
+        var radius = Math.Clamp(radiusKm ?? DefaultRadiusKm, 1, MaxRadiusKm);
+        if (near) filters.Add(BoundingBoxFilter(GeoMath.BoundingBox(lat!.Value, lon!.Value, radius)));
+        else if (CountryFilter(country) is { } countryFilter) filters.Add(countryFilter);
+
+        var candidates = (SearchResult<Item>)await client.Auctions().SearchAsync<Item>(string.Empty, new SearchQuery
+        {
+            Filter = string.Join(" AND ", filters),
+            Limit = MaxNearCandidates,
+        });
+
+        var items = candidates.Hits.Where(item => !near ||
+                (item.Latitude is not null && item.Longitude is not null &&
+                 GeoMath.HaversineKm(lat!.Value, lon!.Value, item.Latitude.Value, item.Longitude.Value) <= radius))
+            .ToList();
+        var size = Math.Clamp(top, 1, 30);
+
+        return Results.Ok(new
+        {
+            // The master-data category ("Body – Exterior"); older documents only have the PartCategory enum.
+            categories = items.Where(x => !string.IsNullOrEmpty(x.Category ?? x.PartCategory))
+                .GroupBy(x => (x.Category ?? x.PartCategory)!)
+                .Select(g => new FilterOption(g.Key, g.Count()))
+                .OrderByDescending(x => x.Count).ThenBy(x => x.Value).Take(size),
+            makes = items.Where(x => x.Make.Length > 0).GroupBy(x => x.Make)
+                .Select(g => new FilterOption(g.Key, g.Count()))
+                .OrderByDescending(x => x.Count).ThenBy(x => x.Value).Take(size),
+            models = items.Where(x => x.Make.Length > 0 && x.Model.Length > 0).GroupBy(x => (x.Make, x.Model))
+                .Select(g => new ModelOption(g.Key.Make, g.Key.Model, g.Count()))
+                .OrderByDescending(x => x.Count).ThenBy(x => x.Make).ThenBy(x => x.Model).Take(size),
+            totalCount = items.Count
         });
     }
 
@@ -161,6 +222,12 @@ public static class SearchEndpoints
             totalCount = within.Count
         });
     }
+
+    /// <summary>Listings inside the country's boxes (null for an unknown country = no filter).</summary>
+    public static string? CountryFilter(string? country) =>
+        CountryBounds.TryGet(country, out var boxes)
+            ? "(" + string.Join(" OR ", boxes.Select(BoundingBoxFilter)) + ")"
+            : null;
 
     /// <summary>Latitude/longitude ranges for Meilisearch. Items without a location never match.</summary>
     public static string BoundingBoxFilter(GeoBox box)

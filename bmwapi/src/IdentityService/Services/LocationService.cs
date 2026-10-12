@@ -55,6 +55,7 @@ public class LocationService(ApplicationDbContext db, IOptions<LocationOptions> 
             CreatedAt = now,
             UpdatedAt = now,
         };
+        SetAddress(row, req);
         db.UserLocations.Add(row);
         await db.SaveChangesAsync(ct);
 
@@ -79,6 +80,7 @@ public class LocationService(ApplicationDbContext db, IOptions<LocationOptions> 
             row.Latitude = lat;
             row.Longitude = lon;
             row.CountryCode = CleanCountry(req.CountryCode) ?? CityCatalog.Describe(lat, lon).CountryCode;
+            SetAddress(row, req);
         }
 
         row.UpdatedAt = DateTime.UtcNow;
@@ -224,9 +226,24 @@ public class LocationService(ApplicationDbContext db, IOptions<LocationOptions> 
         return p.Length > 120 ? p[..120] : p;
     }
 
+    private static void SetAddress(UserLocation row, SaveLocationRequest req)
+    {
+        row.AddressLine = Optional(req.AddressLine, 200);
+        row.Area = Optional(req.Area, 100);
+        row.Landmark = Optional(req.Landmark, 100);
+        row.PostalCode = Optional(req.PostalCode, 12);
+    }
+
+    private static string? Optional(string? text, int max)
+    {
+        var t = text?.Trim();
+        return string.IsNullOrEmpty(t) ? null : t.Length > max ? t[..max] : t;
+    }
+
     private static string? CleanCountry(string? code) =>
         CityCatalog.TryGetCountry(code, out var country) && !string.IsNullOrWhiteSpace(code) ? country.Code : null;
 
     public static UserLocationDto ToDto(UserLocation l) =>
-        new(l.Id, l.Label, l.PlaceName, l.Latitude, l.Longitude, l.RadiusKm, l.CountryCode, l.IsPrimary, l.IsCurrentLocation);
+        new(l.Id, l.Label, l.PlaceName, l.Latitude, l.Longitude, l.RadiusKm, l.CountryCode, l.IsPrimary, l.IsCurrentLocation,
+            l.AddressLine, l.Area, l.Landmark, l.PostalCode);
 }

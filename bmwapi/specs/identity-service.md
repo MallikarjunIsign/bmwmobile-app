@@ -62,6 +62,11 @@ None.
 
 ## User locations
 
+Saved locations also hold an optional address (migration `UserAddresses`): `addressLine` (house / flat, building,
+street), `area`, `landmark`, `postalCode` – accepted on add / edit and returned in every location. The app shows the
+chosen location under the user's name on Home ("My locations"); a chosen saved address replaces GPS until the user
+picks "Use my current location" again, and is offered as the ship-to address on orders.
+
 Like Home / Work in food-delivery apps. Each user has up to 10 locations (`UserLocations` table): `Label` (Home / Work / Other / custom), `PlaceName`, `Latitude`, `Longitude`, `RadiusKm` (5–200, default 50), `CountryCode`, `IsPrimary`, `IsCurrentLocation`. `AspNetUsers.AutoUpdatePrimaryLocation` (default true) is the "Auto-update primary from my current location" switch.
 
 **Rules**
@@ -154,3 +159,8 @@ None.
 ## Event Consumed Types
 
 None.
+
+### Public profile
+
+`GET api/users/:username/public` (anonymous) → `{ username, displayName, memberSince, city, countryCode }` for the seller
+profile. The city comes from the primary location's place name (never an address; GPS rows like "Near Lagos" are left out).

@@ -24,22 +24,57 @@ public class BidRulesTests
 
     private static Bid HighBid(int amount) => new() { AuctionId = "a1", Bidder = "alice", Amount = amount };
 
-    [Fact]
-    public void MinimumBid_WithoutBids_IsStartingPrice()
+    [Theory]
+    [InlineData(0, 10)]
+    [InlineData(100, 10)]
+    [InlineData(999, 10)]
+    [InlineData(1_000, 20)]
+    [InlineData(4_999, 20)]
+    [InlineData(5_000, 50)]
+    [InlineData(9_999, 50)]
+    [InlineData(10_000, 100)]
+    [InlineData(49_999, 100)]
+    [InlineData(50_000, 250)]
+    [InlineData(2_000_000, 250)]
+    public void StepFor_FollowsTheTierTable(int currentTotal, int expectedStep)
     {
-        Assert.Equal(5000, BidRules.MinimumBid(Auction(), null));
+        Assert.Equal(expectedStep, BidRules.StepFor(currentTotal));
+    }
+
+    [Theory]
+    [InlineData(100, 110)]
+    [InlineData(1_000, 1_020)]
+    [InlineData(5_000, 5_050)]
+    [InlineData(10_000, 10_100)]
+    [InlineData(50_000, 50_250)]
+    public void MinimumBid_IsCurrentTotalPlusStep(int highBid, int expected)
+    {
+        Assert.Equal(expected, BidRules.MinimumBid(Auction(), HighBid(highBid)));
     }
 
     [Fact]
-    public void MinimumBid_WithHighBid_IsHighBidPlusIncrement()
+    public void MinimumBid_WithoutBids_IsPartPricePlusStep()
     {
-        Assert.Equal(5500, BidRules.MinimumBid(Auction(), HighBid(5000)));
+        Assert.Equal(5050, BidRules.MinimumBid(Auction(), null));
+        Assert.Equal(310, BidRules.MinimumBid(Auction(x => x.StartingPrice = 300), null));
     }
 
     [Fact]
-    public void MinimumBidMessage_UsesThousandsSeparator()
+    public void MinimumBid_IgnoresTheOldPerAuctionIncrement()
     {
-        Assert.Equal("Minimum bid is 5,500", BidRules.MinimumBidMessage(5500));
+        Assert.Equal(5050, BidRules.MinimumBid(Auction(x => x.BidIncrement = 500), HighBid(5000)));
+    }
+
+    [Fact]
+    public void QuickBids_AreNextPlusOneTwoAndFiveSteps()
+    {
+        Assert.Equal([1020, 1040, 1060, 1120], BidRules.QuickBids(1020, 20));
+    }
+
+    [Fact]
+    public void MinimumBidMessage_ContainsTheNextValidAmount()
+    {
+        Assert.Equal("Your bid is too low. The next valid bid is 5,500", BidRules.MinimumBidMessage(5500));
     }
 
     [Theory]

@@ -18,6 +18,7 @@ SERVICES=(
   "search|SearchService|7002"
   "bid|BidService|7003"
   "notify|NotificationService|7004"
+  "chat|ChatService|7005"
   "gateway|GatewayService|6001"
 )
 

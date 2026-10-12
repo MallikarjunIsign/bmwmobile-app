@@ -94,40 +94,49 @@ public class BiddingTests(AppFixture fixture)
     {
         var auction = await CreateAuctionAsync();
 
-        // next bid pre-filled with the starting price
+        // next bid pre-filled with part price + step: 5,000 + 50 = 5,050
         var next = await NextMin(auction.Id);
-        Assert.Equal(5000, next.MinimumBid);
+        Assert.Equal(5050, next.MinimumBid);
+        Assert.Equal(5000, next.CurrentTotal);
+        Assert.Equal(50, next.BidStep);
+        Assert.Equal(5000, next.PartPrice);
+        Assert.Equal([5050, 5100, 5150, 5300], next.QuickBids);
+        Assert.Equal(0, next.BidCount);
         Assert.Null(next.CurrentHighBid);
 
-        // 5,000 is accepted below the reserve
-        var first = await (await Bid(auction.Id, 5000)).ReadAsJsonAsync<BidDto>();
+        // 5,050 is accepted below the reserve
+        var first = await (await Bid(auction.Id, 5050)).ReadAsJsonAsync<BidDto>();
         Assert.Equal("AcceptedBelowReserve", first.BidStatus);
         Assert.False((await NextMin(auction.Id)).ReserveMet);
 
-        // 5,200 is too low: rejected with the minimum, and not stored
-        var tooLow = await Bid(auction.Id, 5200, expected: HttpStatusCode.BadRequest);
-        Assert.Contains("Minimum bid is 5,500", await tooLow.ReadAsTextAsync());
+        // 5,080 is too low (5,050 + 50 = 5,100): rejected with the next valid amount, and not stored
+        var tooLow = await Bid(auction.Id, 5080, "carol", expected: HttpStatusCode.BadRequest);
+        Assert.Contains("next valid bid is 5,100", await tooLow.ReadAsTextAsync());
 
         // 10,500 meets the reserve
-        var second = await (await Bid(auction.Id, 10500)).ReadAsJsonAsync<BidDto>();
+        var second = await (await Bid(auction.Id, 10500, "carol")).ReadAsJsonAsync<BidDto>();
         Assert.Equal("Accepted", second.BidStatus);
 
         next = await NextMin(auction.Id);
         Assert.True(next.ReserveMet);
         Assert.Equal(10500, next.CurrentHighBid);
-        Assert.Equal(11000, next.MinimumBid);
+        Assert.Equal(10500, next.CurrentTotal);
+        Assert.Equal(100, next.BidStep);
+        Assert.Equal(10600, next.MinimumBid);
+        Assert.Equal(2, next.BidCount);
+        Assert.Equal("carol", next.HighBidder);
 
         // only the accepted bids were stored
         var bids = await (await fixture.Host.Scenario(s => s.Get.Url($"/api/bids/{auction.Id}")))
             .ReadAsJsonAsync<List<BidDto>>();
         Assert.Equal(2, bids.Count);
 
-        // the seller accepts the highest bid: Sold to alice
+        // the seller accepts the highest bid: Sold to carol
         await Accept(auction.Id, second.Id);
         Assert.Equal(AuctionStatus.Sold, (await Reload(auction.Id)).Status);
 
         // no more bids after that
-        await Bid(auction.Id, 11000, "carol", HttpStatusCode.BadRequest);
+        await Bid(auction.Id, 11000, "dave", HttpStatusCode.BadRequest);
     }
 
     [Fact]
@@ -135,9 +144,43 @@ public class BiddingTests(AppFixture fixture)
     {
         var auction = await CreateAuctionAsync();
 
-        var result = await Bid(auction.Id, 4999, expected: HttpStatusCode.BadRequest);
+        // Equal to the part price is not enough: a bid adds at least one step on top of it.
+        var result = await Bid(auction.Id, 5000, expected: HttpStatusCode.BadRequest);
 
-        Assert.Contains("Minimum bid is 5,000", await result.ReadAsTextAsync());
+        Assert.Contains("next valid bid is 5,050", await result.ReadAsTextAsync());
+    }
+
+    [Fact]
+    public async Task NextMinimum_NewRouteMatchesTheOldOne()
+    {
+        var auction = await CreateAuctionAsync(x => x.StartingPrice = 1000);
+
+        var result = await fixture.Host.Scenario(s =>
+        {
+            s.RemoveRequestHeader("Authorization");
+            s.Get.Url($"/api/bids/{auction.Id}/next-minimum");
+            s.StatusCodeShouldBe(HttpStatusCode.OK);
+        });
+        var next = await result.ReadAsJsonAsync<NextMinimumBidDto>();
+
+        Assert.Equal(1000, next.CurrentTotal);
+        Assert.Equal(20, next.BidStep);
+        Assert.Equal(1020, next.MinimumBid);
+    }
+
+    [Fact]
+    public async Task Steps_ReturnsTheTierTable()
+    {
+        var result = await fixture.Host.Scenario(s =>
+        {
+            s.RemoveRequestHeader("Authorization");
+            s.Get.Url("/api/bids/steps");
+            s.StatusCodeShouldBe(HttpStatusCode.OK);
+        });
+        var body = await result.ReadAsTextAsync();
+
+        Assert.Contains("\"from\":0,\"to\":999,\"step\":10", body);
+        Assert.Contains("\"from\":50000,\"to\":null,\"step\":250", body);
     }
 
     [Fact]
@@ -147,18 +190,113 @@ public class BiddingTests(AppFixture fixture)
 
         var result = await Bid(auction.Id, 6000, "bob", HttpStatusCode.BadRequest);
 
-        Assert.Contains("own item", await result.ReadAsTextAsync());
+        Assert.Contains("You can't bid on your own listing", await result.ReadAsTextAsync());
     }
 
     [Fact]
-    public async Task PlaceBid_HighestBidderMayRaiseOwnBid()
+    public async Task PlaceBid_BlockedBySellerInChat_IsRejected_UntilUnblocked()
     {
         var auction = await CreateAuctionAsync();
 
-        await Bid(auction.Id, 5000);
-        var raised = await (await Bid(auction.Id, 6000)).ReadAsJsonAsync<BidDto>();
+        await fixture.Host.InvokeMessageAndWaitAsync(new UserBlocked { Blocker = "bob", Blocked = "mallory" });
+        var blocked = await Bid(auction.Id, 6000, "mallory", HttpStatusCode.BadRequest);
+        Assert.Contains("You can't bid on this seller's listings", await blocked.ReadAsTextAsync());
+        await Bid(auction.Id, 6000, "alice"); // others still can
 
-        Assert.Equal(6000, raised.Amount);
+        await fixture.Host.InvokeMessageAndWaitAsync(new UserUnblocked { Blocker = "bob", Blocked = "mallory" });
+        await Bid(auction.Id, 7000, "mallory");
+    }
+
+    [Fact]
+    public async Task PlaceBid_HighestBidderCannotOutbidThemselves()
+    {
+        var auction = await CreateAuctionAsync();
+
+        await Bid(auction.Id, 5050);
+        var result = await Bid(auction.Id, 6000, expected: HttpStatusCode.BadRequest);
+
+        Assert.Contains("You're the highest bidder", await result.ReadAsTextAsync());
+        // Someone else can still outbid.
+        await Bid(auction.Id, 6000, "carol");
+    }
+
+    [Fact]
+    public async Task BidPlaced_CarriesSellerPreviousHighBidderAndCount()
+    {
+        var auction = await CreateAuctionAsync();
+        await Bid(auction.Id, 5050);
+
+        var tracked = await Track(service => service.PlaceBidAsync(auction.Id, "carol", 5100));
+
+        var placed = tracked.Sent.SingleMessage<BidPlaced>();
+        Assert.Equal("bob", placed.Seller);
+        Assert.Equal("alice", placed.PreviousHighBidder);
+        Assert.Equal(2, placed.BidCount);
+    }
+
+    [Fact]
+    public async Task MyBids_ShowsWinningAndOutbid()
+    {
+        var first = await CreateAuctionAsync();
+        var second = await CreateAuctionAsync();
+        await Bid(first.Id, 5050);
+        await Bid(second.Id, 5050);
+        await Bid(second.Id, 5100, "carol");
+
+        var result = await fixture.Host.Scenario(s =>
+        {
+            s.WithClaim(new Claim("username", "alice"));
+            s.Get.Url("/api/bids/mine");
+            s.StatusCodeShouldBe(HttpStatusCode.OK);
+        });
+        var mine = await result.ReadAsJsonAsync<List<MyBidDto>>();
+
+        Assert.Equal("Winning", mine.Single(x => x.AuctionId == first.Id).State);
+        var outbid = mine.Single(x => x.AuctionId == second.Id);
+        Assert.Equal("Outbid", outbid.State);
+        Assert.Equal(5050, outbid.MyHighestBid);
+        Assert.Equal(5100, outbid.CurrentHighBid);
+        Assert.Equal(2, outbid.BidCount);
+    }
+
+    [Fact]
+    public async Task EndAuction_LiveWithBids_ListsTheBidders()
+    {
+        var auction = await CreateAuctionAsync(x => { x.AuctionEnd = Now.AddSeconds(30); x.ReservePrice = x.StartingPrice; });
+        await Bid(auction.Id, 5050);
+        await Bid(auction.Id, 5100, "carol");
+        fixture.Clock.Advance(TimeSpan.FromMinutes(1));
+
+        var tracked = await Track(service => service.EndAuctionAsync(auction.Id));
+
+        var finished = tracked.Sent.SingleMessage<AuctionFinished>();
+        Assert.Equal("Sold", finished.Status);
+        Assert.Equal("carol", finished.Winner);
+        Assert.Equal(["alice", "carol"], finished.Bidders.Order());
+    }
+
+    [Fact]
+    public async Task EndingSoon_NotifiesSellerAndBidders_OnlyForTheCurrentEnd()
+    {
+        var auction = await CreateAuctionAsync(x => x.AuctionEnd = Now.AddMinutes(30));
+        await Bid(auction.Id, 5050);
+
+        var tracked = await Track(service => service.NotifyEndingSoonAsync(auction.Id, auction.AuctionEnd));
+        var soon = tracked.Sent.SingleMessage<AuctionEndingSoon>();
+        Assert.Equal("bob", soon.Seller);
+        Assert.Equal(["alice"], soon.Bidders);
+
+        // A check scheduled for an older end time does nothing.
+        var stale = await Track(service => service.NotifyEndingSoonAsync(auction.Id, auction.AuctionEnd.AddHours(-2)));
+        Assert.Empty(stale.Sent.MessagesOf<AuctionEndingSoon>());
+    }
+
+    [Fact]
+    public void FromSnapshot_IgnoresTheReservePrice()
+    {
+        var auction = BiddingService.FromSnapshot(Snapshot("x", startingPrice: 300));
+
+        Assert.Equal(300, auction.ReservePrice);
     }
 
     [Fact]
@@ -183,14 +321,14 @@ public class BiddingTests(AppFixture fixture)
         var auction = await CreateAuctionAsync();
 
         var results = await Task.WhenAll(Enumerable.Range(0, 8)
-            .Select(i => Bid(auction.Id, 5000, $"bidder{i}", expected: null)));
+            .Select(i => Bid(auction.Id, 5050, $"bidder{i}", expected: null)));
 
         var statuses = results.Select(x => x.Context.Response.StatusCode).ToList();
         Assert.Equal(1, statuses.Count(x => x == 200));
         Assert.Equal(7, statuses.Count(x => x == 400));
 
         var next = await NextMin(auction.Id);
-        Assert.Equal(5000, next.CurrentHighBid);
+        Assert.Equal(5050, next.CurrentHighBid);
     }
 
     [Fact]
@@ -199,7 +337,7 @@ public class BiddingTests(AppFixture fixture)
         var auction = await CreateAuctionAsync();
 
         await Task.WhenAll(Enumerable.Range(0, 8)
-            .Select(i => Bid(auction.Id, 5000 + i * 500, $"bidder{i}", expected: null)));
+            .Select(i => Bid(auction.Id, 5050 + i * 500, $"bidder{i}", expected: null)));
 
         // whatever order they were processed in, every stored bid respected the minimum at that moment
         var bids = await (await fixture.Host.Scenario(s => s.Get.Url($"/api/bids/{auction.Id}")))
@@ -214,7 +352,7 @@ public class BiddingTests(AppFixture fixture)
     public async Task Accept_WhenOutbid_Returns409WithNewHighBid()
     {
         var auction = await CreateAuctionAsync();
-        var first = await (await Bid(auction.Id, 5000)).ReadAsJsonAsync<BidDto>();
+        var first = await (await Bid(auction.Id, 5050)).ReadAsJsonAsync<BidDto>();
         await Bid(auction.Id, 6000, "carol");
 
         var result = await Accept(auction.Id, first.Id, expected: HttpStatusCode.Conflict);
@@ -229,7 +367,7 @@ public class BiddingTests(AppFixture fixture)
     public async Task Accept_ByNonSeller_Returns403()
     {
         var auction = await CreateAuctionAsync();
-        var bid = await (await Bid(auction.Id, 5000)).ReadAsJsonAsync<BidDto>();
+        var bid = await (await Bid(auction.Id, 5050)).ReadAsJsonAsync<BidDto>();
 
         await Accept(auction.Id, bid.Id, "alice", HttpStatusCode.Forbidden);
     }
@@ -238,14 +376,14 @@ public class BiddingTests(AppFixture fixture)
     public async Task Accept_BelowReserve_SellsAndPublishesAuctionFinished()
     {
         var auction = await CreateAuctionAsync();
-        var bid = await (await Bid(auction.Id, 5000)).ReadAsJsonAsync<BidDto>();
+        var bid = await (await Bid(auction.Id, 5050)).ReadAsJsonAsync<BidDto>();
 
         var tracked = await Track(service => service.AcceptBidAsync(auction.Id, bid.Id, "bob"));
 
         var finished = tracked.Sent.SingleMessage<AuctionFinished>();
         Assert.True(finished.ItemSold);
         Assert.Equal("alice", finished.Winner);
-        Assert.Equal(5000, finished.Amount);
+        Assert.Equal(5050, finished.Amount);
         Assert.Equal("Sold", finished.Status);
         Assert.Equal("SellerAccepted", finished.EndReason);
     }
@@ -361,14 +499,14 @@ public class BiddingTests(AppFixture fixture)
 
         await Track(service => service.ApplySnapshotAsync(Snapshot(auction.Id, startingPrice: 7000)));
 
-        Assert.Equal(7000, (await NextMin(auction.Id)).MinimumBid);
+        Assert.Equal(7050, (await NextMin(auction.Id)).MinimumBid);
     }
 
     [Fact]
     public async Task ApplySnapshot_UpdatedPricesAfterFirstBid_AreIgnored()
     {
         var auction = await CreateAuctionAsync();
-        await Bid(auction.Id, 5000);
+        await Bid(auction.Id, 5050);
 
         await Track(service => service.ApplySnapshotAsync(Snapshot(auction.Id, startingPrice: 1)));
 
@@ -388,7 +526,7 @@ public class BiddingTests(AppFixture fixture)
         {
             using var scope = fixture.Host.Services.CreateScope();
             var service = ActivatorUtilities.CreateInstance<BiddingService>(scope.ServiceProvider, context, enabled);
-            await service.PlaceBidAsync(auction.Id, "alice", 5000);
+            await service.PlaceBidAsync(auction.Id, "alice", 5050);
         });
 
         var extended = tracked.Sent.SingleMessage<AuctionExtended>();
@@ -407,7 +545,7 @@ public class BiddingTests(AppFixture fixture)
     {
         var auction = await CreateAuctionAsync(x => x.AuctionEnd = Now.AddSeconds(60));
 
-        var tracked = await Track(service => service.PlaceBidAsync(auction.Id, "alice", 5000));
+        var tracked = await Track(service => service.PlaceBidAsync(auction.Id, "alice", 5050));
 
         Assert.Empty(tracked.Sent.MessagesOf<AuctionExtended>());
         Assert.Equal(auction.AuctionEnd, (await Reload(auction.Id)).AuctionEnd, TimeSpan.FromMilliseconds(1));

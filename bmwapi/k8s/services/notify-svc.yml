@@ -43,6 +43,8 @@ spec:
                 secretKeyRef:
                   key: rabbitmq-password
                   name: carsties-secrets
+            - name: IdentityServiceUrl
+              value: http://identity-svc
           readinessProbe:
             tcpSocket:
               port: 80

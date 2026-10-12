@@ -55,6 +55,8 @@ export interface Item {
   description: string;
   partName?: string;
   partNumber?: string;
+  /** Body, Engine, Lighting, WheelsAndTyres, ... */
+  partCategory?: string;
   condition?: string;
   containerId?: string;
   images: ItemImage[];
@@ -83,7 +85,34 @@ export interface Auction {
   longitude?: number;
   /** Distance from the selected location (only for "parts near" searches). */
   distanceKm?: number;
+  /** Listing model (search results). */
+  kind?: 'CommonPart' | 'VehicleSpecificPart' | 'Vehicle';
+  fitmentMode?: 'Universal' | 'SizeBased' | 'VehicleSpecific';
+  partType?: string;
+  /** "Fits Toyota Hilux 2016–2020", "Universal – fits any vehicle" … */
+  fitmentSummary?: string;
+  usedGrade?: string;
+  /** "Fits your 2016 Toyota Hilux", "Universal", "Fits by size", "Check fitment". */
+  badge?: string;
+  thumbnailUrl?: string;
+  currency?: string;
+  countryCode?: string;
+  /** Auction (bids until auctionEnd) or FixedPrice (buy now at startingPrice until sold out). */
+  saleType?: SaleType;
+  /** The seller's display name (older listings: undefined – show `seller`). */
+  sellerName?: string;
+  /** FixedPrice: units still for sale. */
+  quantityAvailable?: number;
+  /** Pickup and / or Shipping, the shipping fee (0 = free) and the public pickup city. */
+  deliveryOptions?: ('Pickup' | 'Shipping')[];
+  shippingFee?: number | null;
+  pickupCity?: string | null;
+  /** The seller's average rating (null: none yet) and number of ratings – "⭐ 4.7 (32)". */
+  sellerRating?: number | null;
+  sellerRatingCount?: number;
 }
+
+export type SaleType = 'Auction' | 'FixedPrice';
 
 export interface Bid {
   id: string;
@@ -91,7 +120,8 @@ export interface Bid {
   bidder: string;
   amount: number;
   bidTime: string;
-  isAutoBid: boolean;
+  bidStatus?: string;
+  isAutoBid?: boolean;
 }
 
 export interface Purchase {
@@ -117,21 +147,85 @@ export interface Purchase {
   createdAt: string;
 }
 
+/** Custom order status: Open until a matching listing is published (Matched) or the buyer closes it. */
+export type CustomOrderStatus = 'Open' | 'Matched' | 'Closed';
+
+/** A custom order ("PartRequest" on the server). */
 export interface PartRequest {
   id: string;
   user: string;
+  searchText?: string;
+  /** Empty = any make / model; 0 = any year. */
   make: string;
   model: string;
   year: number;
   partName: string;
+  partNumber?: string;
   vin?: string;
   specs?: string;
   maxBudget: number;
+  locationName?: string;
+  countryCode?: string;
+  radiusKm?: number;
   preferredPort: string;
-  status: 'Feasibility Checked' | 'Sourced' | 'Container Assigned' | 'In Transit' | 'Ready for Pickup';
+  status: CustomOrderStatus | string;
+  /** The listing that matched this order. */
+  matchedAuctionId?: string;
+  matchedAt?: string;
   feasibilityNote?: string;
   estimatedDeliveryDate?: string;
   createdAt: string;
+}
+
+/** POST /partrequests */
+export interface CreateCustomOrder {
+  searchText?: string;
+  partName?: string;
+  partNumber?: string;
+  make?: string;
+  model?: string;
+  year?: number;
+  specs?: string;
+  maxBudget?: number;
+  locationName?: string;
+  countryCode?: string;
+  latitude?: number;
+  longitude?: number;
+  radiusKm?: number;
+}
+
+/**
+ * GET /bids/{id}/next-minimum – the next valid bid and its calculation, worked out by BidService:
+ * "Current bid $1,000 + step $20 = Next bid $1,020". Amounts are totals (part price + bid).
+ */
+export interface NextBid {
+  minimumBid: number;
+  currentTotal: number;
+  bidStep: number;
+  partPrice: number;
+  currentHighBid: number | null;
+  bidCount: number;
+  highBidder: string | null;
+  /** Next, next + 1 step, next + 2 steps, next + 5 steps. */
+  quickBids: number[];
+  auctionEnd: string;
+  status: string;
+}
+
+/** The Marketplace pills (and later the filter sheet). */
+export interface SearchFilters {
+  partCategory?: string;
+  make?: string;
+  model?: string;
+  /** Country-wide results when the location is unknown. */
+  country?: string;
+}
+
+export interface FilterOptions {
+  categories: { value: string; count: number }[];
+  makes: { value: string; count: number }[];
+  models: { make: string; model: string; count: number }[];
+  totalCount: number;
 }
 
 export interface ContainerSchedule {

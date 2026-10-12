@@ -13,9 +13,30 @@ public static class BidEndpoints
 
         group.MapPost("/", PlaceBid).RequireAuthorization();
         group.MapPost("/accept", AcceptBid).RequireAuthorization();
+        group.MapGet("/steps", GetBidSteps);
+        group.MapGet("/mine", GetMyBids).RequireAuthorization();
         group.MapGet("/{auctionId}", GetBidsForAuction);
-        group.MapGet("/{auctionId}/next-min", GetNextMinimumBid);
+        group.MapGet("/{auctionId}/next-minimum", GetNextMinimumBid);
+        group.MapGet("/{auctionId}/next-min", GetNextMinimumBid); // older clients
     }
+
+    /// <summary>My Bids: the auctions the user bid on, newest first, with Winning / Outbid / Won / Lost.</summary>
+    private static async Task<IResult> GetMyBids(ClaimsPrincipal user, IBidRepository repository)
+    {
+        var me = user.Identity?.Name ?? "";
+        var bids = await repository.GetMyBidsAsync(me);
+        foreach (var bid in bids) bid.State = BidRules.MyBidState(bid.AuctionStatus, bid.HighBidder, me);
+        return Results.Ok(bids);
+    }
+
+    /// <summary>The bid step table, e.g. for the seller's review step ("bids go up by 10 below 1,000 ...").</summary>
+    private static IResult GetBidSteps() =>
+        Results.Ok(BidRules.StepTiers.Select((t, i) => new
+        {
+            from = t.From,
+            to = i + 1 < BidRules.StepTiers.Count ? BidRules.StepTiers[i + 1].From - 1 : (int?)null,
+            step = t.Step
+        }));
 
     private static async Task<IResult> PlaceBid(string auctionId, int amount, ClaimsPrincipal user,
         BiddingService biddingService)
@@ -42,7 +63,10 @@ public static class BidEndpoints
         return Results.Ok(bids);
     }
 
-    /// <summary>What the next bid must be at least, so clients can pre-fill the bid box.</summary>
+    /// <summary>
+    /// The next valid bid and its calculation (current total + step = next), so clients can show
+    /// "Current bid $1,000 + step $20 = Next bid $1,020" and pre-fill the bid box.
+    /// </summary>
     private static async Task<IResult> GetNextMinimumBid(string auctionId, BiddingService biddingService,
         IBidRepository repository)
     {
@@ -50,12 +74,21 @@ public static class BidEndpoints
         if (auction == null) return Results.NotFound();
 
         var highBid = await repository.GetHighestBidAsync(auctionId);
+        var currentTotal = BidRules.CurrentTotal(auction, highBid);
+        var step = BidRules.StepFor(currentTotal);
+        var minimumBid = BidRules.MinimumBid(auction, highBid);
 
         return Results.Ok(new NextMinimumBidDto
         {
-            MinimumBid = BidRules.MinimumBid(auction, highBid),
+            MinimumBid = minimumBid,
+            CurrentTotal = currentTotal,
+            BidStep = step,
+            PartPrice = auction.StartingPrice,
             CurrentHighBid = highBid?.Amount,
-            BidIncrement = auction.BidIncrement,
+            BidCount = (await repository.GetBidsForAuctionAsync(auctionId)).Count(),
+            HighBidder = highBid?.Bidder,
+            QuickBids = BidRules.QuickBids(minimumBid, step),
+            BidIncrement = step,
             ReserveMet = BidRules.IsReserveMet(auction, highBid),
             AuctionEnd = auction.AuctionEnd,
             Status = auction.Status.ToString()

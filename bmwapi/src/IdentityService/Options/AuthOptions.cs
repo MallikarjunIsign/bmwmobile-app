@@ -60,7 +60,7 @@ public class EmailOptions
     public string? Username { get; set; }
     public string? Password { get; set; }
     public string? FromAddress { get; set; }
-    public string FromName { get; set; } = "OKOH Parts";
+    public string FromName { get; set; } = "ShopCarParts";
 
     public bool IsConfigured => !string.IsNullOrWhiteSpace(Username) && !string.IsNullOrWhiteSpace(Password);
 }

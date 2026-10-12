@@ -1,6 +1,4 @@
-using Contracts;
-
-namespace IdentityService.Services;
+namespace Contracts;
 
 public record City(string Name, string CountryCode, double Latitude, double Longitude);
 
@@ -12,7 +10,7 @@ public record NearestPlace(string Name, string? CountryCode, double DistanceKm, 
 
 /// <summary>
 /// Built-in city list (India, USA, Nigeria, Ireland) for the location screens and for naming GPS points.
-/// Free and offline — no maps API.
+/// Free and offline â€” no maps API.
 /// </summary>
 public static class CityCatalog
 {

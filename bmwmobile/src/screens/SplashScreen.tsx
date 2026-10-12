@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
@@ -13,16 +13,16 @@ export const SplashScreen: React.FC<Props> = ({ navigation }) => {
       <View style={styles.content}>
         {/* Brand Glow Emblem */}
         <View style={styles.logoBadge}>
-          <Text style={styles.logoText}>OKOH</Text>
+          <Text style={styles.logoText}>BidMy</Text>
           <Text style={styles.subLogoText}>PARTS</Text>
         </View>
 
-        <Text style={styles.tagline}>DIRECT BMW GERMAN AUCTIONS & NIGERIAN CONTAINER LOGISTICS</Text>
+        <Text style={styles.tagline}>BUY AND SELL CAR PARTS & VEHICLES BY AUCTION</Text>
         
         <View style={styles.pillContainer}>
-          <Text style={styles.pill}>🇩🇪 Direct Munich Sourcing</Text>
-          <Text style={styles.pill}>🚢 Lagos Apapa & Tin Can Shipping</Text>
-          <Text style={styles.pill}>⚡ Custom Container Part Feasibility</Text>
+          <Text style={styles.pill}>📍 Parts near you</Text>
+          <Text style={styles.pill}>⚡ Live bidding</Text>
+          <Text style={styles.pill}>🔔 Custom orders – get notified</Text>
         </View>
       </View>
 

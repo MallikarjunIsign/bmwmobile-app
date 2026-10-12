@@ -28,6 +28,10 @@ public class CustomProfileService(
             new(JwtClaimTypes.Email, user.Email ?? string.Empty),
         };
 
+        // Phone: shown only to the other party of a completed sale (AuctionService Orders).
+        if (!string.IsNullOrWhiteSpace(user.PhoneNumber))
+            claims.Add(new Claim(JwtClaimTypes.PhoneNumber, user.PhoneNumber));
+
         context.IssuedClaims.AddRange(claims);
 
         var nameClaim = existingClaims.FirstOrDefault(c => c.Type == JwtClaimTypes.Name);

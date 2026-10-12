@@ -18,12 +18,13 @@ namespace AuctionService.Controllers;
 [ApiController]
 [Route("api/[controller]")] // http://localhost:7001/api/auctions GET, POST, PUT
 public class AuctionsController(AuctionDbContext context, IDbContextOutbox<AuctionDbContext> outbox,
-    AuctionMapper mapper) : ControllerBase
+    AuctionMapper mapper, CustomOrderMatcher customOrders) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<List<AuctionDto>>> GetAuctions(string? date)
     {
-        var query = context.Auctions.AsNoTracking().WithDetails();
+        // Drafts and cancelled listings are private to the seller (and never indexed by SearchService).
+        var query = context.Auctions.AsNoTracking().WithDetails().Published();
 
         if (!string.IsNullOrEmpty(date))
         {
@@ -54,12 +55,12 @@ public class AuctionsController(AuctionDbContext context, IDbContextOutbox<Aucti
             .WithDetails()
             .FirstOrDefaultAsync(x => x.Id == id);
 
-        if (auction == null)
+        if (auction == null || auction.Status is Status.Draft or Status.Cancelled && auction.Seller != User.Identity?.Name)
         {
             return NotFound();
         }
 
-        // The seller (authenticated) also gets their own reserve price.
+        // The seller (authenticated) also gets their own reserve price and full VIN.
         return mapper.ToDto(auction, User.Identity?.Name);
     }
 
@@ -78,6 +79,8 @@ public class AuctionsController(AuctionDbContext context, IDbContextOutbox<Aucti
         await LoadContainerAsync(auction);
 
         await outbox.PublishAsync(mapper.ToCreated(auction));
+        // Buyers waiting for this part (custom orders) are notified in the same transaction.
+        await customOrders.MatchNewListingAsync(auction, outbox);
         await outbox.SaveChangesAndFlushMessagesAsync();
 
         return CreatedAtAction(nameof(GetAuction), new { id = auction.Id }, mapper.ToDto(auction, seller));
@@ -128,7 +131,7 @@ public class AuctionsController(AuctionDbContext context, IDbContextOutbox<Aucti
 
     [Authorize]
     [HttpDelete("{id}")]
-    public async Task<IActionResult> DeleteAuction(string id, [FromServices] IImageStorage storage)
+    public async Task<IActionResult> DeleteAuction(string id, [FromServices] ListingImageService images)
     {
         var auction = await context.Auctions
             .Include(x => x.Item).ThenInclude(x => x.Images)
@@ -152,8 +155,8 @@ public class AuctionsController(AuctionDbContext context, IDbContextOutbox<Aucti
         await outbox.SaveChangesAndFlushMessagesAsync();
 
         // Image rows are cascade-deleted with the item; remove the uploaded files once that is committed.
-        foreach (var image in auction.Item.Images.Where(x => !x.IsExternal))
-            await storage.DeleteAsync(image.FileName);
+        foreach (var image in auction.Item.Images)
+            await images.DeleteFilesAsync(image);
 
         return NoContent();
     }
@@ -165,7 +168,7 @@ public class AuctionsController(AuctionDbContext context, IDbContextOutbox<Aucti
     [Authorize]
     [HttpPost("{id}/relist")]
     public async Task<ActionResult<AuctionDto>> RelistAuction(string id, RelistAuctionDto dto,
-        [FromServices] IImageStorage storage)
+        [FromServices] ListingImageService images)
     {
         var source = await context.Auctions.AsNoTracking().WithDetails().FirstOrDefaultAsync(x => x.Id == id);
         if (source == null) return NotFound();
@@ -178,36 +181,29 @@ public class AuctionsController(AuctionDbContext context, IDbContextOutbox<Aucti
         var invalid = await ValidateAsync(auction, requireFutureEnd: true);
         if (invalid != null) return invalid;
 
-        var copied = new List<string>();
+        var copied = new List<ItemImage>();
         try
         {
             foreach (var image in source.Item.OrderedImages)
             {
                 // Uploaded files are copied so each listing owns its files; seed images are external URLs.
-                var stored = image.IsExternal
-                    ? new StoredImage(image.FileName, image.Url)
-                    : await storage.CopyAsync(image.FileName);
-                if (!image.IsExternal) copied.Add(stored.FileName);
-
-                auction.Item.Images.Add(new ItemImage
-                {
-                    ItemId = auction.Id,
-                    Url = stored.Url,
-                    FileName = stored.FileName,
-                    SortOrder = auction.Item.Images.Count,
-                    IsPrimary = auction.Item.Images.Count == 0
-                });
+                var copy = await images.CopyAsync(image, auction.Id);
+                copy.SortOrder = auction.Item.Images.Count;
+                copy.IsPrimary = auction.Item.Images.Count == 0;
+                if (image.IsStored) copied.Add(copy);
+                auction.Item.Images.Add(copy);
             }
 
             context.Auctions.Add(auction);
             await LoadContainerAsync(auction);
 
             await outbox.PublishAsync(mapper.ToCreated(auction));
+            await customOrders.MatchNewListingAsync(auction, outbox);
             await outbox.SaveChangesAndFlushMessagesAsync();
         }
         catch
         {
-            foreach (var fileName in copied) await storage.DeleteAsync(fileName);
+            foreach (var image in copied) await images.DeleteFilesAsync(image);
             throw;
         }
 

@@ -118,6 +118,38 @@ public class SearchFeatureTests(AppFixture fixture) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Search_ByMarketplacePills_CombinesWithEachOtherAndTheText()
+    {
+        Assert.Equal([_bumper.Id], await Search("partCategory=Body"));
+        Assert.Equal([_bumper.Id], await Search("partCategory=Body&make=Toyota&model=Hilux"));
+        Assert.Equal([_bumper.Id], await Search("make=Toyota&searchTerm=bumper"));
+        Assert.Empty(await Search("partCategory=Body&model=Corolla"));
+        Assert.Empty(await Search("make=Toyota&searchTerm=wheels"));
+    }
+
+    private record FilterOptionsResponse(
+        List<FilterOption> Categories, List<FilterOption> Makes, List<ModelOption> Models, int TotalCount);
+    private record FilterOption(string Value, int Count);
+    private record ModelOption(string Make, string Model, int Count);
+
+    [Fact]
+    public async Task FilterOptions_ListTheLiveCategoriesAndModels()
+    {
+        var result = await fixture.Host.Scenario(s =>
+        {
+            s.Get.Url("/api/search/filters");
+            s.StatusCodeShouldBe(HttpStatusCode.OK);
+        });
+        var options = await result.ReadAsJsonAsync<FilterOptionsResponse>();
+
+        Assert.Equal(["Body", "WheelsAndTyres"], options.Categories.Select(x => x.Value).Order());
+        Assert.Contains(options.Models, x => x is { Make: "Toyota", Model: "Hilux", Count: 1 });
+        // Sold / waiting auctions don't produce pills.
+        Assert.DoesNotContain(options.Makes, x => x.Value is "Soldcar" or "Waitingcar");
+        Assert.Equal(3, options.TotalCount);
+    }
+
+    [Fact]
     public async Task Search_Live_ExcludesEndedAuctions()
     {
         var live = await Search("filterBy=live");

@@ -6,66 +6,82 @@ import { RootStackParamList } from '../types/navigation';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
 import { Badge } from '../components/Badge';
 import { useMoney } from '../location/useMoney';
+import { useLocations } from '../location/LocationContext';
+import { FEATURES } from '../config';
+import { formatRadius } from '../utils/geo';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'RequestSubmitted'>;
 
+/** "Custom order created" – the order is Open until a matching listing is published. */
 export const RequestSubmittedScreen: React.FC<Props> = ({ route, navigation }) => {
   const money = useMoney();
+  const { country } = useLocations();
   const { request } = route.params;
+  const vehicle = [request.year || null, request.make, request.model].filter(Boolean).join(' ');
 
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.iconCircle}>
-          <Text style={styles.iconText}>⚡</Text>
+          <Text style={styles.iconText}>🔔</Text>
         </View>
 
-        <Badge label="FEASIBILITY PASSED & RESERVED" variant="success" />
+        <Badge label="CUSTOM ORDER CREATED" variant="success" />
 
-        <Text style={styles.title}>{request.partName}</Text>
-        <Text style={styles.sub}>For {request.year} {request.make} {request.model}</Text>
+        <Text style={styles.title}>{request.partName || request.partNumber || request.searchText}</Text>
+        <Text style={styles.sub}>{vehicle ? `For ${vehicle}` : 'For any vehicle'}</Text>
 
         <View style={styles.card}>
-          <Text style={styles.cardHeader}>CONTAINER FEASIBILITY REPORT</Text>
-          <Text style={styles.noteText}>{request.feasibilityNote}</Text>
+          <Text style={styles.cardHeader}>WE'LL NOTIFY YOU</Text>
+          <Text style={styles.noteText}>
+            When a matching part is listed
+            {request.radiusKm ? ` within ${formatRadius(request.radiusKm, country)}` : ''}
+            {request.locationName ? ` of ${request.locationName}` : ''}, you'll get a notification that opens the listing.
+          </Text>
 
           <View style={styles.row}>
             <Text style={styles.key}>Status:</Text>
             <Text style={styles.valSuccess}>{request.status}</Text>
           </View>
-          <View style={styles.row}>
-            <Text style={styles.key}>Assigned Container:</Text>
-            <Text style={styles.val}>CN-2026-09 (Bremerhaven Hub)</Text>
-          </View>
-          <View style={styles.row}>
-            <Text style={styles.key}>Port Destination:</Text>
-            <Text style={styles.val}>{request.preferredPort}</Text>
-          </View>
-          <View style={styles.row}>
-            <Text style={styles.key}>Max Budget Ceiling:</Text>
-            <Text style={styles.val}>{money(request.maxBudget)}</Text>
-          </View>
+          {request.partNumber ? (
+            <View style={styles.row}>
+              <Text style={styles.key}>Part number:</Text>
+              <Text style={styles.val}>{request.partNumber}</Text>
+            </View>
+          ) : null}
+          {request.maxBudget > 0 ? (
+            <View style={styles.row}>
+              <Text style={styles.key}>Max budget:</Text>
+              <Text style={styles.val}>{money(request.maxBudget)}</Text>
+            </View>
+          ) : null}
+          {/* Container logistics (hidden while FEATURES.containers is off) */}
+          {FEATURES.containers ? (
+            <View style={styles.row}>
+              <Text style={styles.key}>Port Destination:</Text>
+              <Text style={styles.val}>{request.preferredPort}</Text>
+            </View>
+          ) : null}
         </View>
 
         <TouchableOpacity 
           style={styles.containerBtn}
-          onPress={() => navigation.navigate('PlannedContainers', undefined, { pop: true })}
+          onPress={() => navigation.navigate('MainTabs', { screen: 'MyPurchases' }, { pop: true })}
           activeOpacity={0.8}
         >
-          <Text style={styles.containerText}>VIEW PLANNED CONTAINERS SCHEDULE →</Text>
+          <Text style={styles.containerText}>VIEW MY CUSTOM ORDERS →</Text>
         </TouchableOpacity>
 
         <TouchableOpacity 
           style={styles.secondaryBtn}
           onPress={() => navigation.navigate('MainTabs', { screen: 'Home' }, { pop: true })}
         >
-          <Text style={styles.secondaryText}>Return to Home Dashboard</Text>
+          <Text style={styles.secondaryText}>Return to Home</Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
 };
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,

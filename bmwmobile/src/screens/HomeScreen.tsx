@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CompositeScreenProps } from '@react-navigation/native';
@@ -6,14 +6,18 @@ import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MainTabParamList, RootStackParamList } from '../types/navigation';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
-import { ApiService } from '../services/api';
-import { Auction } from '../types/models';
 import { AuctionCard } from '../components/AuctionCard';
 import { Badge } from '../components/Badge';
 import { useAuth } from '../auth/AuthContext';
-import { LocationSelector } from '../components/LocationSelector';
 import { useLocations } from '../location/LocationContext';
-import { countryName, noPartsNearMessage } from '../utils/geo';
+import { FEATURES } from '../config';
+import { LocationBanner } from '../components/LocationBanner';
+import { NoPartsFound } from '../components/NoPartsFound';
+import { SearchBox, rememberSearch, type SearchState } from '../components/SearchBox';
+import { garageLabel, useGarage } from '../location/GarageContext';
+import { useListingSearch } from '../hooks/useListingSearch';
+import { locationText } from '../utils/geo';
+import { useChat } from '../chat/ChatContext';
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<MainTabParamList, 'Home'>,
@@ -22,23 +26,22 @@ type Props = CompositeScreenProps<
 
 export const HomeScreen: React.FC<Props> = ({ navigation }) => {
   const { user, logout } = useAuth();
-  const { selected, near } = useLocations();
-  const [auctions, setAuctions] = useState<Auction[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [selectedVehicle, setSelectedVehicle] = useState('All Garage');
+  const { unread } = useChat();
+  // Parts within 60 km / 60 mi of the location (GPS or a chosen address), or country-wide while location is off.
+  const { country, location, locationOff } = useLocations();
+  // My Garage: choosing a vehicle filters this list (and every search) by it.
+  const { vehicles, selected: garage, select: selectGarage } = useGarage();
+  const [search, setSearch] = useState<SearchState>({ text: '', chips: [] });
+  const input = useMemo(() => ({ text: '', chips: [], filters: { sort: 'endingSoon' as const } }), []);
+  const { results: auctions, loading, reload: loadData } = useListingSearch(input);
 
-  // The parts within the selected location's radius.
-  const loadData = async () => {
-    setLoading(true);
-    const data = await ApiService.getAuctions(undefined, near);
-    setAuctions(data);
-    setLoading(false);
+  // One search box: searching opens the Market with the results.
+  const submitSearch = (next: SearchState) => {
+    rememberSearch(next);
+    const text = [...next.chips.map(c => c.label), next.text].filter(Boolean).join(' ');
+    if (text) navigation.navigate('Marketplace', { searchTerm: text });
+    setSearch({ text: '', chips: [] });
   };
-
-  useEffect(() => {
-    loadData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [near]);
 
   const handleAccountPress = () => {
     if (!user) return;
@@ -53,77 +56,109 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
       {/* Top Banner Bar */}
       <View style={styles.topHeader}>
         <View style={styles.headerLeft}>
-          <Text style={styles.brandTitle}>OKOH PARTS ⚡</Text>
-          {/* Signed-in user (tap to log out), then the location the parts are shown for */}
+          <Text style={styles.brandTitle}>SHOPCARPARTS ⚡</Text>
+          {/* Signed-in user (tap to log out) */}
           <TouchableOpacity onPress={handleAccountPress} hitSlop={8} activeOpacity={0.7}>
             <Text style={styles.userLine} numberOfLines={1}>
               👤 {user?.fullName} · <Text style={styles.linkBold}>Log out</Text>
             </Text>
           </TouchableOpacity>
-          {selected ? (
-            <TouchableOpacity onPress={() => navigation.navigate('ManageLocations')} hitSlop={8} activeOpacity={0.7}>
-              <Text style={styles.locationLine} numberOfLines={1}>
-                📍 {[selected.placeName, countryName(selected.countryCode)].filter(Boolean).join(', ')}
-              </Text>
-            </TouchableOpacity>
-          ) : null}
+          {/* The user's location (GPS or a chosen address): just the place and country – tap to change it. */}
+          <TouchableOpacity
+            onPress={() => navigation.navigate('Locations')}
+            hitSlop={8}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Change location"
+          >
+            <Text style={styles.locationLine} numberOfLines={1}>
+              {locationText(location) ?? (locationOff ? 'Location off – set your location' : 'Finding your location…')}
+            </Text>
+          </TouchableOpacity>
         </View>
-        <TouchableOpacity 
-          style={styles.requestBtn} 
-          onPress={() => navigation.navigate('OrderPartRequest', {})}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.requestBtnText}>+ Custom Order</Text>
-        </TouchableOpacity>
+        <View style={styles.headerRight}>
+          {/* Messages (buyer–seller chat) with the unread count. */}
+          <TouchableOpacity
+            style={styles.messagesBtn}
+            onPress={() => navigation.navigate('Inbox')}
+            activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel={unread > 0 ? `Messages, ${unread} unread` : 'Messages'}
+          >
+            <Text style={styles.messagesIcon}>💬</Text>
+            {unread > 0 ? (
+              <View style={styles.unreadBadge}>
+                <Text style={styles.unreadText}>{unread > 99 ? '99+' : unread}</Text>
+              </View>
+            ) : null}
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.requestBtn} 
+            onPress={() => navigation.navigate('OrderPartRequest', {})}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.requestBtnText}>+ Custom Order</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView 
         contentContainerStyle={styles.scroll}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={loadData} tintColor={COLORS.primaryGlow} />}
       >
-        {/* Planned Containers Schedule Banner */}
-        <TouchableOpacity 
-          style={styles.containerBanner}
-          onPress={() => navigation.navigate('PlannedContainers')}
-          activeOpacity={0.9}
-        >
-          <View style={styles.bannerLeft}>
-            <Text style={styles.bannerTag}>🚢 CONTAINER SCHEDULE</Text>
-            <Text style={styles.bannerTitle}>Container CN-2026-09</Text>
-            <Text style={styles.bannerDetail}>Bremerhaven → Lagos Apapa • Cutoff in 12 Days</Text>
-          </View>
-          <View style={styles.bannerRight}>
-            <Badge label="68% FULL" variant="warning" size="sm" />
-            <Text style={styles.bannerArrow}>View →</Text>
-          </View>
-        </TouchableOpacity>
+        {/* Location denied / GPS off */}
+        <LocationBanner />
+
+        <View style={styles.searchWrap}>
+          <SearchBox value={search} onChange={setSearch} onSubmit={submitSearch} country={country} />
+        </View>
+
+        {/* Planned Containers Schedule Banner (hidden while FEATURES.containers is off) */}
+        {FEATURES.containers ? (
+          <TouchableOpacity 
+            style={styles.containerBanner}
+            onPress={() => navigation.navigate('PlannedContainers')}
+            activeOpacity={0.9}
+          >
+            <View style={styles.bannerLeft}>
+              <Text style={styles.bannerTag}>🚢 CONTAINER SCHEDULE</Text>
+              <Text style={styles.bannerTitle}>Container CN-2026-09</Text>
+              <Text style={styles.bannerDetail}>Bremerhaven → Lagos Apapa • Cutoff in 12 Days</Text>
+            </View>
+            <View style={styles.bannerRight}>
+              <Badge label="68% FULL" variant="warning" size="sm" />
+              <Text style={styles.bannerArrow}>View →</Text>
+            </View>
+          </TouchableOpacity>
+        ) : null}
 
         {/* Garage Filter Shortcuts */}
         <View style={styles.garageBar}>
           <Text style={styles.sectionHeader}>FILTER BY YOUR GARAGE</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}>
-            {['All Garage', '2018 BMW 330i', '2021 BMW M4', 'S58 Engines', 'Headlights'].map(item => (
+            <TouchableOpacity style={[styles.filterChip, !garage && styles.filterChipActive]} onPress={() => selectGarage(null)}>
+              <Text style={[styles.filterText, !garage && styles.filterTextActive]}>All vehicles</Text>
+            </TouchableOpacity>
+            {vehicles.map(v => (
               <TouchableOpacity
-                key={item}
-                style={[styles.filterChip, selectedVehicle === item && styles.filterChipActive]}
-                onPress={() => setSelectedVehicle(item)}
+                key={v.id}
+                style={[styles.filterChip, garage?.id === v.id && styles.filterChipActive]}
+                onPress={() => selectGarage(garage?.id === v.id ? null : v.id!)}
               >
-                <Text style={[styles.filterText, selectedVehicle === item && styles.filterTextActive]}>
-                  {item}
-                </Text>
+                <Text style={[styles.filterText, garage?.id === v.id && styles.filterTextActive]}>🚗 {garageLabel(v)}</Text>
               </TouchableOpacity>
             ))}
+            <TouchableOpacity style={styles.filterChip} onPress={() => navigation.navigate('Garage')}>
+              <Text style={styles.filterText}>{vehicles.length ? '⚙ My Garage' : '+ Add your vehicle'}</Text>
+            </TouchableOpacity>
           </ScrollView>
-        </View>
-
-        {/* Which saved location the parts list is for */}
-        <View style={styles.locationBar}>
-          <LocationSelector onManage={() => navigation.navigate('ManageLocations')} />
         </View>
 
         {/* Live Auctions Ticker Section */}
         <View style={styles.sectionRow}>
-          <Text style={styles.sectionTitle}>🔥 LIVE BMW AUCTIONS</Text>
+          <Text style={styles.sectionTitle}>
+            {garage ? `🔥 FOR YOUR ${garage.year} ${garage.model.toUpperCase()}` : '🔥 LIVE LISTINGS'}
+          </Text>
           <TouchableOpacity onPress={() => navigation.navigate('Marketplace', {})}>
             <Text style={styles.seeAll}>See All ({auctions.length}) →</Text>
           </TouchableOpacity>
@@ -135,37 +170,31 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
             auction={item}
             onPress={() => navigation.navigate('PartDetails', { auctionId: item.id, auction: item })}
             onBidPress={() => navigation.navigate('PlaceBidModal', { auction: item })}
+            onSellerPress={() => navigation.navigate('SellerProfile', { seller: item.seller, sellerName: item.sellerName })}
           />
         ))}
 
-        {/* Nothing within the selected radius */}
-        {!loading && selected && auctions.length === 0 ? (
-          <View style={styles.noneNear}>
-            <Text style={styles.noneNearIcon}>📍</Text>
-            <Text style={styles.noneNearText}>{noPartsNearMessage(selected)}</Text>
-            <TouchableOpacity onPress={() => navigation.navigate('ManageLocations')}>
-              <Text style={styles.seeAll}>Change location or radius →</Text>
+        {/* Nothing to show: offer a custom order */}
+        {!loading && auctions.length === 0 ? (
+          <NoPartsFound onCreateOrder={() => navigation.navigate('OrderPartRequest', {})} />
+        ) : (
+          /* Quick Custom Request Floating CTA */
+          <View style={styles.partRequestBox}>
+            <Text style={styles.boxTitle}>Can't find your part?</Text>
+            <Text style={styles.boxDesc}>Create a custom order and get notified when the part is available.</Text>
+            <TouchableOpacity 
+              style={styles.boxBtn}
+              onPress={() => navigation.navigate('OrderPartRequest', {})}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.boxBtnText}>CREATE A CUSTOM ORDER</Text>
             </TouchableOpacity>
           </View>
-        ) : null}
-
-        {/* Quick Custom Request Floating CTA */}
-        <View style={styles.partRequestBox}>
-          <Text style={styles.boxTitle}>Can't find your specific BMW part?</Text>
-          <Text style={styles.boxDesc}>Submit a custom part request and check instant container packing feasibility.</Text>
-          <TouchableOpacity 
-            style={styles.boxBtn}
-            onPress={() => navigation.navigate('OrderPartRequest', {})}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.boxBtnText}>REQUEST A BMW PART NOW</Text>
-          </TouchableOpacity>
-        </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
 };
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -195,16 +224,52 @@ const styles = StyleSheet.create({
     color: COLORS.primaryGlow,
     fontWeight: '700',
   },
+  locationLine: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 4,
+  },
   userLine: {
     color: COLORS.text,
     fontSize: 12,
     fontWeight: '600',
     marginTop: 4,
   },
-  locationLine: {
-    color: COLORS.textMuted,
-    fontSize: 11,
-    marginTop: 3,
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+  },
+  messagesBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: COLORS.card,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  messagesIcon: {
+    fontSize: 18,
+  },
+  unreadBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: COLORS.danger,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  unreadText: {
+    color: COLORS.text,
+    fontSize: 10,
+    fontWeight: '900',
   },
   requestBtn: {
     backgroundColor: COLORS.primary,
@@ -216,6 +281,10 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     fontSize: 12,
     fontWeight: '800',
+  },
+  searchWrap: {
+    marginBottom: SPACING.md,
+    zIndex: 10,
   },
   scroll: {
     padding: SPACING.md,
@@ -295,28 +364,6 @@ const styles = StyleSheet.create({
   filterTextActive: {
     color: COLORS.text,
     fontWeight: '800',
-  },
-  locationBar: {
-    marginBottom: SPACING.md,
-  },
-  noneNear: {
-    alignItems: 'center',
-    backgroundColor: COLORS.surface,
-    borderRadius: RADIUS.lg,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    padding: SPACING.lg,
-    marginBottom: SPACING.md,
-    gap: SPACING.sm,
-  },
-  noneNearIcon: {
-    fontSize: 28,
-  },
-  noneNearText: {
-    color: COLORS.text,
-    fontSize: 15,
-    fontWeight: '700',
-    textAlign: 'center',
   },
   sectionRow: {
     flexDirection: 'row',

@@ -6,6 +6,7 @@ import { RootStackParamList } from '../types/navigation';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
 import { Badge } from '../components/Badge';
 import { useMoney } from '../location/useMoney';
+import { FEATURES } from '../config';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AuctionWon'>;
 
@@ -28,6 +29,9 @@ export const AuctionWonScreen: React.FC<Props> = ({ route, navigation }) => {
           <Text style={styles.label}>WINNING BID TOTAL</Text>
           <Text style={styles.amount}>{money(auction.currentHighBid)}</Text>
 
+          {/* Container logistics (hidden while FEATURES.containers is off) */}
+          {FEATURES.containers ? (
+          <>
           <View style={styles.row}>
             <Text style={styles.key}>Assigned Container:</Text>
             <Text style={styles.val}>{auction.containerNumber || 'MSCU7821940'}</Text>
@@ -40,14 +44,20 @@ export const AuctionWonScreen: React.FC<Props> = ({ route, navigation }) => {
             <Text style={styles.key}>Est. Port Arrival Date:</Text>
             <Text style={styles.val}>{auction.estimatedArrival || 'Nov 02, 2026'}</Text>
           </View>
+          </>
+          ) : null}
         </View>
 
         <TouchableOpacity 
           style={styles.checkoutBtn}
-          onPress={() => navigation.navigate('CompletePurchase', { auctionId: auction.id, auction })}
+          onPress={() =>
+            FEATURES.containers
+              ? navigation.navigate('CompletePurchase', { auctionId: auction.id, auction })
+              : navigation.navigate('MainTabs', { screen: 'MyPurchases' }, { pop: true })
+          }
           activeOpacity={0.8}
         >
-          <Text style={styles.checkoutText}>PROCEED TO CHECKOUT & GENERATE PICKUP PASS →</Text>
+          <Text style={styles.checkoutText}>{FEATURES.containers ? 'PROCEED TO CHECKOUT & GENERATE PICKUP PASS →' : 'VIEW MY ORDERS →'}</Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>

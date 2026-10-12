@@ -123,6 +123,111 @@ public class BidRepository(BidDbContext dbContext) : IBidRepository
         return bid.Adapt<BidDto>();
     }
 
+    public async Task<List<string>> GetBiddersAsync(string auctionId, DbSession? session = null)
+    {
+        const string sql = """
+            select distinct bidder from bids
+            where auctionid = @auctionId and bidstatus in (@Accepted, @AcceptedBelowReserve)
+            """;
+        var args = new DynamicParameters(AcceptedStatuses);
+        args.Add("auctionId", auctionId);
+
+        if (session != null)
+            return (await session.Connection.QueryAsync<string>(sql, args, session.Transaction)).ToList();
+
+        await using var connection = dbContext.CreateConnection();
+        return (await connection.QueryAsync<string>(sql, args)).ToList();
+    }
+
+    public async Task<int> CountAcceptedBidsAsync(string auctionId, DbSession? session = null)
+    {
+        const string sql = """
+            select count(*) from bids
+            where auctionid = @auctionId and bidstatus in (@Accepted, @AcceptedBelowReserve)
+            """;
+        var args = new DynamicParameters(AcceptedStatuses);
+        args.Add("auctionId", auctionId);
+
+        if (session != null)
+            return await session.Connection.ExecuteScalarAsync<int>(sql, args, session.Transaction);
+
+        await using var connection = dbContext.CreateConnection();
+        return await connection.ExecuteScalarAsync<int>(sql, args);
+    }
+
+    public async Task<List<MyBidDto>> GetMyBidsAsync(string bidder)
+    {
+        await using var connection = dbContext.CreateConnection();
+        var args = new DynamicParameters(AcceptedStatuses);
+        args.Add("bidder", bidder);
+        var rows = await connection.QueryAsync<MyBidRow>(
+            """
+            with mine as (
+                select auctionid, max(amount) as myhighest, max(bidtime) as mylast
+                from bids
+                where bidder = @bidder and bidstatus in (@Accepted, @AcceptedBelowReserve)
+                group by auctionid
+            ), top as (
+                select distinct on (auctionid) auctionid, amount, bidder
+                from bids
+                where bidstatus in (@Accepted, @AcceptedBelowReserve) and auctionid in (select auctionid from mine)
+                order by auctionid, amount desc, bidtime asc
+            ), counts as (
+                select auctionid, count(*) as bidcount
+                from bids
+                where bidstatus in (@Accepted, @AcceptedBelowReserve) and auctionid in (select auctionid from mine)
+                group by auctionid
+            )
+            select m.auctionid, m.myhighest, m.mylast, t.amount as currenthighbid, t.bidder as highbidder,
+                   c.bidcount, a.status, a.auctionend
+            from mine m
+            join auctions a on a.id = m.auctionid
+            left join top t on t.auctionid = m.auctionid
+            left join counts c on c.auctionid = m.auctionid
+            order by m.mylast desc
+            """, args);
+
+        return rows.Select(r => new MyBidDto
+        {
+            AuctionId = r.AuctionId,
+            MyHighestBid = r.MyHighest,
+            MyLastBidTime = DateTime.SpecifyKind(r.MyLast, DateTimeKind.Utc),
+            CurrentHighBid = r.CurrentHighBid,
+            HighBidder = r.HighBidder,
+            BidCount = (int)r.BidCount,
+            AuctionStatus = ((AuctionStatus)r.Status).ToString(),
+            AuctionEnd = DateTime.SpecifyKind(r.AuctionEnd, DateTimeKind.Utc)
+        }).ToList();
+    }
+
+    private sealed class MyBidRow
+    {
+        public string AuctionId { get; set; } = "";
+        public int MyHighest { get; set; }
+        public DateTime MyLast { get; set; }
+        public int? CurrentHighBid { get; set; }
+        public string? HighBidder { get; set; }
+        public long BidCount { get; set; }
+        public int Status { get; set; }
+        public DateTime AuctionEnd { get; set; }
+    }
+
+    public async Task SetBlockedAsync(string blocker, string blocked, bool isBlocked)
+    {
+        await using var connection = dbContext.CreateConnection();
+        await connection.ExecuteAsync(isBlocked
+            ? "insert into userblocks (blocker, blocked) values (@blocker, @blocked) on conflict do nothing"
+            : "delete from userblocks where blocker = @blocker and blocked = @blocked",
+            new { blocker, blocked });
+    }
+
+    public async Task<bool> IsBlockedAsync(string blocker, string blocked)
+    {
+        await using var connection = dbContext.CreateConnection();
+        return await connection.ExecuteScalarAsync<bool>(
+            "select exists (select 1 from userblocks where blocker = @blocker and blocked = @blocked)", new { blocker, blocked });
+    }
+
     public async Task<IEnumerable<BidDto>> GetBidsForAuctionAsync(string auctionId)
     {
         await using var connection = dbContext.CreateConnection();

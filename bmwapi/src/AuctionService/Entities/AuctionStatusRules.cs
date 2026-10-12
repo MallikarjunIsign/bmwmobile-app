@@ -11,7 +11,7 @@ public static class AuctionStatusRules
     /// </summary>
     public static bool CanTransition(Status current, Status next) => current switch
     {
-        Status.Live => next != Status.Live,
+        Status.Live => next is Status.Sold or Status.ReserveNotMet or Status.Unsold,
         Status.ReserveNotMet => next is Status.Sold or Status.Unsold,
         _ => false
     };

@@ -1,147 +1,172 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Switch } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
-import { ApiService } from '../services/api';
-import { currentUsername } from '../auth/session';
+import { ApiService, ServerError } from '../services/api';
+import { currentUsername, isCurrentUser } from '../auth/session';
 import { useCurrencyLabel, useMoney } from '../location/useMoney';
+import { useLocations } from '../location/LocationContext';
+import { REGIONS } from '../utils/geo';
+import { useNextBid } from '../hooks/useNextBid';
+import { NextBidCalculation } from '../components/NextBidCalculation';
+import { Notice } from '../components/Notice';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'PlaceBidModal'>;
 
+/**
+ * Place a bid. The next valid bid, its calculation and the quick-bid amounts all come from BidService
+ * (GET /bids/{id}/next-minimum) and update live when someone else bids. A bid is the TOTAL (part price + bid).
+ */
 export const PlaceBidModal: React.FC<Props> = ({ route, navigation }) => {
   const money = useMoney();
   const currencyLabel = useCurrencyLabel();
+  const { country } = useLocations();
   const { auction } = route.params;
-  const minBid = auction.currentHighBid + 250;
-  const [bidAmount, setBidAmount] = useState(minBid.toString());
-  const [isAutoBid, setIsAutoBid] = useState(false);
-  const [maxAutoBid, setMaxAutoBid] = useState((minBid + 1500).toString());
+  const { next, loading, reload } = useNextBid(auction.id);
+  const [bidAmount, setBidAmount] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const lastMinimum = useRef<number | null>(null);
 
-  const numericBid = parseFloat(bidAmount) || minBid;
-  const buyerFee = numericBid * 0.03;
+  // Pre-fill the next valid bid; when a new bid raises it, move the box up too (never down).
+  useEffect(() => {
+    if (!next) return;
+    const typed = parseInt(bidAmount, 10);
+    if (!bidAmount || Number.isNaN(typed) || typed < next.minimumBid || typed === lastMinimum.current) {
+      setBidAmount(String(next.minimumBid));
+    }
+    lastMinimum.current = next.minimumBid;
+  }, [next?.minimumBid]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const numericBid = parseInt(bidAmount, 10) || 0;
+  const tooLow = !!next && numericBid < next.minimumBid;
+  // The seller can't bid on their own listing; the highest bidder can't outbid themselves (the Bid service checks too).
+  const blocked = isCurrentUser(auction.seller)
+    ? "You can't bid on your own listing"
+    : next?.highBidder && isCurrentUser(next.highBidder)
+      ? "You're the highest bidder"
+      : null;
 
   const handleConfirmBid = async () => {
-    setSubmitting(true);
-    await ApiService.placeBid(auction.id, numericBid);
-    if (isAutoBid) {
-      await ApiService.setAutoBid(auction.id, parseFloat(maxAutoBid) || numericBid + 1000);
+    if (blocked) return;
+    if (!next || tooLow) {
+      if (next) setError(`The next valid bid is ${money(next.minimumBid)}`);
+      return;
     }
-    setSubmitting(false);
-    navigation.replace('HighestBidder', { auction: { ...auction, currentHighBid: numericBid, highBidder: currentUsername() } });
+    setSubmitting(true);
+    setError(null);
+    try {
+      await ApiService.placeBid(auction.id, numericBid);
+      navigation.replace('HighestBidder', {
+        auction: { ...auction, currentHighBid: numericBid, highBidder: currentUsername(), bidCount: next.bidCount + 1 },
+      });
+    } catch (err) {
+      setError(err instanceof ServerError ? err.message : "Your bid couldn't be placed. Please try again.");
+      reload();
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Place Bid & Auto-Bid Setup</Text>
+        <Text style={styles.headerTitle}>Place Bid</Text>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Text style={styles.closeBtn}>✕</Text>
         </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <Text style={styles.auctionTitle}>{auction.title}</Text>
-        
-        {/* Current High Bid summary */}
-        <View style={styles.currentSummary}>
-          <Text style={styles.summaryLabel}>Current Highest Bid</Text>
-          <Text style={styles.summaryValue}>{money(auction.currentHighBid)}</Text>
-          <Text style={styles.minIncrement}>Minimum Next Bid: {money(minBid)}</Text>
-        </View>
 
-        {/* Instant Increment Quick Chips */}
-        <Text style={styles.label}>QUICK BID SELECTION</Text>
-        <View style={styles.quickRow}>
-          {[minBid, minBid + 250, minBid + 500, minBid + 1000].map(val => (
-            <TouchableOpacity
-              key={val}
-              style={[styles.quickChip, parseFloat(bidAmount) === val && styles.quickChipActive]}
-              onPress={() => setBidAmount(val.toString())}
-            >
-              <Text style={[styles.quickChipText, parseFloat(bidAmount) === val && styles.quickChipTextActive]}>
-                {money(val)}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {/* Custom Bid Input */}
-        <Text style={styles.label}>YOUR BID AMOUNT ({currencyLabel})</Text>
-        <View style={styles.inputWrap}>
-          <Text style={styles.currencySymbol}>$</Text>
-          <TextInput
-            style={styles.input}
-            value={bidAmount}
-            onChangeText={setBidAmount}
-            keyboardType="numeric"
-          />
-        </View>
-
-        {/* Auto-Bid Protection Toggle */}
-        <View style={styles.autoBidCard}>
-          <View style={styles.autoBidHeader}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.autoBidTitle}>⚡ Enable Auto-Bid Ceiling Protection</Text>
-              <Text style={styles.autoBidSub}>Automatically outbid competitors up to your maximum ceiling.</Text>
-            </View>
-            <Switch 
-              value={isAutoBid} 
-              onValueChange={setIsAutoBid} 
-              trackColor={{ false: COLORS.border, true: COLORS.primary }}
-            />
+        {!next ? (
+          <View style={styles.currentSummary}>
+            {loading ? (
+              <ActivityIndicator color={COLORS.primaryGlow} />
+            ) : (
+              <>
+                <Text style={styles.summaryLabel}>We couldn't load the current bid.</Text>
+                <TouchableOpacity onPress={() => reload()}>
+                  <Text style={styles.retry}>Try again</Text>
+                </TouchableOpacity>
+              </>
+            )}
           </View>
+        ) : (
+          <>
+            {/* Current total and the next valid bid */}
+            <View style={styles.currentSummary}>
+              <Text style={styles.summaryLabel}>{next.bidCount > 0 ? 'Current bid' : 'Part price'}</Text>
+              <Text style={styles.summaryValue}>{money(next.currentTotal)}</Text>
+              <Text style={styles.minIncrement}>
+                {next.bidCount} {next.bidCount === 1 ? 'bid' : 'bids'} · Next bid {money(next.minimumBid)}
+              </Text>
+            </View>
 
-          {isAutoBid && (
-            <View style={styles.autoInputBox}>
-              <Text style={styles.autoInputLabel}>MAX CEILING AUTO-BID AMOUNT ($)</Text>
+            {/* Quick bids: next, next + 1, 2 and 5 steps */}
+            <Text style={styles.label}>QUICK BID</Text>
+            <View style={styles.quickRow}>
+              {next.quickBids.map(val => (
+                <TouchableOpacity
+                  key={val}
+                  style={[styles.quickChip, numericBid === val && styles.quickChipActive]}
+                  onPress={() => {
+                    setBidAmount(String(val));
+                    setError(null);
+                  }}
+                >
+                  <Text style={[styles.quickChipText, numericBid === val && styles.quickChipTextActive]} numberOfLines={1}>
+                    {money(val)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* Custom Bid Input (the total) */}
+            <Text style={styles.label}>YOUR BID – TOTAL ({currencyLabel})</Text>
+            <View style={[styles.inputWrap, tooLow && styles.inputWrapError]}>
+              <Text style={styles.currencySymbol}>{REGIONS[country].currencySymbol}</Text>
               <TextInput
-                style={styles.autoInput}
-                value={maxAutoBid}
-                onChangeText={setMaxAutoBid}
-                keyboardType="numeric"
+                style={styles.input}
+                value={bidAmount}
+                onChangeText={text => {
+                  setBidAmount(text.replace(/[^0-9]/g, ''));
+                  setError(null);
+                }}
+                keyboardType="number-pad"
+                accessibilityLabel="Bid amount"
               />
             </View>
-          )}
-        </View>
 
-        {/* Cost Breakdown */}
-        <View style={styles.breakdown}>
-          <View style={styles.breakRow}>
-            <Text style={styles.breakKey}>Winning Bid Amount:</Text>
-            <Text style={styles.breakVal}>{money(numericBid)}</Text>
-          </View>
-          <View style={styles.breakRow}>
-            <Text style={styles.breakKey}>OKOH Buyer Clearing Fee (3%):</Text>
-            <Text style={styles.breakVal}>{money(buyerFee, 2)}</Text>
-          </View>
-          <View style={styles.breakRow}>
-            <Text style={styles.breakKey}>Est. Container Ocean Shipping:</Text>
-            <Text style={styles.breakVal}>Included (Free Port Pickup)</Text>
-          </View>
-          <View style={[styles.breakRow, styles.totalRow]}>
-            <Text style={styles.totalKey}>TOTAL ESTIMATED COST:</Text>
-            <Text style={styles.totalVal}>{money((numericBid + buyerFee))}</Text>
-          </View>
-        </View>
+            {/* Current bid + step = next bid, and part price + your bid = total */}
+            <NextBidCalculation next={next} bidTotal={numericBid || next.minimumBid} />
+
+            <Text style={styles.howItWorks}>
+              A bid is an amount on top of the part price. The highest total when the auction ends wins. Bids can't be withdrawn.
+            </Text>
+          </>
+        )}
+
+        {blocked ? <Notice tone="info" message={blocked} /> : null}
+        {error ? <Notice tone="error" message={error} /> : null}
 
         <TouchableOpacity 
-          style={styles.confirmBtn} 
+          style={[styles.confirmBtn, (!next || submitting || !!blocked) && styles.confirmBtnDisabled]} 
           onPress={handleConfirmBid} 
-          disabled={submitting}
+          disabled={!next || submitting || !!blocked}
           activeOpacity={0.8}
         >
           <Text style={styles.confirmText}>
-            {submitting ? 'CONFIRMING BID...' : `CONFIRM BID OF ${money(numericBid)}`}
+            {submitting ? 'PLACING BID...' : `CONFIRM BID OF ${money(numericBid || next?.minimumBid || 0)}`}
           </Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
 };
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -256,92 +281,30 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     height: 50,
   },
-  autoBidCard: {
-    backgroundColor: COLORS.surface,
-    padding: SPACING.md,
-    borderRadius: RADIUS.md,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    marginBottom: SPACING.md,
-  },
-  autoBidHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  autoBidTitle: {
-    color: COLORS.text,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  autoBidSub: {
-    color: COLORS.textMuted,
-    fontSize: 11,
-    marginTop: 2,
-  },
-  autoInputBox: {
-    marginTop: SPACING.md,
-    paddingTop: SPACING.sm,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-  },
-  autoInputLabel: {
-    color: COLORS.textSecondary,
-    fontSize: 11,
-    fontWeight: '700',
-    marginBottom: 4,
-  },
-  autoInput: {
-    backgroundColor: COLORS.card,
-    color: COLORS.primaryGlow,
-    fontSize: 18,
-    fontWeight: '800',
-    paddingHorizontal: SPACING.md,
-    height: 44,
-    borderRadius: RADIUS.sm,
-    borderWidth: 1,
-    borderColor: COLORS.borderHighlight,
-  },
-  breakdown: {
-    backgroundColor: COLORS.card,
-    padding: SPACING.md,
-    borderRadius: RADIUS.md,
-    marginBottom: SPACING.lg,
-  },
-  breakRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 4,
-  },
-  breakKey: {
-    color: COLORS.textMuted,
-    fontSize: 12,
-  },
-  breakVal: {
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  totalRow: {
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-    marginTop: SPACING.xs,
-    paddingTop: SPACING.sm,
-  },
-  totalKey: {
-    color: COLORS.text,
-    fontWeight: '800',
-    fontSize: 13,
-  },
-  totalVal: {
-    color: COLORS.primaryGlow,
-    fontWeight: '900',
-    fontSize: 16,
-  },
   confirmBtn: {
     backgroundColor: COLORS.primary,
+    marginTop: SPACING.lg,
     paddingVertical: 14,
     borderRadius: RADIUS.md,
     alignItems: 'center',
+  },
+  confirmBtnDisabled: {
+    opacity: 0.6,
+  },
+  inputWrapError: {
+    borderColor: COLORS.danger,
+  },
+  retry: {
+    color: COLORS.primaryGlow,
+    fontSize: 13,
+    fontWeight: '800',
+    marginTop: SPACING.xs,
+  },
+  howItWorks: {
+    color: COLORS.textMuted,
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: SPACING.md,
   },
   confirmText: {
     color: COLORS.text,

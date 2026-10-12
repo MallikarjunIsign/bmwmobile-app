@@ -52,7 +52,14 @@ builder.Host.UseWolverine(opts =>
         .DeclareExchange("bid-placed", ex => ex.ExchangeType = ExchangeType.Fanout)
         .DeclareExchange("auction-finished", ex => ex.ExchangeType = ExchangeType.Fanout)
         .DeclareExchange("auction-extended", ex => ex.ExchangeType = ExchangeType.Fanout)
+        .DeclareExchange("auction-ending-soon", ex => ex.ExchangeType = ExchangeType.Fanout)
+        .DeclareExchange("user-blocked", ex => ex.ExchangeType = ExchangeType.Fanout)
+        .DeclareExchange("user-unblocked", ex => ex.ExchangeType = ExchangeType.Fanout)
+        .BindExchange("user-blocked").ToQueue("bid-user-blocked")
+        .BindExchange("user-unblocked").ToQueue("bid-user-unblocked")
         .BindExchange("auction-created").ToQueue("bid-auction-created")
+        // Kept for NotificationService even while it is down.
+        .BindExchange("auction-ending-soon").ToQueue("notification-auction-ending-soon")
         .BindExchange("auction-updated").ToQueue("bid-auction-updated")
         .BindExchange("auction-deleted").ToQueue("bid-auction-deleted")
         .AutoProvision();
@@ -60,9 +67,12 @@ builder.Host.UseWolverine(opts =>
     opts.ListenToRabbitQueue("bid-auction-created");
     opts.ListenToRabbitQueue("bid-auction-updated");
     opts.ListenToRabbitQueue("bid-auction-deleted");
+    opts.ListenToRabbitQueue("bid-user-blocked");
+    opts.ListenToRabbitQueue("bid-user-unblocked");
     opts.PublishMessage<BidPlaced>().ToRabbitExchange("bid-placed");
     opts.PublishMessage<AuctionFinished>().ToRabbitExchange("auction-finished");
     opts.PublishMessage<AuctionExtended>().ToRabbitExchange("auction-extended");
+    opts.PublishMessage<AuctionEndingSoon>().ToRabbitExchange("auction-ending-soon");
 });
 
 builder.Services.AddScoped<IBidRepository, BidRepository>();

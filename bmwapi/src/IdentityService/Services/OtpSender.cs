@@ -40,8 +40,8 @@ public class EmailOtpSender(
         message.From.Add(new MailboxAddress(_opt.FromName, from));
         message.To.Add(new MailboxAddress(user.FullName ?? user.UserName ?? email, email));
         message.Subject = purpose == OtpPurpose.ResetPassword
-            ? $"{code} is your OKOH Parts password reset code"
-            : $"{code} is your OKOH Parts sign-in code";
+            ? $"{code} is your ShopCarParts password reset code"
+            : $"{code} is your ShopCarParts sign-in code";
 
         var action = purpose == OtpPurpose.ResetPassword ? "reset your password" : "sign in";
         var builder = new BodyBuilder
@@ -49,7 +49,7 @@ public class EmailOtpSender(
             TextBody = $"Your code to {action} is {code}.\n\nIt expires in 10 minutes. If you didn't ask for it, you can ignore this email.",
             HtmlBody = $"""
                 <div style="font-family:Arial,sans-serif;background:#07071C;color:#ffffff;padding:24px;border-radius:12px">
-                  <p style="color:#B226FF;font-weight:800;letter-spacing:2px;margin:0">OKOH PARTS</p>
+                  <p style="color:#B226FF;font-weight:800;letter-spacing:2px;margin:0">SHOPCARPARTS</p>
                   <p>Your code to {action} is</p>
                   <p style="font-size:32px;font-weight:900;letter-spacing:8px;color:#B226FF;margin:8px 0">{code}</p>
                   <p style="color:#94A3B8">It expires in 10 minutes. If you didn't ask for it, you can ignore this email.</p>

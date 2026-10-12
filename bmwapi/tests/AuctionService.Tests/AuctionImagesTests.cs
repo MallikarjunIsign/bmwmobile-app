@@ -12,9 +12,9 @@ namespace AuctionService.Tests;
 [Collection("auction-service")]
 public class AuctionImagesTests(AppFixture fixture) : IAsyncLifetime
 {
-    private static readonly byte[] PngBytes = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13, 1, 2, 3];
-    private static readonly byte[] JpegBytes = [0xFF, 0xD8, 0xFF, 0xE0, 0, 16, 0x4A, 0x46, 0x49, 0x46, 0, 1];
-    private static readonly byte[] WebpBytes = "RIFF\0\0\0\0WEBPVP8 "u8.ToArray();
+    private static readonly byte[] PngBytes = TestImages.Png();
+    private static readonly byte[] JpegBytes = TestImages.Jpeg();
+    private static readonly byte[] WebpBytes = TestImages.Webp();
 
     // An auction without images, like one that was just created.
     private readonly Auction _auction = TestData.CreateAuction(x => x.Item.Images.Clear());
@@ -82,6 +82,33 @@ public class AuctionImagesTests(AppFixture fixture) : IAsyncLifetime
         Assert.EndsWith(".webp", images[2].Url);
         Assert.StartsWith("http://localhost:6001/images/", images[0].Url);
         Assert.All(images, x => Assert.True(File.Exists(Path.Combine(fixture.UploadsPath, x.Url.Split('/').Last()))));
+        // Every photo also gets a ~400 px JPEG thumbnail.
+        Assert.All(images, x => Assert.EndsWith(".jpg", x.ThumbnailUrl));
+        Assert.All(images, x => Assert.True(File.Exists(Path.Combine(fixture.UploadsPath, x.ThumbnailUrl!.Split('/').Last()))));
+    }
+
+    [Fact]
+    public async Task Upload_RemovesExifAndResizes()
+    {
+        var images = await Upload(("phone.jpg", TestImages.JpegWithExif(2400, 1800)));
+
+        var stored = await File.ReadAllBytesAsync(Path.Combine(fixture.UploadsPath, images[0].Url.Split('/').Last()));
+        var text = System.Text.Encoding.ASCII.GetString(stored);
+        Assert.DoesNotContain("Exif", text);
+        Assert.DoesNotContain(TestImages.SecretGpsText, text);
+
+        using var bitmap = SkiaSharp.SKBitmap.Decode(stored);
+        Assert.Equal(1600, Math.Max(bitmap.Width, bitmap.Height));
+        using var thumb = SkiaSharp.SKBitmap.Decode(Path.Combine(fixture.UploadsPath, images[0].ThumbnailUrl!.Split('/').Last()));
+        Assert.Equal(400, Math.Max(thumb.Width, thumb.Height));
+    }
+
+    [Fact]
+    public async Task Upload_ImageWithValidHeaderButBrokenContent_Returns400()
+    {
+        byte[] broken = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13, 1, 2, 3];
+
+        await UploadExpecting(HttpStatusCode.BadRequest, "seller", ("broken.png", broken));
     }
 
     [Fact]
@@ -114,10 +141,11 @@ public class AuctionImagesTests(AppFixture fixture) : IAsyncLifetime
     {
         await Upload(("first.png", PngBytes));
 
-        var files = Enumerable.Range(0, 10).Select(i => ($"{i}.png", PngBytes)).ToArray();
+        // A vehicle listing takes up to 20 photos (parts 10).
+        var files = Enumerable.Range(0, 20).Select(i => ($"{i}.png", PngBytes)).ToArray();
         var body = await UploadExpecting(HttpStatusCode.BadRequest, "seller", files);
 
-        Assert.Contains("at most 10", body);
+        Assert.Contains("at most 20", body);
     }
 
     [Fact]
@@ -127,8 +155,9 @@ public class AuctionImagesTests(AppFixture fixture) : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Upload_AuctionWithBids_Returns400()
+    public async Task AuctionWithBids_PhotosCanBeAddedButNotRemovedOrReordered()
     {
+        var first = await Upload(("a.png", PngBytes));
         using (var scope = fixture.Host.Services.CreateScope())
         {
             var dbContext = scope.ServiceProvider.GetRequiredService<AuctionDbContext>();
@@ -136,7 +165,21 @@ public class AuctionImagesTests(AppFixture fixture) : IAsyncLifetime
             await dbContext.SaveChangesAsync();
         }
 
-        await UploadExpecting(HttpStatusCode.BadRequest, "seller", ("a.png", PngBytes));
+        var images = await Upload(("b.png", PngBytes));
+        Assert.Equal(2, images.Count);
+
+        await fixture.Host.Scenario(s =>
+        {
+            s.WithClaim(new Claim("username", "seller"));
+            s.Delete.Url($"/api/auctions/{_auction.Id}/images/{first[0].Id}");
+            s.StatusCodeShouldBe(HttpStatusCode.BadRequest);
+        });
+        await fixture.Host.Scenario(s =>
+        {
+            s.WithClaim(new Claim("username", "seller"));
+            s.Put.Json(new ReorderImagesDto { ImageIds = [images[1].Id, images[0].Id] }).ToUrl($"/api/auctions/{_auction.Id}/images/order");
+            s.StatusCodeShouldBe(HttpStatusCode.BadRequest);
+        });
     }
 
     [Fact]
@@ -216,7 +259,7 @@ public class AuctionImagesTests(AppFixture fixture) : IAsyncLifetime
             s.Header("X-Content-Type-Options").SingleValueShouldEqual("nosniff");
         });
 
-        Assert.Equal(PngBytes.Length, result.Context.Response.ContentLength);
+        Assert.True(result.Context.Response.ContentLength > 0);
     }
 
     [Fact]

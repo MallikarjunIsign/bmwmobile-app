@@ -6,6 +6,7 @@ import { RootStackParamList } from '../types/navigation';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
 import { Badge } from '../components/Badge';
 import { useMoney } from '../location/useMoney';
+import { FEATURES } from '../config';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'HighestBidder'>;
 
@@ -32,22 +33,29 @@ export const HighestBidderScreen: React.FC<Props> = ({ route, navigation }) => {
             <Text style={styles.key}>Status:</Text>
             <Text style={styles.valSuccess}>Active High Bidder ✓</Text>
           </View>
-          <View style={styles.row}>
-            <Text style={styles.key}>Auto-Bid Protection:</Text>
-            <Text style={styles.val}>Active (Ceiling: {money(auction.userMaxAutoBid ?? 16000)})</Text>
-          </View>
-          <View style={styles.row}>
-            <Text style={styles.key}>Target Shipment Container:</Text>
-            <Text style={styles.val}>{auction.containerNumber || 'CN-2026-09'}</Text>
-          </View>
-          <View style={styles.row}>
-            <Text style={styles.key}>Port Destination:</Text>
-            <Text style={styles.val}>{auction.pickupPort || 'Lagos Apapa Port'}</Text>
-          </View>
+          {auction.isAutoBidActive ? (
+            <View style={styles.row}>
+              <Text style={styles.key}>Auto-Bid Protection:</Text>
+              <Text style={styles.val}>Active (Ceiling: {money(auction.userMaxAutoBid ?? 0)})</Text>
+            </View>
+          ) : null}
+          {/* Container logistics (hidden while FEATURES.containers is off) */}
+          {FEATURES.containers ? (
+            <>
+              <View style={styles.row}>
+                <Text style={styles.key}>Target Shipment Container:</Text>
+                <Text style={styles.val}>{auction.containerNumber || 'CN-2026-09'}</Text>
+              </View>
+              <View style={styles.row}>
+                <Text style={styles.key}>Port Destination:</Text>
+                <Text style={styles.val}>{auction.pickupPort || 'Lagos Apapa Port'}</Text>
+              </View>
+            </>
+          ) : null}
         </View>
 
         <View style={styles.alertNotice}>
-          <Text style={styles.alertTitle}>🔔 Real-Time SMS & Push Alerts Enabled</Text>
+          <Text style={styles.alertTitle}>🔔 Live Bid Alerts</Text>
           <Text style={styles.alertText}>
             We will notify you instantly if another buyer places a higher bid so you can counter bid before the auction ends.
           </Text>

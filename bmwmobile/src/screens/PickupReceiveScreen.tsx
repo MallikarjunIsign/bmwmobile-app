@@ -7,6 +7,7 @@ import { COLORS, SPACING, RADIUS } from '../theme/colors';
 import { Header } from '../components/Header';
 import { ApiService, MOCK_PURCHASES } from '../services/api';
 import { useMoney } from '../location/useMoney';
+import { FEATURES } from '../config';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'PickupReceive'>;
 
@@ -17,7 +18,7 @@ export const PickupReceiveScreen: React.FC<Props> = ({ route, navigation }) => {
 
   const [ratingModalVisible, setRatingModalVisible] = useState(false);
   const [rating, setRating] = useState(5);
-  const [comment, setComment] = useState('Outstanding packaging and exact match for S58 engine. Fast customs clearance!');
+  const [comment, setComment] = useState('');
   const [submitted, setSubmitted] = useState(false);
 
   const handleRatingSubmit = async () => {
@@ -28,9 +29,12 @@ export const PickupReceiveScreen: React.FC<Props> = ({ route, navigation }) => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <Header title="Pickup Pass & Receive" onBack={() => navigation.goBack()} />
+      <Header title={FEATURES.containers ? 'Pickup Pass & Receive' : 'Receive & Rate'} onBack={() => navigation.goBack()} />
 
       <ScrollView contentContainerStyle={styles.scroll}>
+        {/* Port pass and warehouse (hidden while FEATURES.containers is off) */}
+        {FEATURES.containers ? (
+        <>
         {/* Pass Banner */}
         <View style={styles.qrCard}>
           <Text style={styles.qrHeader}>PORT WAREHOUSE PICKUP PASS</Text>
@@ -42,35 +46,41 @@ export const PickupReceiveScreen: React.FC<Props> = ({ route, navigation }) => {
               ))}
             </View>
             <Text style={styles.passCode}>{purchase.qrPassCode}</Text>
-            <Text style={styles.passSub}>Present to OKOH Gate Officer at Port</Text>
+            <Text style={styles.passSub}>Present to the ShopCarParts gate officer at the port</Text>
           </View>
         </View>
 
         {/* Warehouse Location Info */}
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>📍 PICKUP LOCATION ADDRESS</Text>
-          <Text style={styles.locName}>OKOH Logistics Port Warehouse - Terminal B</Text>
+          <Text style={styles.locName}>ShopCarParts Logistics Port Warehouse - Terminal B</Text>
           <Text style={styles.locAddr}>Gate 4, Apapa Commercial Complex, Apapa Port, Lagos, Nigeria</Text>
           <Text style={styles.locHours}>Hours: Mon - Sat (8:00 AM - 5:30 PM)</Text>
         </View>
+        </>
+        ) : null}
 
         {/* Item & Container Summary */}
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>📦 ITEM & CONTAINER SUMMARY</Text>
+          <Text style={styles.sectionTitle}>{FEATURES.containers ? '📦 ITEM & CONTAINER SUMMARY' : '📦 ITEM SUMMARY'}</Text>
           <Text style={styles.itemTitle}>{purchase.itemTitle}</Text>
 
-          <View style={styles.row}>
-            <Text style={styles.key}>Container Number:</Text>
-            <Text style={styles.val}>{purchase.containerNumber || 'MSCU7821940'}</Text>
-          </View>
+          {FEATURES.containers ? (
+            <View style={styles.row}>
+              <Text style={styles.key}>Container Number:</Text>
+              <Text style={styles.val}>{purchase.containerNumber || 'MSCU7821940'}</Text>
+            </View>
+          ) : null}
           <View style={styles.row}>
             <Text style={styles.key}>Total Paid:</Text>
             <Text style={styles.valSuccess}>{money(purchase.totalAmount)}</Text>
           </View>
-          <View style={styles.row}>
-            <Text style={styles.key}>Current Status:</Text>
-            <Text style={styles.valSuccess}>{purchase.shippingStatus}</Text>
-          </View>
+          {FEATURES.containers ? (
+            <View style={styles.row}>
+              <Text style={styles.key}>Current Status:</Text>
+              <Text style={styles.valSuccess}>{purchase.shippingStatus}</Text>
+            </View>
+          ) : null}
         </View>
 
         {/* Rating Submission / Confirmation Button */}

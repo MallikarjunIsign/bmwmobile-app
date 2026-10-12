@@ -1,6 +1,9 @@
 package com.bidmywork.app
 
 import android.app.Application
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.os.Build
 import com.facebook.react.PackageList
 import com.facebook.react.ReactApplication
 import com.facebook.react.ReactHost
@@ -22,6 +25,16 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
+    createChatChannel()
     loadReactNative(this)
+  }
+
+  /** The "Messages" channel that chat push notifications use (ChatService sends with channel id "chat"). */
+  private fun createChatChannel() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+    val channel = NotificationChannel("chat", "Messages", NotificationManager.IMPORTANCE_HIGH).apply {
+      description = "New messages from buyers and sellers"
+    }
+    getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
   }
 }

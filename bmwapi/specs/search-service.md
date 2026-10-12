@@ -42,7 +42,9 @@ None — SearchService has no authenticated write endpoints; it only builds its 
 | | `endingSoon` | live and ending within 6 hours |
 | | `finished` | `status` is `Sold`, `ReserveNotMet` or `Unsold`, or `auctionEnd` has passed |
 | `itemType` | `all` (default) / `vehicle` / `part` (plural and any case accepted) | `itemType` |
-| `partCategory` | `Body`, `Engine`, … `WheelsAndTyres`, … | `partCategory` |
+| `partCategory` | `Body`, `Engine`, … `WheelsAndTyres`, … | `partCategory` (Marketplace category pill) |
+| `make`, `model` | exact names | `make`, `model` (Marketplace make/model pill; combine with each other and `searchTerm`) |
+| `country` | `IN` / `US` / `NG` / `IE` | only without `lat`/`lon`: listings inside the country's boxes (`Contracts.CountryBounds`) – the app's "country-wide" results while the user's location is off |
 | `condition` | `New` / `Used` / `Refurbished` | `condition` |
 | `destination` | port or country | `container.destinationPort` or `container.destinationCountry` |
 | `orderBy` | `make` / `new` / `endingSoon` / `distance` | sort (`distance` = nearest first, only with `lat`/`lon`) |
@@ -83,7 +85,39 @@ On boot, `DbInitializer` deletes the legacy `items` index (its documents contain
 
 |GET|api/search|Search auctions (see *Search parameters*)|Anon|
 |---|---|---|---|
+|GET|api/search/filters|Marketplace pills: `{ categories: [{value,count}], makes: [{value,count}], models: [{make,model,count}], totalCount }` for **live** listings within `lat`/`lon`/`radiusKm` (or `country`), most listings first, `top` (default 10) each|Anon|
+|GET|api/search/listings|E-commerce search (see *Listing search*) → `{ results, totalCount, pageCount, chips, keywords, facets, priceMin, priceMax }`|Anon|
+|GET|api/search/suggest?q=&country=|Suggestions while typing → `[{ group: parts \| vehicles \| partNumbers, label, chips, subtitle? }]`|Anon|
 |GET|api/search/:id|Get an indexed auction by id|Anon|
+
+## Listing search
+
+`GET api/search/listings` parameters (all optional): `q`, `partType`, `make`, `model`, `year`, `category`, `kind`
+(`CommonPart` / `VehicleSpecificPart` / `Vehicle`), `condition`, `brandType`, `minPrice`, `maxPrice`, `lat`/`lon`/`radiusKm`
+(default 60 km), `maxDistanceKm`, `country` (when there is no location), `delivery` (`Pickup` / `Shipping`), `seller` (one seller's listings – without
+location / country they are returned wherever they are), `saleType` (`Auction` / `FixedPrice`), `sort` (`best` default,
+`endingSoon`, `newest`, `priceAsc`, `priceDesc`, `nearest`), `page`, `pageSize`. Only Live listings that haven't ended are
+returned. Hits carry `saleType`, `sellerName` and `quantityAvailable`; for FixedPrice listings **AuctionUpdated** sets the
+status too (Sold when sold out), since BidService never sends events for them.
+
+**Query understanding** (`Services/QueryParser` with `SearchDictionary`, loaded from AuctionService
+`GET api/catalog/dictionary` and refreshed by `DictionaryRefresher`): tyre sizes (`265/65R17` → `specKeys`
+`tyresize:265/65r17`), years and year ranges, part numbers (with or without dashes/spaces → `partNumbersNormalized`),
+part types and their synonyms, positions (front/rear/left/right), makes, models and aliases (n-grams); what is left
+becomes keywords. The understood parts come back as `chips`.
+
+**Fitment**: each document has `fitKeys` (`make`, `make|model`, `make|model|year` for every year of every fitment).
+A vehicle in the query matches vehicle-specific listings with that key, plus universal / size-based listings of the
+same part type. The search is never relaxed silently – no matches means an empty result (the app then offers a custom order).
+
+**Ranking** (`matchTier`): 0 part number → 1 exact vehicle + part type → 2 make + model → 3 universal / size match →
+4 keywords; ties nearest first (or by the chosen `sort`). **Badge**: "Fits your 2016 Toyota Hilux", "Universal",
+"Fits by size" or "Check fitment". **Facets**: counts per category, part type, make, condition and brand type.
+
+The `Item` document gains the listing fields (`kind`, `fitmentMode`, `partType`, `title`, `fitmentSummary`, `fitments`,
+`partNumbers`, `specs`, `brandType`, `usedGrade`, `bidCount`, `thumbnailUrl`, `currency`, …) and the derived
+`fitKeys`, `partNumbersNormalized`, `specKeys` and `currentPrice` (`Item.Prepare()`). On startup the index settings
+are updated and documents missing the derived fields are re-indexed.
 
 ## Models
 
@@ -144,3 +178,9 @@ None — the Meilisearch `Item` document is returned directly (as search hits, o
 |BidTime|DateTime||
 |Amount|int||
 |BidStatus|string||
+
+### Seller ratings
+
+Documents carry `sellerRating` / `sellerRatingCount` (from the snapshot, and updated for all of a seller's listings by
+**SellerRatingChanged**). `GET api/search/listings` also takes `minSellerRating` ("Seller rating 4★ & up") and
+`sort=topRated` ("Top-rated sellers": rating, then number of ratings, then best match).

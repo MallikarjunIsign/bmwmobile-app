@@ -1,4 +1,5 @@
 using Meilisearch;
+using SearchService.Models;
 using SearchService.Services;
 
 namespace SearchService.Data;
@@ -15,15 +16,22 @@ public class DbInitializer
 
         var settingsTask = await index.UpdateSettingsAsync(new Settings
         {
-            SearchableAttributes = ["make", "model", "partName", "partNumber", "description", "container.containerNumber"],
+            SearchableAttributes =
+            [
+                "title", "partType", "make", "model", "fitments.make", "fitments.model", "partName", "partNumbers",
+                "partNumbersNormalized", "partNumber", "brand", "category", "description", "container.containerNumber"
+            ],
             FilterableAttributes =
             [
-                "seller", "winner", "status", "auctionEnd", "itemType", "partCategory", "condition",
+                "id", "seller", "winner", "status", "auctionEnd", "itemType", "partCategory", "condition", "make", "model",
                 "container.id", "container.destinationCountry", "container.destinationPort",
                 // Bounding-box pre-filter for "parts within X km".
-                "latitude", "longitude"
+                "latitude", "longitude",
+                // Listing model (design doc §7.4): fitment keys, part numbers, specs, facets.
+                "kind", "fitmentMode", "partType", "partTypeId", "category", "brandType", "position", "side",
+                "fitKeys", "partNumbersNormalized", "specKeys", "currentPrice", "countryCode", "saleType", "deliveryOptions", "sellerRating"
             ],
-            SortableAttributes = ["auctionEnd", "currentHighBid", "createdAt", "updatedAt", "make", "model"]
+            SortableAttributes = ["auctionEnd", "currentHighBid", "currentPrice", "createdAt", "updatedAt", "make", "model", "sellerRating", "sellerRatingCount"]
         });
         await client.WaitForTaskAsync(settingsTask.TaskUid);
     }
@@ -52,7 +60,14 @@ public class DbInitializer
         using var scope = app.Services.CreateScope();
         var auctionSvc = scope.ServiceProvider.GetRequiredService<AuctionSvcHttpClient>();
 
-        var items = await auctionSvc.GetItemsForSearch();
+        // Documents indexed before the listing model (no fitment keys yet), or with the old delivery options ("Seller
+        // ships" / "Buyer arranges", migrated in AuctionService's database): fetch everything once again.
+        var outdated = await index.SearchAsync<Item>(string.Empty, new SearchQuery
+        {
+            Filter = "NOT fitKeys EXISTS OR deliveryOptions IN [\"SellerShips\", \"BuyerArranges\"]",
+            Limit = 1
+        });
+        var items = await auctionSvc.GetItemsForSearch(full: outdated.Hits.Count > 0);
 
         if (items.Count == 0)
         {

@@ -35,12 +35,16 @@ WolverineFx.RuntimeCompilation
 
 | Rule | Detail |
 |---|---|
-| Minimum bid | No accepted bid yet → `StartingPrice`; otherwise `CurrentHighBid + BidIncrement` |
-| Too low | HTTP 400 `"Minimum bid is {amount}"` (e.g. `Minimum bid is 5,500`). The bid is **not stored** and no event is published, so it can never change the high bid |
+| Bid amount | A bid is stored as the **total** (part price + the amount on top), so "highest amount wins" is unchanged |
+| Current total | The highest accepted bid, or `StartingPrice` (the part price) before the first bid |
+| Bid step | From the tier table in `BidRules.StepTiers` (the **only** place it is defined; the per-auction `BidIncrement` is ignored): below 1,000 → **+10**; 1,000–4,999 → **+20**; 5,000–9,999 → **+50**; 10,000–49,999 → **+100**; 50,000 and above → **+250** (listing currency units) |
+| Minimum bid | `CurrentTotal + Step(CurrentTotal)` – e.g. 100 → 110, 1,000 → 1,020, 5,000 → 5,050; part price 300 with no bids → 310 |
+| Too low | HTTP 400 `"Your bid is too low. The next valid bid is {amount}"` (e.g. `... is 5,100`). The bid is **not stored** and no event is published, so it can never change the high bid |
 | Accepted | `Accepted` if amount ≥ `ReservePrice`, otherwise `AcceptedBelowReserve` |
-| Own auction | HTTP 400 `"You cannot bid on your own item"` |
+| Own auction | HTTP 400 `"You can't bid on your own listing"` |
 | Ended | Bids are only taken while `Status = Live` and before `AuctionEnd`; otherwise HTTP 400 `"Auction has finished"` (not stored) |
-| Raising own bid | The current highest bidder **may** bid again |
+| Outbidding yourself | The current highest bidder can't bid again: HTTP 400 `"You're the highest bidder"` (not stored) |
+| Reserve | No reserve in this phase: a listing's reserve = its part price, so any bid at the end sells |
 | Concurrency | Placing, accepting and ending run in a transaction that locks the auction row (`SELECT ... FOR UPDATE`), so concurrent bids are validated one after the other against the latest high bid. Events are written to the Wolverine outbox in the same transaction and sent after commit |
 | Anti-sniping | If `AntiSniping:Enabled` (default **false**) and an accepted bid arrives within `AntiSniping:WindowMinutes` (2) of the end, `AuctionEnd` moves `AntiSniping:ExtendMinutes` (2) later, a new `CheckAuctionEnded` is scheduled and **AuctionExtended** is published |
 
@@ -70,13 +74,26 @@ Each transition publishes **AuctionFinished**, so one auction can produce two of
 
 **GetBidsForAuction** - Gets all stored bids for an auction, newest first. Returns list of **BidDto**
 
-**GetNextMinimumBid** - Returns **NextMinimumBidDto** `{ minimumBid, currentHighBid, bidIncrement, reserveMet, auctionEnd, status }` so clients can pre-fill the next bid. Never exposes the reserve itself
+**GetNextMinimumBid** - `GET api/bids/{auctionId}/next-minimum` (old route `next-min` still works). Returns **NextMinimumBidDto**
+`{ minimumBid, currentTotal, bidStep, partPrice, currentHighBid, bidCount, highBidder, quickBids, bidIncrement, reserveMet, auctionEnd, status }`
+so the app can show "Current bid $1,000 + step $20 = Next bid $1,020", pre-fill the bid and offer quick bids
+(next, next + 1, 2 and 5 steps). `bidIncrement` = `bidStep` for older clients. Never exposes the reserve itself
+
+**GetBidSteps** - `GET api/bids/steps` → `[{ from, to, step }]`, the tier table (e.g. for the seller's review step)
+
+**GetMyBids** - `GET api/bids/mine` → one row per auction the caller bid on: their highest bid, the current high bid
+and bidder, bid count, end time, status and `state` = **Winning** / **Outbid** (Live) or **Won** / **Lost** (ended)
+(`BidRules.MyBidState`)
 
 ## Events emitted
 
 **BidPlaced** - When a bid is accepted, in response to PlaceBid
 **AuctionFinished** - When an auction ends or the seller accepts (see *How auctions end*)
 **AuctionExtended** - When anti-sniping moves an auction's end time (exchange `auction-extended`)
+**AuctionEndingSoon** - One hour before the end of a Live auction: `{ auctionId, auctionEnd, seller, bidders, currentHighBid }` (exchange `auction-ending-soon`)
+
+`BidPlaced` now also carries `BidCount`, `Seller` and `PreviousHighBidder` (who was just outbid); `AuctionFinished`
+carries `Bidders` (everyone who bid), so NotificationService can tell each person what happened.
 
 ## Events consumed
 
@@ -90,6 +107,7 @@ The `bid-auction-*` queues are also declared by AuctionService, so events publis
 
 **CheckAuctionEnded(AuctionId)** - Wolverine durable scheduled message at the auction's end time. See *How auctions end*.
 **CheckSellerDecision(AuctionId)** - Wolverine durable scheduled message at `SellerDecisionDeadline`. Moves a still-`ReserveNotMet` auction to `Unsold`.
+**CheckAuctionEndingSoon(AuctionId, AuctionEnd)** - scheduled one hour before the end whenever an end check is scheduled; publishes **AuctionEndingSoon** if the auction is still Live with that end time.
 
 ## gRPC (client)
 
@@ -100,8 +118,10 @@ Calls **AuctionService.GrpcAuction/GetAuction(auctionId)** when a bid (or next-m
 |POST|api/bids|Place a bid (`auctionId`, `amount` as query params)|Auth|
 |---|---|---|---|
 |POST|api/bids/accept|Accept the highest bid: body `{ auctionId, bidId }` → 200 `BidDto`, 400, 403 (not the seller), 404, 409 `{ message, highBid }`|Auth (seller)|
+|GET|api/bids/mine|My Bids with Winning / Outbid / Won / Lost|Auth|
+|GET|api/bids/steps|Bid step tiers|Anon|
 |GET|api/bids/:auctionId|Get bids for an auction, newest first|Anon|
-|GET|api/bids/:auctionId/next-min|Next minimum bid|Anon|
+|GET|api/bids/:auctionId/next-minimum|Next minimum bid (old route `next-min`)|Anon|
 
 Auth is JWT Bearer, validated against IdentityService (`Authority` = IdentityServiceUrl), with `NameClaimType` mapped to the `username` claim. Errors (400/404) are returned as a JSON string message.
 
@@ -208,3 +228,7 @@ dbup script `0003_PricingAndEndRules.sql`: adds `startingPrice`, `bidIncrement`,
 **AuctionService.AuctionCreated** / **AuctionService.AuctionUpdated** - the full `AuctionSnapshot` (see auction-service.md). Only `Id`, `AuctionEnd`, `Seller`, `StartingPrice`, `ReservePrice`, `BidIncrement`, `Status` and `SellerDecisionDeadline` are used.
 
 **AuctionService.AuctionDeleted** - `Id`
+
+### Blocks (from ChatService)
+
+Consumes **UserBlocked / UserUnblocked** into the `userblocks` table (script 0005). A bid from a user the seller blocked is rejected with 400 "You can't bid on this seller's listings".

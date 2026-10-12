@@ -19,7 +19,8 @@ public class AuctionUpdatedHandler
         var item = message.Adapt<Item>();
 
         var existing = await TryGetAsync(index, message.Id);
-        if (existing != null)
+        // Fixed-price listings have no BidService events: AuctionService's status (Sold when sold out) is the newest.
+        if (existing != null && message.SaleType != "FixedPrice")
         {
             item.CurrentHighBid = existing.CurrentHighBid ?? item.CurrentHighBid;
             item.ReserveMet = existing.ReserveMet;
@@ -28,10 +29,12 @@ public class AuctionUpdatedHandler
             item.SellerDecisionDeadline = existing.SellerDecisionDeadline;
             item.Winner = existing.Winner;
             item.SoldAmount = existing.SoldAmount;
+            item.BidCount = Math.Max(item.BidCount, existing.BidCount);
             if (existing.AuctionEnd > item.AuctionEnd && existing.CurrentHighBid != null)
                 item.AuctionEnd = existing.AuctionEnd; // extended by anti-sniping
         }
 
+        item.Prepare();
         var addTask = await index.AddDocumentsAsync([item], primaryKey: "id");
         await client.WaitForTaskAsync(addTask.TaskUid);
     }

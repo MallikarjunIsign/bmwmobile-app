@@ -15,6 +15,7 @@ import {
   saveSession,
 } from './storage';
 import { SocialCancelled, signInWithApple, signInWithGoogle, signOutSocial, type SocialCredential } from './social';
+import { unregisterPush } from '../services/push';
 
 type AuthStatus = 'loading' | 'signedOut' | 'signedIn';
 
@@ -40,7 +41,7 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 function chooseRole(): Promise<UserRole | null> {
   return new Promise(resolve =>
-    Alert.alert('One more step', 'How will you use OKOH Parts?', [
+    Alert.alert('One more step', 'How will you use ShopCarParts?', [
       { text: 'Customer', onPress: () => resolve('customer') },
       { text: 'Service Pro', onPress: () => resolve('pro') },
       { text: 'Cancel', style: 'cancel', onPress: () => resolve(null) },
@@ -73,6 +74,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const endSession = useCallback(async () => {
+    // While still signed in: this phone stops getting the user's chat notifications.
+    await unregisterPush();
     const refreshToken = getSession()?.refreshToken;
     apply(null);
     setStatus('signedOut');

@@ -11,7 +11,7 @@ import { isCurrentUser } from '../src/auth/session';
 
 async function runTests() {
   console.log('\n================================================================');
-  console.log('  OKOH Parts Mobile — Comprehensive 23-Screen Functionality Test ');
+  console.log('  ShopCarParts Mobile — Comprehensive 23-Screen Functionality Test ');
   console.log('================================================================\n');
 
   let passed = 0;
@@ -115,14 +115,14 @@ async function runTests() {
 
   // --- Screen 19: Request Submitted Confirmation ---
   const submittedReq = await ApiService.createPartRequest({
+    searchText: '2022 bmw x5 front bumper',
     make: 'BMW',
     model: 'X5',
     year: 2022,
     partName: 'Front Bumper Assembly',
     maxBudget: 1500,
-    preferredPort: 'Lagos Apapa Port'
   });
-  assert('Screen 19 (RequestSubmitted): Submits part request & returns quote tracking ID', submittedReq.id !== undefined && submittedReq.status === 'Feasibility Checked');
+  assert('Screen 19 (RequestSubmitted): Creates an Open custom order', submittedReq.id !== undefined && submittedReq.status === 'Open');
 
   // --- Screen 20: Planned Containers Schedule ---
   assert('Screen 20 (PlannedContainers): Fetches next 3 container arrivals to Nigeria', containers.length >= 3);

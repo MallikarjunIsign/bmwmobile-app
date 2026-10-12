@@ -3,7 +3,10 @@ using System.Text.Json.Serialization;
 using AuctionService.Errors;
 using AuctionService.RequestHelpers;
 using AuctionService.Services;
+using AuctionService.Services.Geocoding;
 using AuctionService.Validation;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Options;
 using Contracts;
 using Mapster;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -69,11 +72,40 @@ switch (imageStorageProvider)
     case "Local":
         builder.Services.AddSingleton<IImageStorage, LocalDiskImageStorage>();
         break;
-    // case "AzureBlob": builder.Services.AddSingleton<IImageStorage, AzureBlobImageStorage>(); break;
+    case "GoogleCloudStorage":
+        // Bucket from settings; credentials only from the environment (GOOGLE_APPLICATION_CREDENTIALS).
+        builder.Services.AddSingleton<IImageStorage, GoogleCloudImageStorage>();
+        break;
     default:
-        throw new Exception($"Unknown ImageStorage:Provider '{imageStorageProvider}'");
+        throw new Exception($"Unknown ImageStorage:Provider '{imageStorageProvider}' (use Local or GoogleCloudStorage)");
+}
+builder.Services.AddScoped<ListingImageService>();
+builder.Services.AddSingleton(TimeProvider.System);
+// Reverse geocoding for the app's automatic location (city, country). Provider from settings; the Google API key
+// only from environment variables / user-secrets.
+builder.Services.Configure<GeocodingOptions>(builder.Configuration.GetSection(GeocodingOptions.SectionName));
+builder.Services.AddMemoryCache();
+var geocodingProvider = builder.Configuration["Geocoding:Provider"] ?? "BuiltIn";
+switch (geocodingProvider)
+{
+    case "BuiltIn":
+        builder.Services.AddSingleton<BuiltInReverseGeocoder>();
+        builder.Services.AddSingleton<IReverseGeocoder>(sp => new CachedReverseGeocoder(
+            sp.GetRequiredService<BuiltInReverseGeocoder>(), sp.GetRequiredService<IMemoryCache>(),
+            sp.GetRequiredService<IOptions<GeocodingOptions>>()));
+        break;
+    case "Google":
+        builder.Services.AddHttpClient<GoogleReverseGeocoder>(c => c.Timeout = TimeSpan.FromSeconds(10));
+        builder.Services.AddSingleton<IReverseGeocoder>(sp => new CachedReverseGeocoder(
+            sp.GetRequiredService<GoogleReverseGeocoder>(), sp.GetRequiredService<IMemoryCache>(),
+            sp.GetRequiredService<IOptions<GeocodingOptions>>()));
+        break;
+    default:
+        throw new Exception($"Unknown Geocoding:Provider '{geocodingProvider}' (use BuiltIn or Google)");
 }
 builder.Services.AddSingleton<AuctionMapper>();
+builder.Services.AddScoped<CustomOrderMatcher>();
+builder.Services.AddScoped<ReviewService>();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddProblemDetails();
 
@@ -107,7 +139,23 @@ builder.Host.UseWolverine(opts =>
         .DeclareExchange("auction-finished", ex => ex.ExchangeType = ExchangeType.Fanout)
         .DeclareExchange("bid-placed", ex => ex.ExchangeType = ExchangeType.Fanout)
         .DeclareExchange("auction-extended", ex => ex.ExchangeType = ExchangeType.Fanout)
+        .DeclareExchange("custom-order-matched", ex => ex.ExchangeType = ExchangeType.Fanout)
+        .DeclareExchange("order-status-changed", ex => ex.ExchangeType = ExchangeType.Fanout)
+        .DeclareExchange("order-created", ex => ex.ExchangeType = ExchangeType.Fanout)
+        .DeclareExchange("user-blocked", ex => ex.ExchangeType = ExchangeType.Fanout)
+        .DeclareExchange("user-unblocked", ex => ex.ExchangeType = ExchangeType.Fanout)
+        .DeclareExchange("seller-rating-changed", ex => ex.ExchangeType = ExchangeType.Fanout)
+        .DeclareExchange("review-requested", ex => ex.ExchangeType = ExchangeType.Fanout)
+        // The consumers' queues are declared here too, so no rating change / reminder is lost while one is down.
+        .BindExchange("seller-rating-changed").ToQueue("search-seller-rating-changed")
+        .BindExchange("seller-rating-changed").ToQueue("chat-seller-rating-changed")
+        .BindExchange("review-requested").ToQueue("notification-review-requested")
+        .BindExchange("review-requested").ToQueue("chat-review-requested")
         .BindExchange("auction-finished").ToQueue("auction-auction-finished")
+        .BindExchange("user-blocked").ToQueue("auction-user-blocked")
+        .BindExchange("user-unblocked").ToQueue("auction-user-unblocked")
+        // ChatService's queue is declared here too, so no sale is missed while it is down.
+        .BindExchange("order-created").ToQueue("chat-order-created")
         .BindExchange("bid-placed").ToQueue("auction-bid-placed")
         .BindExchange("auction-extended").ToQueue("auction-auction-extended")
         // BidService's queues are declared here too, so auction events published before BidService has ever
@@ -115,17 +163,30 @@ builder.Host.UseWolverine(opts =>
         .BindExchange("auction-created").ToQueue("bid-auction-created")
         .BindExchange("auction-updated").ToQueue("bid-auction-updated")
         .BindExchange("auction-deleted").ToQueue("bid-auction-deleted")
+        // Kept for NotificationService even while it is down, so no "part now available" message is lost.
+        .BindExchange("custom-order-matched").ToQueue("notification-custom-order-matched")
+        .BindExchange("order-status-changed").ToQueue("notification-order-status-changed")
         .AutoProvision();
     
     opts.PublishMessage<AuctionCreated>().ToRabbitExchange("auction-created");
     opts.PublishMessage<AuctionUpdated>().ToRabbitExchange("auction-updated");
     opts.PublishMessage<AuctionDeleted>().ToRabbitExchange("auction-deleted");
     opts.PublishMessage<ContainerUpdated>().ToRabbitExchange("container-updated");
+    opts.PublishMessage<CustomOrderMatched>().ToRabbitExchange("custom-order-matched");
+    opts.PublishMessage<OrderStatusChanged>().ToRabbitExchange("order-status-changed");
+    opts.PublishMessage<OrderCreated>().ToRabbitExchange("order-created");
+    opts.PublishMessage<SellerRatingChanged>().ToRabbitExchange("seller-rating-changed");
+    opts.PublishMessage<ReviewRequested>().ToRabbitExchange("review-requested");
+    // "How was your purchase?" 2 days after completion: scheduled, stored in Postgres until then.
+    opts.PublishMessage<AuctionService.Handlers.ReviewReminder>().ToLocalQueue("review-reminders");
+    opts.LocalQueue("review-reminders").UseDurableInbox();
     
     opts.ListenToRabbitQueue("wolverine-dead-letter-queue");
     opts.ListenToRabbitQueue("auction-auction-finished");
     opts.ListenToRabbitQueue("auction-bid-placed");
     opts.ListenToRabbitQueue("auction-auction-extended");
+    opts.ListenToRabbitQueue("auction-user-blocked");
+    opts.ListenToRabbitQueue("auction-user-unblocked");
 });
 
 var app = builder.Build();

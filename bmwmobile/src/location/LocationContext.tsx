@@ -2,176 +2,252 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../auth/AuthContext';
+import { ApiService, type NearFilter } from '../services/api';
 import { LocationApi } from '../services/locationApi';
-import type { NearFilter } from '../services/api';
-import type { CountryCode, MyLocations, SaveLocationRequest, UserLocation } from '../types/location';
-import { countryFromPhone, haversineKm, MOVE_THRESHOLD_KM } from '../utils/geo';
-import { getCurrentPosition } from '../utils/gps';
+import type { AutoLocation, CountryCode, MyLocations, SaveLocationRequest, SavedLocation } from '../types/location';
+import { countryFromPhone, fallbackRadius, haversineKm, isCountryCode, MIN_MOVE_KM, MOVE_THRESHOLD_KM } from '../utils/geo';
+import { getCurrentPosition, GpsError, type GpsFailure, openLocationSettings } from '../utils/gps';
 
-type LocationStatus = 'idle' | 'loading' | 'ready' | 'error';
+type LocationStatus = 'idle' | 'ready';
 
 type LocationContextValue = {
-  /** 'ready' once the signed-in user's locations are loaded (guests stay 'idle'). */
+  /** 'ready' once the last known location has been read from the phone (signed-in users only). */
   status: LocationStatus;
-  autoUpdatePrimary: boolean;
-  /** Primary first. */
-  locations: UserLocation[];
-  primary: UserLocation | null;
-  /** The location the parts list is filtered by (primary unless the user picked another). */
-  selected: UserLocation | null;
-  /** Filter for the parts lists: within the selected location's radius (undefined for guests). */
+  /** The automatic location (null until the first fix, or when location is off). */
+  location: AutoLocation | null;
+  /** Location permission denied or GPS off: show "Turn on location to see parts near you". */
+  locationOff: boolean;
+  /** Parts within the radius (60 km / 60 mi) of the automatic location; undefined = country-wide. */
   near: NearFilter | undefined;
-  /** Country of the selected location (else the phone number's): decides km/miles and the currency. */
+  /** km/miles and the currency: the location's country, else the phone number's. */
   country: CountryCode;
-  select: (id: string) => void;
-  reload: () => Promise<void>;
-  add: (body: SaveLocationRequest) => Promise<void>;
-  update: (id: string, body: SaveLocationRequest) => Promise<void>;
-  remove: (id: string) => Promise<void>;
-  setPrimary: (id: string) => Promise<void>;
-  /** "Use my current location": asks for permission, then makes GPS the primary (auto-update on). */
-  useCurrentLocation: (radiusKm?: number) => Promise<void>;
-  setAutoUpdate: (on: boolean) => Promise<void>;
+  /** Read the position again (prompt = ask for permission if needed). */
+  refresh: (opts?: { prompt?: boolean }) => Promise<void>;
+  /** The banner's button: ask again, or open the settings when Android won't ask any more / GPS is off. */
+  turnOnLocation: () => Promise<void>;
+  /** The user's saved addresses (not the GPS row). */
+  addresses: SavedLocation[];
+  /** True while the location follows the phone's GPS; false when a saved address is chosen. */
+  usingCurrentLocation: boolean;
+  /** "Use my current location": GPS again (asks for permission). Throws GpsError when it can't. */
+  switchToCurrentLocation: () => Promise<void>;
+  /** Use a saved address as the location (GPS no longer changes it). */
+  chooseAddress: (id: string) => Promise<void>;
+  /** Add (and use) or edit an address. */
+  saveAddress: (request: SaveLocationRequest, id?: string) => Promise<void>;
+  removeAddress: (id: string) => Promise<void>;
 };
 
 const LocationContext = createContext<LocationContextValue | undefined>(undefined);
 
-const selectedKey = (userId: string) => `@okoh/selected-location/${userId}`;
+const storageKey = (userId: string) => `@bidmyparts/auto-location/${userId}`;
+const addressesKey = (userId: string) => `@bidmyparts/addresses/${userId}`;
 
-async function readSelected(userId: string): Promise<string | null> {
+/** The chosen saved address as the app's location (radius 60 km / 60 mi by its country). */
+function fromAddress(a: SavedLocation, phoneCountry: CountryCode): AutoLocation {
+  return {
+    latitude: a.latitude,
+    longitude: a.longitude,
+    city: a.placeName,
+    countryCode: a.countryCode,
+    ...fallbackRadius(a.countryCode ?? phoneCountry),
+    updatedAt: new Date().toISOString(),
+    addressId: a.id,
+    label: a.label,
+    area: a.area ?? null,
+  };
+}
+
+async function readSaved(userId: string): Promise<AutoLocation | null> {
   try {
-    return await AsyncStorage.getItem(selectedKey(userId));
+    const raw = await AsyncStorage.getItem(storageKey(userId));
+    return raw ? (JSON.parse(raw) as AutoLocation) : null;
   } catch {
     return null;
   }
 }
 
+/** Names the position through the backend; offline, keeps the coordinates with the phone number's country. */
+async function describe(latitude: number, longitude: number, phoneCountry: CountryCode): Promise<AutoLocation> {
+  const now = new Date().toISOString();
+  try {
+    const geo = await ApiService.reverseGeocode(latitude, longitude);
+    const countryCode = isCountryCode(geo.countryCode) ? (geo.countryCode.toUpperCase() as CountryCode) : null;
+    return {
+      latitude,
+      longitude,
+      city: geo.city,
+      countryCode,
+      radiusKm: geo.radiusKm,
+      radiusValue: geo.radiusValue,
+      radiusUnit: geo.radiusUnit,
+      updatedAt: now,
+    };
+  } catch {
+    return { latitude, longitude, city: null, countryCode: null, ...fallbackRadius(phoneCountry), updatedAt: now };
+  }
+}
+
+/**
+ * The user's location: found automatically from GPS, or a saved address the user chose (Home → location line →
+ * "My locations").
+ *  - After sign-in: asks for location permission and reads the position (unless a saved address is chosen).
+ *  - Each time the app comes back to the foreground: reads it again (without prompting).
+ *  - The location only changes when the phone moved more than ~5 km or the city changed.
+ *  - Permission denied / GPS off: "Turn on location" banner, country-wide results (phone number's country).
+ */
 export function LocationProvider({ children }: { children: React.ReactNode }) {
   const { status: authStatus, user } = useAuth();
   const userId = authStatus === 'signedIn' ? user?.id ?? null : null;
+  const phoneCountry = countryFromPhone(user?.phoneNumber);
 
   const [status, setStatus] = useState<LocationStatus>('idle');
-  const [data, setData] = useState<MyLocations>({ autoUpdatePrimary: true, locations: [] });
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const dataRef = useRef(data);
-  dataRef.current = data;
-  const syncing = useRef(false);
+  const [location, setLocation] = useState<AutoLocation | null>(null);
+  const [failure, setFailure] = useState<GpsFailure | null>(null);
+  const locationRef = useRef<AutoLocation | null>(null);
+  locationRef.current = location;
+  const busy = useRef(false);
+  // Saved addresses; the primary one (when it isn't the GPS row) replaces the GPS location.
+  const [mine, setMine] = useState<MyLocations | null>(null);
 
-  const apply = useCallback((next: MyLocations) => setData(next), []);
-
-  /** Auto-update ON: move the primary to the phone's position when it moved more than 1 km. Never prompts. */
-  const syncWithGps = useCallback(async (latest?: MyLocations) => {
-    const current = latest ?? dataRef.current;
-    if (!userId || !current.autoUpdatePrimary || current.locations.length === 0 || syncing.current) return;
-    syncing.current = true;
-    try {
-      const pos = await getCurrentPosition({ prompt: false });
-      const gpsRow = current.locations.find(l => l.isCurrentLocation && l.isPrimary);
-      if (gpsRow && haversineKm(gpsRow.latitude, gpsRow.longitude, pos.latitude, pos.longitude) < MOVE_THRESHOLD_KM) return;
-      apply(await LocationApi.updateCurrent(pos.latitude, pos.longitude, { explicit: false }));
-    } catch {
-      // No permission, GPS off or offline: keep the saved locations as they are.
-    } finally {
-      syncing.current = false;
-    }
-  }, [userId, apply]);
-
-  const load = useCallback(async (): Promise<MyLocations | null> => {
-    if (!userId) return null;
-    try {
-      const next = await LocationApi.list();
-      apply(next);
-      setStatus('ready');
-      return next;
-    } catch {
-      setStatus(s => (s === 'ready' ? 'ready' : 'error'));
-      return null;
-    }
-  }, [userId, apply]);
-
-  const reload = useCallback(async () => {
-    await load();
-  }, [load]);
-
-  // Signed in: load the locations and the last selected one. Signed out: forget them.
-  useEffect(() => {
-    if (!userId) {
-      setStatus('idle');
-      setData({ autoUpdatePrimary: true, locations: [] });
-      setSelectedId(null);
-      return;
-    }
-    let alive = true;
-    setStatus('loading');
-    (async () => {
-      const [saved, loaded] = await Promise.all([readSelected(userId), load()]);
-      if (!alive) return;
-      setSelectedId(saved);
-      if (loaded) syncWithGps(loaded);
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [userId, load, syncWithGps]);
-
-  // Each time the app comes back to the foreground.
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', state => {
-      if (state === 'active') syncWithGps();
-    });
-    return () => sub.remove();
-  }, [syncWithGps]);
-
-  const primary = data.locations.find(l => l.isPrimary) ?? data.locations[0] ?? null;
-  const selected = data.locations.find(l => l.id === selectedId) ?? primary;
-  const near = useMemo<NearFilter | undefined>(
-    () => (selected ? { latitude: selected.latitude, longitude: selected.longitude, radiusKm: selected.radiusKm } : undefined),
-    [selected?.latitude, selected?.longitude, selected?.radiusKm], // eslint-disable-line react-hooks/exhaustive-deps
-  );
-
-  const country = selected?.countryCode ?? countryFromPhone(user?.phoneNumber);
-
-  const select = useCallback(
-    (id: string) => {
-      setSelectedId(id);
-      if (userId) AsyncStorage.setItem(selectedKey(userId), id).catch(() => undefined);
+  const save = useCallback(
+    (next: AutoLocation) => {
+      setLocation(next);
+      if (userId) AsyncStorage.setItem(storageKey(userId), JSON.stringify(next)).catch(() => undefined);
     },
     [userId],
   );
 
-  const add = useCallback(async (body: SaveLocationRequest) => apply(await LocationApi.add(body)), [apply]);
-  const update = useCallback(async (id: string, body: SaveLocationRequest) => apply(await LocationApi.update(id, body)), [apply]);
-  const remove = useCallback(async (id: string) => apply(await LocationApi.remove(id)), [apply]);
-  const setPrimary = useCallback(async (id: string) => apply(await LocationApi.setPrimary(id)), [apply]);
-  const setAutoUpdate = useCallback(async (on: boolean) => apply(await LocationApi.setAutoUpdate(on)), [apply]);
+  const refresh = useCallback(
+    async ({ prompt = false }: { prompt?: boolean } = {}) => {
+      if (!userId || busy.current) return;
+      busy.current = true;
+      try {
+        const pos = await getCurrentPosition({ prompt });
+        setFailure(null);
+        const current = locationRef.current;
+        const moved = current ? haversineKm(current.latitude, current.longitude, pos.latitude, pos.longitude) : Infinity;
+        if (moved < MIN_MOVE_KM) return;
 
-  const useCurrentLocation = useCallback(
-    async (radiusKm?: number) => {
-      const pos = await getCurrentPosition({ prompt: true });
-      apply(await LocationApi.updateCurrent(pos.latitude, pos.longitude, { explicit: true, radiusKm }));
+        const next = await describe(pos.latitude, pos.longitude, phoneCountry);
+        // A small move only counts when it crossed into another city.
+        if (current && moved < MOVE_THRESHOLD_KM && next.city === current.city && next.countryCode === current.countryCode) return;
+        save(next);
+      } catch (err) {
+        // Timeout: keep the last known location. Denied / GPS off: banner + country-wide results.
+        if (err instanceof GpsError && err.needsUser) setFailure(err.reason);
+      } finally {
+        busy.current = false;
+      }
     },
-    [apply],
+    [userId, phoneCountry, save],
   );
+
+  const keepAddresses = useCallback(
+    (next: MyLocations) => {
+      setMine(next);
+      if (userId) AsyncStorage.setItem(addressesKey(userId), JSON.stringify(next)).catch(() => undefined);
+    },
+    [userId],
+  );
+
+  // Signed in: show the last known location at once, then ask for permission and read the position
+  // (no permission prompt when the user chose a saved address – GPS isn't needed then).
+  useEffect(() => {
+    if (!userId) {
+      setStatus('idle');
+      setLocation(null);
+      setFailure(null);
+      setMine(null);
+      return;
+    }
+    let alive = true;
+    (async () => {
+      const saved = await readSaved(userId);
+      let addresses: MyLocations | null = null;
+      try {
+        const raw = await AsyncStorage.getItem(addressesKey(userId));
+        addresses = raw ? (JSON.parse(raw) as MyLocations) : null;
+      } catch {
+        addresses = null;
+      }
+      if (!alive) return;
+      setLocation(saved);
+      locationRef.current = saved;
+      setMine(addresses);
+      setStatus('ready');
+      const fresh = await LocationApi.list().catch(() => null);
+      if (!alive) return;
+      if (fresh) keepAddresses(fresh);
+      const chosen = (fresh ?? addresses)?.locations.some(l => l.isPrimary && !l.isCurrentLocation);
+      refresh({ prompt: !chosen });
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [userId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Each time the app comes back to the foreground (also after the user switched location on in Settings).
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', state => {
+      if (state === 'active') refresh();
+    });
+    return () => sub.remove();
+  }, [refresh]);
+
+  const turnOnLocation = useCallback(async () => {
+    if (failure === 'denied') {
+      await refresh({ prompt: true });
+      return;
+    }
+    await openLocationSettings(failure);
+  }, [failure, refresh]);
+
+  const addresses = useMemo(() => (mine?.locations ?? []).filter(l => !l.isCurrentLocation), [mine]);
+  const chosen = addresses.find(l => l.isPrimary) ?? null;
+
+  const switchToCurrentLocation = useCallback(async () => {
+    // Throws GpsError (denied / GPS off) for the screen to explain.
+    const pos = await getCurrentPosition({ prompt: true });
+    setFailure(null);
+    const next = await describe(pos.latitude, pos.longitude, phoneCountry);
+    save(next);
+    keepAddresses(await LocationApi.setCurrent(pos.latitude, pos.longitude, next.radiusKm));
+  }, [phoneCountry, save, keepAddresses]);
+
+  const chooseAddress = useCallback(async (id: string) => keepAddresses(await LocationApi.setPrimary(id)), [keepAddresses]);
+
+  const saveAddress = useCallback(
+    async (request: SaveLocationRequest, id?: string) => {
+      const radiusKm = fallbackRadius(isCountryCode(request.countryCode) ? (request.countryCode as CountryCode) : phoneCountry).radiusKm;
+      const body = { ...request, radiusKm: Math.round(radiusKm) };
+      keepAddresses(id ? await LocationApi.update(id, body) : await LocationApi.add(body));
+    },
+    [phoneCountry, keepAddresses],
+  );
+
+  const removeAddress = useCallback(async (id: string) => keepAddresses(await LocationApi.remove(id)), [keepAddresses]);
+
+  // A chosen address wins over GPS; without one, GPS (or nothing while location is off).
+  const locationOff = !chosen && failure !== null;
+  const active = useMemo(
+    () => (chosen ? fromAddress(chosen, phoneCountry) : locationOff ? null : location),
+    [chosen, phoneCountry, locationOff, location],
+  );
+
+  const near = useMemo<NearFilter | undefined>(
+    () => (active ? { latitude: active.latitude, longitude: active.longitude, radiusKm: active.radiusKm } : undefined),
+    [active?.latitude, active?.longitude, active?.radiusKm], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  const country: CountryCode = active?.countryCode ?? phoneCountry;
 
   const value = useMemo<LocationContextValue>(
     () => ({
-      status,
-      autoUpdatePrimary: data.autoUpdatePrimary,
-      locations: data.locations,
-      primary,
-      selected,
-      near,
-      country,
-      select,
-      reload,
-      add,
-      update,
-      remove,
-      setPrimary,
-      useCurrentLocation,
-      setAutoUpdate,
+      status, location: active, locationOff, near, country, refresh, turnOnLocation,
+      addresses, usingCurrentLocation: !chosen, switchToCurrentLocation, chooseAddress, saveAddress, removeAddress,
     }),
-    [status, data, primary, selected, near, country, select, reload, add, update, remove, setPrimary, useCurrentLocation, setAutoUpdate],
+    [status, active, locationOff, near, country, refresh, turnOnLocation, addresses, chosen, switchToCurrentLocation, chooseAddress, saveAddress, removeAddress],
   );
 
   return <LocationContext.Provider value={value}>{children}</LocationContext.Provider>;

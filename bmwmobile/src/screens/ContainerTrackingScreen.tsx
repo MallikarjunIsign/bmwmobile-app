@@ -13,7 +13,7 @@ type Props = CompositeScreenProps<
   NativeStackScreenProps<RootStackParamList>
 >;
 
-export const ContainerTrackingScreen: React.FC<Props> = ({ route }) => {
+export const ContainerTrackingScreen: React.FC<Props> = () => {
   const [containerNum, setContainerNum] = useState('MSCU7821940');
 
   const trackingSteps = [
@@ -21,7 +21,7 @@ export const ContainerTrackingScreen: React.FC<Props> = ({ route }) => {
     { title: 'Container Loaded & Sealed', subtitle: 'Container MSCU7821940 (40ft High Cube)', date: 'Oct 03, 2026', completed: true, active: false },
     { title: 'Vessel Departed Origin Port', subtitle: 'Cargo Vessel: CMA CGM MUNCHEN', date: 'Oct 06, 2026', completed: true, active: false },
     { title: 'Arrived at Lagos Apapa Customs Port', subtitle: 'Vessel berth & container discharge', date: 'Oct 28, 2026', completed: true, active: false },
-    { title: 'Customs Clearing & Inspection', subtitle: 'OKOH Logistics Clearing Agent', date: 'Oct 30, 2026', completed: false, active: true },
+    { title: 'Customs Clearing & Inspection', subtitle: 'ShopCarParts Logistics Clearing Agent', date: 'Oct 30, 2026', completed: false, active: true },
     { title: 'Ready for Warehouse Pickup / Delivery', subtitle: 'QR Pass Code PU-1042-7731 Ready', date: 'Nov 02, 2026', completed: false, active: false },
   ];
 
@@ -72,7 +72,7 @@ export const ContainerTrackingScreen: React.FC<Props> = ({ route }) => {
             </View>
             <View style={styles.gridItem}>
               <Text style={styles.gridLabel}>Clearing Agent</Text>
-              <Text style={styles.gridVal}>OKOH Logistics NG</Text>
+              <Text style={styles.gridVal}>ShopCarParts Logistics NG</Text>
             </View>
             <View style={styles.gridItem}>
               <Text style={styles.gridLabel}>Items Packed</Text>

@@ -52,7 +52,6 @@ public static class AuctionValidator
         }
 
         if (auction.StartingPrice <= 0) Add("startingPrice", "Starting price must be greater than 0");
-        if (auction.BidIncrement <= 0) Add("bidIncrement", "Bid increment must be greater than 0");
         if (auction.ReservePrice < auction.StartingPrice)
             Add("reservePrice", "Reserve price must be at least the starting price");
 

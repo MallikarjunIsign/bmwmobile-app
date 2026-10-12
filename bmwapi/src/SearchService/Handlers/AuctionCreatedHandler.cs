@@ -28,7 +28,7 @@ public class AuctionCreatedHandler
         }
 
         // Item has no ReservePrice property, so the reserve is dropped here.
-        var item = message.Adapt<Item>();
+        var item = message.Adapt<Item>().Prepare();
         // Wait until it is indexed, so follow-up events (bids) for this auction find the document.
         var addTask = await client.Auctions().AddDocumentsAsync([item], primaryKey: "id");
         await client.WaitForTaskAsync(addTask.TaskUid);

@@ -1,7 +1,7 @@
 {
   "name": "bmwmobile",
   "version": "1.0.0",
-  "description": "OKOH Parts - BMW Auction & Logistics Cross-Platform React Native App",
+  "description": "ShopCarParts - car parts and vehicle auctions (React Native app)",
   "private": true,
   "scripts": {
     "android": "react-native run-android",
@@ -12,8 +12,11 @@
   },
   "dependencies": {
     "@invertase/react-native-apple-authentication": "^2.5.1",
+    "@microsoft/signalr": "^8.0.7",
     "@react-native-async-storage/async-storage": "^3.1.1",
     "@react-native-community/geolocation": "^3.4.0",
+    "@react-native-firebase/app": "26.4.0",
+    "@react-native-firebase/messaging": "26.4.0",
     "@react-native-google-signin/google-signin": "^16.1.5",
     "@react-navigation/bottom-tabs": "^7.4.0",
     "@react-navigation/native": "^7.5.0",
@@ -21,6 +24,7 @@
     "axios": "^1.7.9",
     "react": "19.2.3",
     "react-native": "0.87.1",
+    "react-native-image-picker": "^8.2.1",
     "react-native-keychain": "^10.0.0",
     "react-native-safe-area-context": "^5.5.2",
     "react-native-screens": "^4.28.0"

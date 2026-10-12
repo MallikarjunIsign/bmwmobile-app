@@ -30,6 +30,7 @@ public class AppFixture : IAsyncLifetime
             builder.UseSetting("ConnectionStrings:DefaultConnection",
                 _postgreSqlContainer.GetConnectionString());
             builder.UseSetting("ImageStorage:LocalPath", UploadsPath);
+            builder.UseSetting("Admin:Usernames:0", "admin");
             builder.ConfigureServices(services =>
             {
                 services.RunWolverineInSoloMode();

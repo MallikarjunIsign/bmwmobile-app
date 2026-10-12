@@ -17,6 +17,13 @@ public class UserLocation
     /// <summary>City or place name shown to the user, e.g. "Hyderabad" or "Near Lagos".</summary>
     public required string PlaceName { get; set; }
 
+    /// <summary>House / flat, building and street (saved addresses only; optional).</summary>
+    public string? AddressLine { get; set; }
+    /// <summary>Area / locality, e.g. "Kukatpally".</summary>
+    public string? Area { get; set; }
+    public string? Landmark { get; set; }
+    public string? PostalCode { get; set; }
+
     public double Latitude { get; set; }
     public double Longitude { get; set; }
     public int RadiusKm { get; set; }

@@ -1,289 +1,137 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import React, { useCallback, useState } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { CompositeScreenProps } from '@react-navigation/native';
+import { CompositeScreenProps, useFocusEffect } from '@react-navigation/native';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MainTabParamList, RootStackParamList } from '../types/navigation';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
-import { MOCK_AUCTIONS } from '../services/api';
-import { AuctionCard } from '../components/AuctionCard';
+import { MarketApi } from '../services/marketApi';
+import { mapRawDtoToAuction } from '../services/api';
+import { useLiveEvent } from '../services/notifications';
+import { Badge } from '../components/Badge';
 import { useMoney } from '../location/useMoney';
+import { Countdown } from '../components/Countdown';
+import type { MyBid } from '../types/listing';
+import type { Auction } from '../types/models';
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<MainTabParamList, 'MyBids'>,
   NativeStackScreenProps<RootStackParamList>
 >;
 
+const TABS = ['Winning', 'Outbid', 'Won', 'Lost'] as const;
+const VARIANT = { Winning: 'success', Outbid: 'warning', Won: 'success', Lost: 'dark' } as const;
+
+type Row = MyBid & { auction?: Auction };
+
+/** My Bids: Winning / Outbid while live; Won / Lost once ended. Updates live. */
 export const MyBidsScreen: React.FC<Props> = ({ navigation }) => {
   const money = useMoney();
-  const [activeTab, setActiveTab] = useState<'Active' | 'Won' | 'Ended'>('Active');
+  const [tab, setTab] = useState<(typeof TABS)[number]>('Winning');
+  const [rows, setRows] = useState<Row[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const activeBids = MOCK_AUCTIONS;
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const bids = await MarketApi.myBids();
+      const details = await Promise.all(
+        bids.map(b => MarketApi.listingDetail(b.auctionId).then(mapRawDtoToAuction).catch(() => undefined)),
+      );
+      setRows(bids.map((b, i) => ({ ...b, auction: details[i] })));
+      setError(null);
+    } catch (e: any) {
+      setError(e?.message ?? "Couldn't load your bids");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useFocusEffect(useCallback(() => { load(); }, [load]));
+  useLiveEvent('BidPlaced', (m: { auctionId?: string }) => rows.some(r => r.auctionId === m?.auctionId) && load());
+  useLiveEvent('AuctionFinished', (m: { auctionId?: string }) => rows.some(r => r.auctionId === m?.auctionId) && load());
+
+  const shown = rows.filter(r => r.state === tab);
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>My Bids & Auction Trackers</Text>
+        <Text style={styles.title}>My Bids</Text>
       </View>
-
-      {/* Tabs */}
       <View style={styles.tabBar}>
-        {(['Active', 'Won', 'Ended'] as const).map(tab => (
-          <TouchableOpacity
-            key={tab}
-            style={[styles.tab, activeTab === tab && styles.tabActive]}
-            onPress={() => setActiveTab(tab)}
-          >
-            <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
-              {tab} Bids {tab === 'Active' ? `(${activeBids.length})` : ''}
+        {TABS.map(t => (
+          <TouchableOpacity key={t} style={[styles.tab, tab === t && styles.tabActive]} onPress={() => setTab(t)}>
+            <Text style={[styles.tabText, tab === t && styles.tabTextActive]}>
+              {t} ({rows.filter(r => r.state === t).length})
             </Text>
           </TouchableOpacity>
         ))}
       </View>
-
-      <ScrollView contentContainerStyle={styles.scroll}>
-        {activeTab === 'Active' && (
-          <View>
-            <View style={styles.statusSummary}>
-              <View style={styles.summaryBox}>
-                <Text style={styles.boxValSuccess}>1</Text>
-                <Text style={styles.boxKey}>Highest Bidder</Text>
-              </View>
-              <View style={styles.summaryBox}>
-                <Text style={styles.boxValWarning}>1</Text>
-                <Text style={styles.boxKey}>Outbid Alert</Text>
-              </View>
-              <View style={styles.summaryBox}>
-                <Text style={styles.boxValPrimary}>1</Text>
-                <Text style={styles.boxKey}>Ending Soon</Text>
-              </View>
-            </View>
-
-            {/* Quick Demo Outbid State Banner */}
-            <TouchableOpacity 
-              style={styles.outbidBanner}
-              onPress={() => navigation.navigate('Outbid', { auction: MOCK_AUCTIONS[1] })}
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+      <FlatList
+        data={shown}
+        keyExtractor={r => r.auctionId}
+        contentContainerStyle={styles.list}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={COLORS.primaryGlow} />}
+        ListEmptyComponent={!loading ? <Text style={styles.empty}>No {tab.toLowerCase()} bids.</Text> : undefined}
+        renderItem={({ item }) => {
+          const image = item.auction?.thumbnailUrl ?? item.auction?.item.images[0]?.url;
+          const live = item.state === 'Winning' || item.state === 'Outbid';
+          return (
+            <TouchableOpacity
+              style={styles.card}
+              onPress={() => navigation.navigate('PartDetails', { auctionId: item.auctionId, auction: item.auction })}
               activeOpacity={0.9}
             >
-              <View style={{ flex: 1 }}>
-                <Text style={styles.outbidTitle}>⚠️ OUTBID ALERT: 2019 BMW 330i LaserLight</Text>
-                <Text style={styles.outbidSub}>Current bid: {money(2450)} by autoworks_lagos. Tap to counter bid.</Text>
+              {image ? <Image source={{ uri: image }} style={styles.thumb} /> : <View style={styles.thumb} />}
+              <View style={styles.body}>
+                <Badge label={item.state === 'Winning' ? "YOU'RE THE HIGHEST BIDDER" : item.state.toUpperCase()} variant={VARIANT[item.state]} size="sm" />
+                <Text style={styles.itemTitle} numberOfLines={2}>{item.auction?.title ?? 'Listing'}</Text>
+                <Text style={styles.meta}>
+                  Your bid {money(item.myHighestBid)} · {item.state === 'Won' ? 'Final' : 'Highest'} {money(item.currentHighBid ?? item.myHighestBid)}
+                </Text>
+                <Text style={styles.meta}>
+                  {item.bidCount} bids{live ? ' · ⏱ ' : ''}
+                  {live ? <Countdown end={item.auctionEnd} /> : null}
+                </Text>
+                {item.state === 'Outbid' && item.auction ? (
+                  <TouchableOpacity style={styles.action} onPress={() => navigation.navigate('PlaceBidModal', { auction: item.auction! })}>
+                    <Text style={styles.actionText}>Bid again</Text>
+                  </TouchableOpacity>
+                ) : null}
+                {item.state === 'Won' ? (
+                  <TouchableOpacity style={styles.action} onPress={() => navigation.navigate('MyPurchases')}>
+                    <Text style={styles.actionText}>See in Orders</Text>
+                  </TouchableOpacity>
+                ) : null}
               </View>
-              <Text style={styles.outbidArrow}>Outbid →</Text>
             </TouchableOpacity>
-
-            {activeBids.map(auction => (
-              <AuctionCard
-                key={auction.id}
-                auction={auction}
-                onPress={() => navigation.navigate('PartDetails', { auctionId: auction.id, auction })}
-                onBidPress={() => navigation.navigate('PlaceBidModal', { auction })}
-              />
-            ))}
-          </View>
-        )}
-
-        {activeTab === 'Won' && (
-          <View style={styles.wonCard}>
-            <Text style={styles.wonTitle}>🎉 AUCTION WON: 2021 BMW M4 Engine Assembly</Text>
-            <Text style={styles.wonAmount}>Winning Bid: {money(14500)}</Text>
-            <Text style={styles.wonPort}>Destination: Lagos Apapa Port (Container MSCU7821940)</Text>
-
-            <TouchableOpacity 
-              style={styles.checkoutBtn}
-              onPress={() => navigation.navigate('CompletePurchase', { auctionId: 'auc-bmw-m4-01' })}
-            >
-              <Text style={styles.checkoutBtnText}>COMPLETE CHECKOUT & GENERATE PICKUP PASS</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {activeTab === 'Ended' && (
-          <View style={styles.endedCard}>
-            <Text style={styles.endedTitle}>2020 BMW X3 M-Sport Steering Wheel</Text>
-            <Text style={styles.endedStatus}>Ended • Sold for {money(850)}</Text>
-            <TouchableOpacity 
-              style={styles.reorderBtn}
-              onPress={() => navigation.navigate('OrderPartRequest', { prefillPart: 'BMW X3 M Steering Wheel' })}
-            >
-              <Text style={styles.reorderText}>Request Similar Part for Next Container →</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-      </ScrollView>
+          );
+        }}
+      />
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-  },
-  header: {
-    padding: SPACING.md,
-    backgroundColor: COLORS.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-  },
-  title: {
-    color: COLORS.text,
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  tabBar: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-  },
-  tab: {
-    flex: 1,
-    paddingVertical: SPACING.md,
-    alignItems: 'center',
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
-  },
-  tabActive: {
-    borderBottomColor: COLORS.primaryGlow,
-  },
-  tabText: {
-    color: COLORS.textMuted,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  tabTextActive: {
-    color: COLORS.text,
-    fontWeight: '800',
-  },
-  scroll: {
-    padding: SPACING.md,
-    paddingBottom: SPACING.xxl,
-  },
-  statusSummary: {
-    flexDirection: 'row',
-    gap: SPACING.xs,
-    marginBottom: SPACING.md,
-  },
-  summaryBox: {
-    flex: 1,
-    backgroundColor: COLORS.surface,
-    padding: SPACING.sm,
-    borderRadius: RADIUS.md,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  boxValSuccess: {
-    color: COLORS.success,
-    fontSize: 20,
-    fontWeight: '900',
-  },
-  boxValWarning: {
-    color: COLORS.danger,
-    fontSize: 20,
-    fontWeight: '900',
-  },
-  boxValPrimary: {
-    color: COLORS.warningGlow,
-    fontSize: 20,
-    fontWeight: '900',
-  },
-  boxKey: {
-    color: COLORS.textMuted,
-    fontSize: 11,
-    marginTop: 2,
-  },
-  outbidBanner: {
-    backgroundColor: 'rgba(239, 68, 68, 0.15)',
-    borderWidth: 1,
-    borderColor: COLORS.danger,
-    borderRadius: RADIUS.lg,
-    padding: SPACING.md,
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: SPACING.md,
-  },
-  outbidTitle: {
-    color: COLORS.danger,
-    fontWeight: '800',
-    fontSize: 13,
-  },
-  outbidSub: {
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    marginTop: 2,
-  },
-  outbidArrow: {
-    color: COLORS.danger,
-    fontWeight: '800',
-    fontSize: 13,
-    marginLeft: SPACING.xs,
-  },
-  wonCard: {
-    backgroundColor: COLORS.surface,
-    padding: SPACING.md,
-    borderRadius: RADIUS.lg,
-    borderWidth: 1,
-    borderColor: COLORS.success,
-  },
-  wonTitle: {
-    color: COLORS.text,
-    fontWeight: '800',
-    fontSize: 15,
-  },
-  wonAmount: {
-    color: COLORS.success,
-    fontSize: 20,
-    fontWeight: '900',
-    marginVertical: SPACING.xs,
-  },
-  wonPort: {
-    color: COLORS.textMuted,
-    fontSize: 12,
-    marginBottom: SPACING.md,
-  },
-  checkoutBtn: {
-    backgroundColor: COLORS.success,
-    paddingVertical: 14,
-    borderRadius: RADIUS.md,
-    alignItems: 'center',
-  },
-  checkoutBtnText: {
-    color: COLORS.text,
-    fontWeight: '900',
-    fontSize: 13,
-  },
-  endedCard: {
-    backgroundColor: COLORS.surface,
-    padding: SPACING.md,
-    borderRadius: RADIUS.lg,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  endedTitle: {
-    color: COLORS.text,
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  endedStatus: {
-    color: COLORS.textMuted,
-    fontSize: 12,
-    marginVertical: SPACING.xs,
-  },
-  reorderBtn: {
-    backgroundColor: COLORS.cardSecondary,
-    paddingVertical: 10,
-    borderRadius: RADIUS.md,
-    alignItems: 'center',
-    marginTop: SPACING.xs,
-    borderWidth: 1,
-    borderColor: COLORS.primary,
-  },
-  reorderText: {
-    color: COLORS.primaryGlow,
-    fontWeight: '700',
-    fontSize: 12,
-  },
+  container: { flex: 1, backgroundColor: COLORS.background },
+  header: { padding: SPACING.md, backgroundColor: COLORS.surface, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  title: { color: COLORS.text, fontSize: 18, fontWeight: '800' },
+  tabBar: { flexDirection: 'row', backgroundColor: COLORS.surface, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  tab: { flex: 1, paddingVertical: SPACING.sm + 2, alignItems: 'center', borderBottomWidth: 2, borderBottomColor: 'transparent' },
+  tabActive: { borderBottomColor: COLORS.primaryGlow },
+  tabText: { color: COLORS.textMuted, fontSize: 12, fontWeight: '700' },
+  tabTextActive: { color: COLORS.primaryGlow },
+  error: { color: COLORS.danger, padding: SPACING.md },
+  list: { padding: SPACING.md, paddingBottom: SPACING.xxl },
+  empty: { color: COLORS.textMuted, textAlign: 'center', marginTop: SPACING.xl },
+  card: { flexDirection: 'row', gap: SPACING.md, backgroundColor: COLORS.surface, borderRadius: RADIUS.lg, borderWidth: 1, borderColor: COLORS.border, padding: SPACING.sm, marginBottom: SPACING.sm },
+  thumb: { width: 84, height: 84, borderRadius: RADIUS.md, backgroundColor: COLORS.card },
+  body: { flex: 1, gap: 3, alignItems: 'flex-start' },
+  itemTitle: { color: COLORS.text, fontSize: 14, fontWeight: '700' },
+  meta: { color: COLORS.textMuted, fontSize: 12 },
+  action: { marginTop: 4, backgroundColor: COLORS.primary, paddingHorizontal: SPACING.md, paddingVertical: 6, borderRadius: RADIUS.md },
+  actionText: { color: COLORS.text, fontWeight: '800', fontSize: 12 },
 });

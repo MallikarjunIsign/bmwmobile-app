@@ -41,4 +41,16 @@ export const config = {
 
   TERMS_URL: 'https://www.bidmywork.com/terms/',
   PRIVACY_URL: 'https://www.bidmywork.com/privacy/',
+
+  /** SignalR hub for live updates (bids, "a part matching your request is now available"). */
+  NOTIFICATIONS_URL: `http://${DEV_HOST}:6001/notifications`,
+} as const;
+
+/**
+ * Feature switches. Hidden features keep their code and backend tables, they are just not shown.
+ *  - containers: container / port / shipping logistics (container schedule, Tracking tab, port pickup passes,
+ *    clearing fees). Off in this phase.
+ */
+export const FEATURES = {
+  containers: false,
 } as const;

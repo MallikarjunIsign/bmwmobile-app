@@ -38,13 +38,39 @@ None (rebroadcasts happen over SignalR, not RabbitMQ).
 |---|---|---|
 | **AuctionService.AuctionCreated** | `AuctionCreated` | **AuctionCreatedNotification** (public fields + `title`, no reserve) |
 | **AuctionService.ContainerUpdated** | `ContainerUpdated` | event as-is |
+| **ChatService.ChatMessageSent** | `ChatMessage` – **to the recipient only** | event as-is (conversation, sender, listing title, preview) |
+| **AuctionService.ReviewRequested** | `Notify` (`type: reviewRequest`) – **to the buyer only** | 2 days after completion without a review |
+| **ChatService.ChatReceipt** | `ChatReceipt` – **to the sender of the messages only** | `{ conversationId, state: Delivered\|Read, upTo }` |
 | **BidService.BidPlaced** | `BidPlaced` | event as-is |
 | **BidService.AuctionFinished** | `AuctionFinished` | event as-is (may arrive twice per auction: ReserveNotMet, then Sold/Unsold) |
 | **BidService.AuctionExtended** | `AuctionExtended` | event as-is |
+| **AuctionService.CustomOrderMatched** | `CustomOrderMatched` | event as-is, **only to the buyer** (`Clients.User(username)`): "A part matching your request is now available" → the app opens the listing |
+
+### Personal notifications – `Notify`
+
+Sent only to the people concerned (`Clients.User(username)`) as `Notify` with
+**UserNotification** `{ type, auctionId, title, amount?, detail? }` (the title comes from the `AuctionTitles` cache filled from
+`AuctionCreated`):
+
+| Event | `type` | To |
+|---|---|---|
+| BidPlaced | `outbid` | the previous high bidder |
+| BidPlaced | `newBid` | the seller |
+| AuctionEndingSoon | `endingSoon` | the seller and every bidder |
+| AuctionFinished (Sold) | `won` / `lost` / `sold` | the winner / the other bidders / the seller |
+| AuctionFinished (no bids) | `endedNoBids` | the seller |
+| CustomOrderMatched | `customOrderMatched` | the buyer |
+| OrderStatusChanged | `orderUpdate` (`detail` = the step, e.g. "Dispatched") | the other party of the sale |
+
+The app shows them as toasts on any screen (`NotificationToasts`).
 
 ## SignalR Hub
 
 **`/notifications`** - `NotificationHub` (empty `Hub` subclass — server never receives client-invoked methods, it's push-only). Routed through GatewayService with a CORS policy allowing the frontend origin (needed because SignalR negotiation isn't a simple CORS request).
+
+Connections may send the IdentityService access token as `?access_token=...` (validated with JWT Bearer against
+`IdentityServiceUrl`); `UsernameUserIdProvider` maps the `username` claim to the SignalR user, so personal messages
+(CustomOrderMatched) reach only that user. Anonymous connections still receive the public bid/auction messages.
 
 ## API Endpoints
 

@@ -11,91 +11,70 @@ using Wolverine.EntityFrameworkCore;
 
 namespace AuctionService.Controllers;
 
+/// <summary>
+/// Listing photos (multipart upload). Every file is checked by its real content (not the extension), size and count,
+/// re-encoded without EXIF data (no GPS position leaks) and stored with a ~400 px thumbnail.
+/// Limits: parts 3–10 photos, vehicles 8–20 (the minimum is checked when publishing); 5 MB each.
+/// After the first bid the seller may still ADD photos, but not delete or reorder them.
+/// </summary>
 [ApiController]
 [Authorize]
 [Route("api/auctions/{auctionId}/images")]
 public class AuctionImagesController(AuctionDbContext context, IDbContextOutbox<AuctionDbContext> outbox,
-    AuctionMapper mapper, IImageStorage storage, IOptions<ImageUploadOptions> uploadOptions,
+    AuctionMapper mapper, ListingImageService images, IOptions<ImageUploadOptions> uploadOptions,
     ILogger<AuctionImagesController> logger) : ControllerBase
 {
     private ImageUploadOptions Limits => uploadOptions.Value;
 
-    /// <summary>Uploads one or more images (multipart/form-data, any field name).</summary>
+    /// <summary>Uploads one or more images (multipart/form-data, any file field name; optional "angle" field for vehicles).</summary>
     [HttpPost]
     [Consumes("multipart/form-data")]
     [ImageUploadLimit]
     public async Task<ActionResult<List<ItemImageDto>>> Upload(string auctionId, CancellationToken cancellationToken)
     {
-        var (auction, error) = await LoadForSellerAsync(auctionId);
+        var (auction, error) = await LoadForSellerAsync(auctionId, allowWithBids: true);
         if (error != null) return error;
 
-        IFormFileCollection files;
+        var item = auction!.Item;
+        var upload = await UploadedImages.ReadAsync(Request, Limits, cancellationToken);
+        // The count is checked before the content, as before (no file is stored until all of them are valid).
+        var form = upload.Form;
+        var fileCount = form?.Files.Count ?? 0;
+        var max = ListingRules.MaxPhotos(item);
+        if (form is not null && fileCount > 0 && item.Images.Count + fileCount > max)
+            return BadRequest($"A listing can have at most {max} photos ({item.Images.Count} already uploaded)");
+        if (upload.Error != null) return BadRequest(upload.Error);
+
+        var angle = form!.TryGetValue("angle", out var angleValue) ? angleValue.ToString() : null;
+        if (!string.IsNullOrEmpty(angle) && !ListingRules.VehicleAngles.Contains(angle))
+            return BadRequest($"angle must be one of {string.Join(", ", ListingRules.VehicleAngles)}");
+
+        var accepted = upload.Files;
+
+        var added = new List<ItemImage>();
         try
         {
-            files = (await Request.ReadFormAsync(cancellationToken)).Files;
-        }
-        catch (Exception e) when (e is InvalidDataException or BadHttpRequestException)
-        {
-            return BadRequest($"Upload is too large: max {Limits.MaxFiles} images of {Limits.MaxFileSizeMB} MB each");
-        }
+            var nextOrder = item.Images.Count == 0 ? 0 : item.Images.Max(x => x.SortOrder) + 1;
+            var hasPrimary = item.Images.Any(x => x.IsPrimary);
 
-        if (files.Count == 0) return BadRequest("No files were uploaded");
-
-        var images = auction!.Item.Images;
-        if (images.Count + files.Count > Limits.MaxFiles)
-            return BadRequest($"An item can have at most {Limits.MaxFiles} images ({images.Count} already uploaded)");
-
-        // Validate every file before storing any of them.
-        var accepted = new List<(IFormFile File, string Extension)>();
-        foreach (var file in files)
-        {
-            var name = Path.GetFileName(file.FileName);
-
-            if (file.Length == 0) return BadRequest($"{name} is empty");
-            if (file.Length > Limits.MaxFileSizeBytes)
-                return BadRequest($"{name} is larger than {Limits.MaxFileSizeMB} MB");
-
-            var extension = Path.GetExtension(name).ToLowerInvariant();
-            if (!Limits.AllowedExtensions.Contains(extension))
-                return BadRequest($"{name} is not an allowed type ({string.Join(", ", Limits.AllowedExtensions)})");
-
-            await using var stream = file.OpenReadStream();
-            // The content decides the type (and the stored extension), not the uploaded name.
-            var detected = await ImageSignature.DetectAsync(stream, cancellationToken);
-            if (detected == null || !IsAllowed(detected))
-                return BadRequest($"{name} is not a valid {string.Join(", ", Limits.AllowedExtensions)} image");
-
-            accepted.Add((file, detected));
-        }
-
-        var stored = new List<StoredImage>();
-        try
-        {
-            var nextOrder = images.Count == 0 ? 0 : images.Max(x => x.SortOrder) + 1;
-            var hasPrimary = images.Any(x => x.IsPrimary);
-
-            foreach (var (file, extension) in accepted)
+            foreach (var (data, extension) in accepted)
             {
-                await using var stream = file.OpenReadStream();
-                var saved = await storage.SaveAsync(stream, extension, cancellationToken);
-                stored.Add(saved);
+                var image = await images.StoreAsync(data, extension, item.Id, cancellationToken);
+                if (image is null) return BadRequest("One of the files is not a readable image");
 
-                images.Add(new ItemImage
-                {
-                    ItemId = auction.Item.Id,
-                    Url = saved.Url,
-                    FileName = saved.FileName,
-                    SortOrder = nextOrder++,
-                    IsPrimary = !hasPrimary
-                });
+                image.SortOrder = nextOrder++;
+                image.IsPrimary = !hasPrimary;
+                image.Angle = string.IsNullOrEmpty(angle) ? null : angle;
                 hasPrimary = true;
+                item.Images.Add(image);
+                added.Add(image);
             }
 
             await SaveAndPublishAsync(auction);
         }
         catch
         {
-            foreach (var saved in stored) await storage.DeleteAsync(saved.FileName, CancellationToken.None);
+            foreach (var image in added) await images.DeleteFilesAsync(image, CancellationToken.None);
             throw;
         }
 
@@ -105,70 +84,67 @@ public class AuctionImagesController(AuctionDbContext context, IDbContextOutbox<
     [HttpDelete("{imageId}")]
     public async Task<IActionResult> Delete(string auctionId, string imageId, CancellationToken cancellationToken)
     {
-        var (auction, error) = await LoadForSellerAsync(auctionId);
+        var (auction, error) = await LoadForSellerAsync(auctionId, allowWithBids: false);
         if (error != null) return error;
 
-        var images = auction!.Item.Images;
-        var image = images.FirstOrDefault(x => x.Id == imageId);
+        var list = auction!.Item.Images;
+        var image = list.FirstOrDefault(x => x.Id == imageId);
         if (image == null) return NotFound();
 
-        images.Remove(image);
+        list.Remove(image);
         context.ItemImages.Remove(image);
-        Normalize(images, primaryId: image.IsPrimary ? null : images.FirstOrDefault(x => x.IsPrimary)?.Id);
+        Normalize(list, primaryId: image.IsPrimary ? null : list.FirstOrDefault(x => x.IsPrimary)?.Id);
 
         await SaveAndPublishAsync(auction);
-
-        if (!image.IsExternal) await storage.DeleteAsync(image.FileName, cancellationToken);
+        await images.DeleteFilesAsync(image, cancellationToken);
 
         return NoContent();
     }
 
-    /// <summary>Reorders the images and sets the primary one. Must list every image id exactly once.</summary>
+    /// <summary>Reorders the images (the first one is the cover). Must list every image id exactly once.</summary>
     [HttpPut("order")]
     public async Task<ActionResult<List<ItemImageDto>>> Reorder(string auctionId, ReorderImagesDto dto)
     {
-        var (auction, error) = await LoadForSellerAsync(auctionId);
+        var (auction, error) = await LoadForSellerAsync(auctionId, allowWithBids: false);
         if (error != null) return error;
 
-        var images = auction!.Item.Images;
+        var list = auction!.Item.Images;
         var ids = dto.ImageIds.Distinct().ToList();
 
-        if (ids.Count != dto.ImageIds.Count || ids.Count != images.Count || ids.Any(id => images.All(x => x.Id != id)))
+        if (ids.Count != dto.ImageIds.Count || ids.Count != list.Count || ids.Any(id => list.All(x => x.Id != id)))
             return BadRequest("imageIds must list every image of the item exactly once");
 
         if (dto.PrimaryImageId != null && !ids.Contains(dto.PrimaryImageId))
             return BadRequest("primaryImageId must be one of the item's images");
 
-        foreach (var image in images) image.SortOrder = ids.IndexOf(image.Id);
-        Normalize(images, dto.PrimaryImageId ?? ids.FirstOrDefault());
+        foreach (var image in list) image.SortOrder = ids.IndexOf(image.Id);
+        Normalize(list, dto.PrimaryImageId ?? ids.FirstOrDefault());
 
         await SaveAndPublishAsync(auction);
 
         return Ok(mapper.ToDto(auction).ImageItems);
     }
 
-    private bool IsAllowed(string detectedExtension) =>
-        Limits.AllowedExtensions.Contains(detectedExtension) ||
-        detectedExtension == ".jpg" && Limits.AllowedExtensions.Contains(".jpeg");
-
-    private async Task<(Auction? Auction, ActionResult? Error)> LoadForSellerAsync(string auctionId)
+    private async Task<(Auction? Auction, ActionResult? Error)> LoadForSellerAsync(string auctionId, bool allowWithBids)
     {
         var auction = await context.Auctions.WithDetails().FirstOrDefaultAsync(x => x.Id == auctionId);
 
         if (auction == null) return (null, NotFound());
         if (auction.Seller != User.Identity?.Name) return (null, Forbid());
 
-        // Images follow the same "no edits after a bid" rule as the rest of the listing.
-        if (auction.CurrentHighBid > 0) return (null, BadRequest("Cannot change images of an auction that has bids"));
-        if (auction.Status != Status.Live) return (null, BadRequest("Cannot change images of an auction that has ended"));
+        if (auction.Status is not (Status.Live or Status.Draft))
+            return (null, BadRequest("Cannot change photos of a listing that has ended"));
+        var hasBids = auction.CurrentHighBid > 0 || auction.BidCount > 0;
+        if (hasBids && !allowWithBids)
+            return (null, BadRequest("After the first bid you can only add photos, not remove or reorder them"));
 
         return (auction, null);
     }
 
     // Sort orders become 0..n-1 and exactly one image is primary (the given one, else the first).
-    private static void Normalize(List<ItemImage> images, string? primaryId)
+    private static void Normalize(List<ItemImage> list, string? primaryId)
     {
-        var ordered = images.OrderBy(x => x.SortOrder).ToList();
+        var ordered = list.OrderBy(x => x.SortOrder).ToList();
         primaryId ??= ordered.FirstOrDefault()?.Id;
 
         for (var i = 0; i < ordered.Count; i++)
@@ -181,7 +157,8 @@ public class AuctionImagesController(AuctionDbContext context, IDbContextOutbox<
     private async Task SaveAndPublishAsync(Auction auction)
     {
         auction.UpdatedAt = DateTime.UtcNow;
-        await outbox.PublishAsync(mapper.ToUpdated(auction));
+        // Drafts are private: Bid/Search only hear about a listing once it is published.
+        if (auction.Status != Status.Draft) await outbox.PublishAsync(mapper.ToUpdated(auction));
         await outbox.SaveChangesAndFlushMessagesAsync();
         logger.LogInformation("Images of auction {AuctionId} changed ({Count} images)", auction.Id, auction.Item.Images.Count);
     }

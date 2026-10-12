@@ -57,11 +57,97 @@ public class AuctionMapper(ImageUrlBuilder urls)
             {
                 Id = x.Id,
                 Url = urls.Build(x.Url),
+                ThumbnailUrl = x.ThumbnailUrl is null ? null : urls.Build(x.ThumbnailUrl),
+                Angle = x.Angle,
                 SortOrder = x.SortOrder,
                 IsPrimary = x.IsPrimary
-            }).ToList()
+            }).ToList(),
+            Kind = item.Kind?.ToString(),
+            FitmentMode = item.FitmentMode?.ToString(),
+            PartTypeId = item.PartTypeId,
+            PartType = item.PartType?.Name ?? item.PartName,
+            Category = TopCategory(item)?.Name,
+            SubCategory = item.PartType?.Category?.Parent is null ? null : item.PartType.Category.Name,
+            Title = item.Title ?? item.DisplayName,
+            TitleExtra = item.TitleExtra,
+            FitmentSummary = ListingRules.FitmentSummary(item),
+            CountryCode = item.CountryCode,
+            Currency = item.Currency,
+            DeliveryOptions = DeliveryList(item.DeliveryOptions),
+            SizeClass = item.SizeClass?.ToString(),
+            ShippingFee = item.DeliveryOptions.HasFlag(Entities.DeliveryOptions.Shipping) ? item.ShippingFee : null,
+            ShipsWithin = item.DeliveryOptions.HasFlag(Entities.DeliveryOptions.Shipping) ? item.CountryCode : null,
+            PickupCity = item.DeliveryOptions.HasFlag(Entities.DeliveryOptions.Pickup) ? ListingRules.PublicCity(item.LocationName) : null,
+            // The exact pickup address never leaves AuctionService except to the seller (and later the buyer's order).
+            PickupAddress = currentUser != null && currentUser == auction.Seller ? item.PickupAddress : null,
+            DurationDays = item.DurationDays,
+            BidCount = auction.BidCount,
+            PartDetails = item.ItemType == ItemType.Vehicle ? null : new PartDetailsDto
+            {
+                BrandType = item.PartDetails?.BrandType?.ToString(),
+                Brand = item.PartDetails?.Brand,
+                Position = item.PartDetails?.Position,
+                Side = item.PartDetails?.Side,
+                Condition = item.Condition?.ToString(),
+                UsedGrade = item.PartDetails?.UsedGrade?.ToString(),
+                DonorMileage = item.PartDetails?.DonorMileage,
+                Colour = item.PartDetails?.Colour,
+                PaintCode = item.PartDetails?.PaintCode,
+                Quantity = item.Quantity,
+                Includes = item.PartDetails?.Includes,
+                Warranty = item.PartDetails?.Warranty
+            },
+            Fitments = item.Fitments.OrderBy(f => f.SortOrder).Select(f => new FitmentDto
+            {
+                YearFrom = f.YearFrom, YearTo = f.YearTo, MakeId = f.MakeId, Make = f.Make, ModelId = f.ModelId,
+                Model = f.Model, Trim = f.Trim, Engine = f.Engine, Fuel = f.Fuel, Transmission = f.Transmission,
+                Drivetrain = f.Drivetrain, SteeringSide = f.SteeringSide, Market = f.Market, Note = f.Note
+            }).ToList(),
+            PartNumbers = item.PartNumbers.OrderBy(n => n.Kind == "OEM" ? 0 : 1).Select(n => n.Value)
+                .DefaultIfEmpty(item.PartNumber).OfType<string>().Where(n => n.Length > 0).ToList(),
+            BrandType = item.PartDetails?.BrandType?.ToString(),
+            Brand = item.PartDetails?.Brand,
+            Position = item.PartDetails?.Position,
+            Side = item.PartDetails?.Side,
+            UsedGrade = item.PartDetails?.UsedGrade?.ToString(),
+            PartNumberItems = item.PartNumbers.OrderBy(n => n.Kind == "OEM" ? 0 : 1)
+                .Select(n => new PartNumberDto { Value = n.Value, Kind = n.Kind, Normalized = n.Normalized }).ToList(),
+            Specs = item.Specs.GroupBy(s => s.Key).ToDictionary(g => g.Key, g => g.First().Value),
+            Vehicle = item.VehicleDetails is not { } v ? null : new VehicleDetailsDto
+            {
+                Trim = v.Trim, BodyType = v.BodyType, Fuel = v.Fuel, EngineSize = v.EngineSize,
+                Transmission = v.Transmission, Drivetrain = v.Drivetrain, SteeringSide = v.SteeringSide,
+                // The full VIN only for the seller.
+                Vin = currentUser != null && currentUser == auction.Seller ? v.Vin : ListingRules.MaskVin(v.Vin),
+                RunningStatus = v.RunningStatus, MileageUnit = v.MileageUnit, DamageType = v.DamageType,
+                DamageAreas = v.DamageAreas.ToList(), Keys = v.Keys, Owners = v.Owners,
+                ServiceHistory = v.ServiceHistory, InspectionAllowed = v.InspectionAllowed, Papers = v.Papers
+            },
+            ThumbnailUrl = images.Count > 0 && images[0].ThumbnailUrl is { } thumb ? urls.Build(thumb) : null,
+            CanEdit = currentUser != null && currentUser == auction.Seller && auction.BidCount == 0 &&
+                      auction.CurrentHighBid is null or 0 && auction.Status is Status.Draft or Status.Live,
+            SaleType = auction.SaleType.ToString(),
+            SellerName = auction.SellerName,
+            QuantityAvailable = auction.QuantityAvailable,
+            QuantitySold = auction.QuantitySold,
+            SellerRating = auction.SellerRatingAverage,
+            SellerRatingCount = auction.SellerRatingCount
         };
     }
+
+    /// <summary>Public URL of a stored image path.</summary>
+    public string ImageUrl(string stored) => urls.Build(stored);
+
+    /// <summary>The cover photo's thumbnail (orders, My Listings); null without photos.</summary>
+    public string? CoverUrl(Auction auction) =>
+        auction.Item.OrderedImages.FirstOrDefault() is { } image ? urls.Build(image.ThumbnailUrl ?? image.Url) : null;
+
+    private static Category? TopCategory(Item item) =>
+        item.PartType?.Category is { } c ? c.Parent ?? c : null;
+
+    public static List<string> DeliveryList(DeliveryOptions options) =>
+        Enum.GetValues<DeliveryOptions>().Where(o => o != Entities.DeliveryOptions.None && options.HasFlag(o))
+            .Select(o => o.ToString()).ToList();
 
     public AuctionCreated ToCreated(Auction auction) => Fill(new AuctionCreated
     {
@@ -75,6 +161,7 @@ public class AuctionMapper(ImageUrlBuilder urls)
 
     private T Fill<T>(T target, Auction auction) where T : AuctionSnapshot
     {
+        // Never the seller's view: no full VIN in events.
         var dto = ToDto(auction);
 
         target.ReservePrice = auction.ReservePrice;
@@ -110,6 +197,44 @@ public class AuctionMapper(ImageUrlBuilder urls)
         target.ImageUrl = dto.ImageUrl;
         target.Images = dto.Images;
 
+        target.Kind = dto.Kind;
+        target.FitmentMode = dto.FitmentMode;
+        target.PartTypeId = dto.PartTypeId;
+        target.PartType = dto.PartType;
+        target.Category = dto.Category;
+        target.Title = dto.Title;
+        target.FitmentSummary = dto.FitmentSummary;
+        target.Fitments = dto.Fitments.Select(f => new FitmentInfo
+        {
+            YearFrom = f.YearFrom, YearTo = f.YearTo, Make = f.Make, Model = f.Model, Trim = f.Trim, Engine = f.Engine,
+            Fuel = f.Fuel, Transmission = f.Transmission, Drivetrain = f.Drivetrain, SteeringSide = f.SteeringSide
+        }).ToList();
+        target.PartNumbers = dto.PartNumbers;
+        target.Specs = dto.Specs;
+        target.BrandType = dto.PartDetails?.BrandType;
+        target.Brand = dto.PartDetails?.Brand;
+        target.Position = dto.PartDetails?.Position;
+        target.Side = dto.PartDetails?.Side;
+        target.UsedGrade = dto.PartDetails?.UsedGrade;
+        target.CountryCode = dto.CountryCode;
+        target.Currency = dto.Currency;
+        target.DeliveryOptions = dto.DeliveryOptions;
+        target.ShippingFee = dto.ShippingFee;
+        target.PickupCity = dto.PickupCity;
+        target.ThumbnailUrl = dto.ThumbnailUrl;
+        target.BidCount = dto.BidCount;
+        target.SaleType = dto.SaleType;
+        target.SellerName = dto.SellerName;
+        target.QuantityAvailable = dto.QuantityAvailable;
+        target.SellerRating = dto.SellerRating;
+        target.SellerRatingCount = dto.SellerRatingCount;
+        target.Vehicle = dto.Vehicle is not { } v ? null : new VehicleSummary
+        {
+            Trim = v.Trim, BodyType = v.BodyType, Fuel = v.Fuel, EngineSize = v.EngineSize, Transmission = v.Transmission,
+            Drivetrain = v.Drivetrain, SteeringSide = v.SteeringSide, RunningStatus = v.RunningStatus,
+            MileageUnit = v.MileageUnit, DamageType = v.DamageType
+        };
+
         return target;
     }
 
@@ -133,7 +258,8 @@ public class AuctionMapper(ImageUrlBuilder urls)
             Seller = seller,
             StartingPrice = dto.StartingPrice,
             ReservePrice = dto.ReservePrice is null or 0 ? dto.StartingPrice : dto.ReservePrice.Value,
-            BidIncrement = dto.BidIncrement,
+            // The bid step now comes from BidService's tier table; the old per-auction increment is optional.
+            BidIncrement = dto.BidIncrement > 0 ? dto.BidIncrement : 1,
             AuctionEnd = dto.AuctionEnd,
             Status = Status.Live,
             Item = new Item
@@ -175,7 +301,8 @@ public class AuctionMapper(ImageUrlBuilder urls)
             Seller = source.Seller,
             StartingPrice = dto.StartingPrice,
             ReservePrice = dto.ReservePrice is null or 0 ? dto.StartingPrice : dto.ReservePrice.Value,
-            BidIncrement = dto.BidIncrement,
+            // The bid step now comes from BidService's tier table; the old per-auction increment is optional.
+            BidIncrement = dto.BidIncrement > 0 ? dto.BidIncrement : 1,
             AuctionEnd = dto.AuctionEnd,
             Status = Status.Live,
             Item = new Item
@@ -230,7 +357,7 @@ public class AuctionMapper(ImageUrlBuilder urls)
         if (dto.LocationName is not null) item.LocationName = Clean(dto.LocationName);
 
         if (dto.StartingPrice is not null) auction.StartingPrice = dto.StartingPrice.Value;
-        if (dto.BidIncrement is not null) auction.BidIncrement = dto.BidIncrement.Value;
+        if (dto.BidIncrement is not null) auction.BidIncrement = Math.Max(dto.BidIncrement.Value, 1);
         if (dto.ReservePrice is not null)
             auction.ReservePrice = dto.ReservePrice == 0 ? auction.StartingPrice : dto.ReservePrice.Value;
         if (dto.AuctionEnd is not null) auction.AuctionEnd = dto.AuctionEnd.Value;

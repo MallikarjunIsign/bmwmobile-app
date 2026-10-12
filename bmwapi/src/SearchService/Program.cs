@@ -38,6 +38,11 @@ builder.Services.AddHttpClient<AuctionSvcHttpClient>()
             return default;
         };
     });
+builder.Services.AddSingleton<SearchDictionaryProvider>();
+builder.Services.AddHttpClient(nameof(DictionaryRefresher));
+if (!builder.Environment.IsEnvironment("Test"))
+    builder.Services.AddHostedService<DictionaryRefresher>();
+
 builder.Host.UseWolverine(opts =>
 {
     opts.UseRabbitMq(rabbit =>
@@ -60,6 +65,8 @@ builder.Host.UseWolverine(opts =>
         .BindExchange("bid-placed").ToQueue("search-bid-placed")
         .BindExchange("auction-extended").ToQueue("search-auction-extended")
         .BindExchange("container-updated").ToQueue("search-container-updated")
+        .DeclareExchange("seller-rating-changed", ex => ex.ExchangeType = ExchangeType.Fanout)
+        .BindExchange("seller-rating-changed").ToQueue("search-seller-rating-changed")
         .AutoProvision();
     
     opts.ListenToRabbitQueue("search-auction-created");
@@ -69,6 +76,7 @@ builder.Host.UseWolverine(opts =>
     opts.ListenToRabbitQueue("search-bid-placed");
     opts.ListenToRabbitQueue("search-auction-extended");
     opts.ListenToRabbitQueue("search-container-updated");
+    opts.ListenToRabbitQueue("search-seller-rating-changed");
 
     opts.OnException<TransientSearchException>()
         .RetryWithCooldown(
@@ -97,6 +105,10 @@ if (app.Environment.IsDevelopment())
 }
 
 app.MapGet("/api/search", SearchEndpoints.GetSearchResults);
+app.MapGet("/api/search/filters", SearchEndpoints.GetFilterOptions);
+// E-commerce style search and suggestions (listing model).
+app.MapGet("/api/search/listings", ListingSearchEndpoints.Search);
+app.MapGet("/api/search/suggest", ListingSearchEndpoints.Suggest);
 app.MapGet("/api/search/{id}", SearchEndpoints.GetAuctionById);
 
 try

@@ -18,7 +18,11 @@ public record UserLocationDto(
     int RadiusKm,
     string? CountryCode,
     bool IsPrimary,
-    bool IsCurrentLocation);
+    bool IsCurrentLocation,
+    string? AddressLine = null,
+    string? Area = null,
+    string? Landmark = null,
+    string? PostalCode = null);
 
 /// <summary>All of the user's locations (primary first) and the auto-update setting.</summary>
 public record MyLocationsResponse(bool AutoUpdatePrimary, IReadOnlyList<UserLocationDto> Locations);
@@ -32,7 +36,12 @@ public record SaveLocationRequest(
     int? RadiusKm = null,
     string? CountryCode = null,
     // Add only: also make it the primary location (turns auto-update off).
-    bool MakePrimary = false);
+    bool MakePrimary = false,
+    // Optional address details (house / street, area, landmark, PIN / ZIP code).
+    [StringLength(200)] string? AddressLine = null,
+    [StringLength(100)] string? Area = null,
+    [StringLength(100)] string? Landmark = null,
+    [StringLength(12)] string? PostalCode = null);
 
 /// <summary>
 /// The phone's GPS position. Explicit = the user tapped "Use my current location" (also turns auto-update on).

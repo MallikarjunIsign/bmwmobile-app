@@ -27,7 +27,7 @@ export const AuctionLostScreen: React.FC<Props> = ({ route, navigation }) => {
         <View style={styles.card}>
           <Text style={styles.desc}>
             This auction ended at <Text style={styles.bold}>{money(auction.currentHighBid)}</Text>.
-            Don't worry! You can submit a custom part order for the upcoming German container schedule with zero extra fee.
+            Create a custom order for this part and get notified when a matching part is listed.
           </Text>
         </View>
 
@@ -39,7 +39,7 @@ export const AuctionLostScreen: React.FC<Props> = ({ route, navigation }) => {
             prefillPart: auction.item.partName || auction.title
           })}
         >
-          <Text style={styles.requestText}>SUBMIT CUSTOM ORDER FOR NEXT CONTAINER →</Text>
+          <Text style={styles.requestText}>CREATE A CUSTOM ORDER →</Text>
         </TouchableOpacity>
 
         <TouchableOpacity 

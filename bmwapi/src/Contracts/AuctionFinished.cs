@@ -20,4 +20,6 @@ public class AuctionFinished
     public DateTime? SellerDecisionDeadline { get; set; }
     /// <summary>Id of the winning (or, for ReserveNotMet, the highest) bid.</summary>
     public string? BidId { get; set; }
+    /// <summary>Everyone who bid (for "you won" / "auction lost" notifications).</summary>
+    public List<string> Bidders { get; set; } = [];
 }

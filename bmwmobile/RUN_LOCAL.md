@@ -1,4 +1,4 @@
-# Run and test OKOH Parts locally (Windows, Git Bash)
+# Run and test BidMyParts locally (Windows, Git Bash)
 
 This guide starts the backend (Docker + .NET services) and the React Native app on the Android emulator.
 All commands are for **Git Bash**. Folder paths:
@@ -30,6 +30,21 @@ dotnet user-secrets set "Email:Password" "your-16-letter-app-password"
 ```
 
 These are stored only on your PC (user-secrets), never in the repo.
+
+### Settings with secrets (placeholders – never commit real values)
+
+| Service | Setting | Default | How to set it |
+|---|---|---|---|
+| Auction | `Geocoding:Provider` | `BuiltIn` (offline city list for India, USA, Nigeria, Ireland – no key) | `appsettings.json`; switch to `Google` for exact cities |
+| Auction | `Geocoding:Google:ApiKey` | empty | only when `Provider = Google`: `cd /c/Bmwmobile/bmwapi/src/AuctionService && dotnet user-secrets set "Geocoding:Google:ApiKey" "<your-key>"`, or the env var `Geocoding__Google__ApiKey` (Docker/K8s) |
+| Identity | `Email:Username` / `Email:Password` | empty | user-secrets (see above) |
+| Auction | `ImageStorage:Provider` | `Local` (photos saved in `src/AuctionService/uploads`, served by the Gateway under `/images`) | `appsettings.json`; `GoogleCloudStorage` for the cloud bucket |
+| Auction | `ImageStorage:Gcs:Bucket` | empty | only with `GoogleCloudStorage`: `dotnet user-secrets set "ImageStorage:Gcs:Bucket" "<bucket-name>"` or env var `ImageStorage__Gcs__Bucket`. Optional `ImageStorage:Gcs:PublicBaseUrl` (CDN), `ImageStorage:Gcs:ObjectPrefix` (`listings`) |
+| Auction | Google credentials | – | **never in settings**: env var `GOOGLE_APPLICATION_CREDENTIALS=<path to service-account .json outside the repo>` (or the workload identity in Google Cloud). The account needs *Storage Object Admin* on the bucket; the bucket must allow public reads (or put a CDN in front) |
+| Auction | `Admin:Usernames` | `[]` | usernames that may approve makes/models sellers request (`/api/catalog/pending`, `/approve`), e.g. env var `Admin__Usernames__0=alice` |
+
+The Google key needs the **Geocoding API** enabled in Google Cloud Console (APIs & Services). Results are cached per
+~1 km for `Geocoding:CacheHours` (24), so phones in the same area don't call Google again.
 
 ---
 
@@ -142,7 +157,15 @@ npm run android -- --active-arch-only --no-packager
 - `--active-arch-only` builds only for the emulator's CPU – much faster and uses far less memory.
 - First build: 5–15 minutes. Ready when you see `BUILD SUCCESSFUL` and the app opens on the emulator.
 - After the first build you only need Metro: change code → the app reloads; or press `r` in the Metro window.
-  Rebuild (`npm run android ...`) only after adding a native package.
+  Rebuild (`npm run android ...`) only after adding a native package **or changing the app name**.
+- **Rebuild needed now:** the app was renamed to **BidMyParts** (launcher label and the registered component name
+  `BidMyParts` in `app.json` / `MainActivity.kt`). An old build with the new JavaScript shows
+  *"BidMyParts has not been registered"* – run `npm run android -- --active-arch-only --no-packager` once.
+  The Android package id stays `com.bidmywork.app` (Google sign-in keeps working, the app updates in place).
+  New JS-only package `@microsoft/signalr` (live updates) needs `npm install` but no native rebuild.
+- **Rebuild needed again for "+ Sell":** the new native package `react-native-image-picker` (camera + gallery for
+  listing photos) and the `CAMERA` permission. Run `npm install`, then `npm run android -- --active-arch-only --no-packager`.
+  Without the rebuild the photo step shows *"RNImagePicker could not be found"* / the camera button does nothing.
 
 **Real phone instead of the emulator:** connect it with USB debugging on, then
 
@@ -201,9 +224,23 @@ Codes expire after 10 minutes, allow 5 tries, and can be resent after 30 seconds
 | Port | `5433` |
 | Username | `postgres` |
 | Password | the `POSTGRES_PASSWORD` value in `bmwapi/docker-compose.yml` |
-| Databases | `identity` (users, OTP codes, trusted devices, refresh tokens, `UserLocations`), `auctions` (`Auctions`, `Items` with location), `bids` |
+| Databases | `identity` (users, OTP codes, trusted devices, refresh tokens, `UserLocations` – no longer used by the app), `auctions` (`Auctions`, `Items` with location, `PartRequests` = custom orders, `Purchases`), `bids` |
 
-pgAdmin: right-click **Servers → Register → Server…**, name it e.g. `OKOH local`, fill the **Connection** tab as above.
+pgAdmin: right-click **Servers → Register → Server…**, name it e.g. `BidMyParts local`, fill the **Connection** tab as above.
+
+New tables are created automatically when the Auction service starts (EF Core migrations `CustomOrders` and
+`ListingModel` – they only **add** tables and columns; existing data is untouched):
+
+- master data: `Categories`, `PartTypes` (synonyms, spec fields), `Makes`, `VehicleModels`, `VehicleConfigs`
+- listings: new columns on `Items` (kind, fitment mode, part type, title, currency, delivery, …) and `Auctions`
+  (bid count, seller contact); `PartDetails`, `PartFitments`, `PartNumbers`, `PartSpecs`, `VehicleDetails`
+- `Orders` (with delivery method, address, courier, tracking number) and `OrderEvents` (one row per tracking step,
+  migration `OrderTracking`), `GarageVehicles` (My Garage)
+- identity database: `UserLocations` gets address columns (house/street, area, landmark, postal code – migration `UserAddresses`)
+
+On the first start the master data is seeded and **17 demo listings** of all three kinds (bumpers, tyres,
+batteries, a Hilux, …, with generated placeholder photos) are added in India, Nigeria, the USA and Ireland; older auctions are converted to the new model.
+The Search service re-indexes documents that miss the new fields when it starts.
 
 ---
 
@@ -254,10 +291,96 @@ Next time start again with section 1.
 
 ## 9. Quick test checklist
 
-1. App opens on the dark OKOH Parts splash screen.
-2. ENTER MARKETPLACE → Create an account → code from section 5 → **Set your location** → parts list.
+1. App opens on the dark **BidMyParts** splash screen; the launcher label is "BidMyParts".
+2. ENTER MARKETPLACE → Create an account → code from section 5 → Android asks for location → parts list.
+   There is **no** location screen any more.
 3. Log out (Home → `👤 name · Log out`), log in again: with "Remember this device" ticked no code is asked.
 4. Forgot password → code → new password → log in.
-5. Home → location chip → Manage locations → add Home (Hyderabad, 25 km) and Work (Bangalore, 10 km); switch between them: the list changes and cards show "X km away".
-6. GPS: `adb emu geo fix 78.4138 17.4849`, press the emulator Home button, reopen the app → primary follows GPS (auto-update on).
-7. Set Bangalore as primary → auto switch turns off → move GPS again → primary stays Bangalore.
+
+### Automatic location (mock positions on the emulator)
+
+`adb emu geo fix <longitude> <latitude>` (longitude first!), then bring the app to the foreground again
+(emulator Home button → reopen) so it reads the position:
+
+| Place | Command | Expected |
+|---|---|---|
+| Hyderabad, India | `adb emu geo fix 78.4867 17.3850` | 60 km radius, ₹, distances in km |
+| New York, USA | `adb emu geo fix -74.0060 40.7128` | 60 mi radius, $, distances in miles |
+| Lagos, Nigeria | `adb emu geo fix 3.3792 6.5244` | 60 km, ₦ |
+| Dublin, Ireland | `adb emu geo fix -6.2603 53.3498` | 60 km, € |
+
+- The location changes only after a move of more than ~5 km (or into another city).
+- Check what the backend answers: `curl -s -H "Authorization: Bearer <token>" "http://localhost:6001/geo/reverse?lat=17.385&lon=78.4867"`.
+- **Deny** the permission (or switch location off in the emulator's quick settings): a banner
+  "Turn on location to see parts near you" appears on Home and Market, results are country-wide (country from the
+  phone number). "Turn on" asks again, or opens Settings when Android won't ask any more.
+  Reset the permission: `adb shell pm reset-permissions com.bidmywork.app` (or uninstall/reinstall).
+
+### Step 1 – lead review changes
+
+5. Home: no "Parts near you" block, no location text, no container banner; tabs are Home / Market / My Bids / Orders (no Tracking).
+6. Market: tap a category pill → only that category; add a make/model pill → narrowed further; both show as chips in the search bar; "All" / "All Models" clear them; the count updates.
+7. Search something that doesn't exist (e.g. `zzz`) → "There are no parts available for this search. Create a custom order …" → **Create custom order** (pre-filled) → Orders tab shows it as **OPEN**.
+8. With another account, publish a matching part within 60 km (e.g. Swagger `POST http://localhost:7001/api/auctions` or the
+   API with the same part name/make/model) → the requester gets "A part matching your request is now available" (live, or the next time the app opens) → **View part** opens the listing; the order shows **MATCHED**.
+9. Place Bid: "Current bid $1,000 + step $20 = Next bid $1,020" and "Part price … + your bid … = Total …"; quick bids next/+1/+2/+5 steps.
+   Totals 100 → 110, 1,000 → 1,020, 5,000 → 5,050. A lower bid through the API is rejected with the next valid amount:
+   `curl -X POST -H "Authorization: Bearer <token>" "http://localhost:6001/bids?auctionId=<id>&amount=1"`.
+10. Bid from a second phone/account: the next-bid line on the first phone updates by itself (SignalR).
+
+Use two accounts (A = seller, B = buyer). Rebuild the app first (section 3, image picker).
+
+### Step 2 – "+ Sell"
+
+11. **Sell** tab → three choices: *Common part*, *Part for a specific vehicle*, *Vehicle*.
+12. Vehicle-specific part: type "bumper" → pick **Bumper** → *Fits which vehicles* → + Add vehicle Toyota / Hilux /
+    2016–2020 (or "⧉ Copy fitment from my last listing") → Details (Genuine OEM, Used grade A, part number
+    `52119-0K907`) → Photos → Location (pre-filled) → Auction (part price; the bid steps are shown read-only) → Review → **Publish**.
+    The listing opens; its title is built automatically ("2016–2020 Toyota Hilux Front Bumper – Genuine OEM – Used (Grade A)").
+13. Close the app halfway through a listing → **Sell tab → My Listings** (also linked from the Orders tab) → **Draft** → it reopens on the same step (autosave).
+14. Publish with missing data → "Please fix these first" lists each problem with the step to fix.
+15. Common part (e.g. Tyre): asks only for the size (width / profile / rim), no vehicle questions.
+16. Vehicle: identity, condition, papers for your country (India: RC, insurance, PUC…), 8 guided photo angles; the VIN is shown masked to buyers.
+17. Description with a phone number or e-mail → publish is refused ("Please don't put phone numbers or e-mail addresses …"); contact details are only shared after the sale.
+18. Unknown make/model → type it in the picker → "➕ Other – request to add …" → usable on your listing at once, shown to others after an `Admin:Usernames` user approves it.
+
+### Step 3 – photos
+
+19. Photos step: camera and gallery; a progress bar per photo; parts 3–10, vehicles 8–20; set the cover; the photo is ≤ 1600 px with a 400 px thumbnail.
+20. GPS/EXIF is removed: download a photo (`curl -o p.jpg <url>`) and check it has no location (e.g. Windows → Properties → Details).
+21. After the first bid photos can only be **added**, not removed.
+22. Cloud bucket (optional): set the Google Cloud Storage settings from section 0 → new photo URLs start with `https://storage.googleapis.com/<bucket>/listings/`.
+
+### Step 4 – search
+
+23. Home or Market search: type `hilux front bum` → suggestions grouped (Parts / Vehicles / Part numbers) → pick one → chips.
+24. Type `265/65R17` → tyres of that size only; `52119 0K907` (with or without the dash/space) → the exact part first.
+25. Home → **+ Add your vehicle / ⚙ My Garage** → add 2016 Toyota Hilux → Market shows the garage pill; results get "✓ Fits your 2016 Toyota Hilux"; universal parts show "Universal".
+26. Filter sheet: condition, brand type, price, distance, sort (best / ending soon / price / newest / nearest); facet counts update.
+27. List / grid toggle; the listing page shows the photo carousel, fitment table, details, bid history and the seller's area (not the address).
+
+### Step 5 – bidding, end and orders
+
+28. A opens their own listing → no Bid button ("This is your listing – you can't bid on it."); B bids → A gets "New bid" live; B's button then says "YOU'RE THE HIGHEST BIDDER".
+29. A third account outbids B → B gets "You've been outbid" (toast, even on another screen).
+30. **My Bids**: Winning / Outbid / Won / Lost tabs. **My Listings**: Draft / Live / Ended – no bids / Sold / Completed / Cancelled.
+31. Seller: **ACCEPT $X AND CLOSE** → the auction ends now; B gets "You won! 🎉" (tap → the *Victory – auction won* screen), the other bidders "Auction lost" (tap → the *Auction lost* screen). An ended listing also shows **YOU WON · VIEW** / **AUCTION LOST · VIEW** to its bidders.
+32. Orders: each order has a step bar and **Track order ▾** (timeline with dates). The steps depend on the delivery:
+    - *Seller ships*: Part won → Packed → Dispatched (courier + tracking no., optional) → Out for delivery → Delivered
+    - *Pickup*: Part won → Ready for pickup → Picked up
+    - *Buyer's courier*: Part won → Packed → Handed to courier → Delivered
+
+    If the listing offered several options, B first picks one ("How do you want to receive it?"; *Seller ships* asks
+    which saved address). A taps **Mark as …** for each step, B taps **Confirm delivered / picked up**. Each step
+    notifies the other side ("Order update: Dispatched"). Both see each other's phone/e-mail.
+33. A listing ending with no bids → "Ended – no bids" → **RELIST** (same data, new end date).
+34. One hour before the end, bidders get "Auction ending in 1 hour" (the reminder is scheduled when the listing goes live or its end time changes – a database edit in pgAdmin does
+   **not** reschedule it). To test quickly, before any bid move the end to ~65 minutes from now:
+   `curl -X PUT -H "Authorization: Bearer <seller token>" -H "Content-Type: application/json" -d '{"auctionEnd":"<UTC time>"}' http://localhost:6001/auctions/<id>`,
+   then bid with B and wait ~5 minutes.
+35. **Location on Home**: under your name "📍 Kukatpally, Hyderabad, India ▾" (GPS city, or the address you chose).
+    Tap it → **My locations**: *Use my current location* or a saved address (**Use this address**, Edit, Delete) →
+    **+ Add new address** (city from search or *Use my current position*, house/street, area, landmark, PIN/ZIP code,
+    Home/Work/Other). A chosen address is used for the 60 km / 60 mi search and as the default item location; GPS no
+    longer changes it until you pick *Use my current location* again.
+36. Cancel a live listing without bids → Cancelled; once it has bids the Cancel link is gone (the API refuses with "A listing with bids can't be cancelled").

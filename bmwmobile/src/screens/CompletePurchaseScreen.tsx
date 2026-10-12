@@ -7,22 +7,24 @@ import { COLORS, SPACING, RADIUS } from '../theme/colors';
 import { Header } from '../components/Header';
 import { ApiService, MOCK_AUCTIONS } from '../services/api';
 import { useMoney } from '../location/useMoney';
+import { FEATURES } from '../config';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CompletePurchase'>;
 
 export const CompletePurchaseScreen: React.FC<Props> = ({ route, navigation }) => {
   const money = useMoney();
-  const { auctionId, auction: initialAuction } = route.params;
+  const { auction: initialAuction } = route.params;
   const auction = initialAuction || MOCK_AUCTIONS[0];
 
   const [deliveryOption, setDeliveryOption] = useState<'PortPickup' | 'DoorstepDelivery'>('PortPickup');
-  const [pickupPort, setPickupPort] = useState('Lagos Apapa Port');
+  const [pickupPort] = useState('Lagos Apapa Port');
   const [deliveryAddress, setDeliveryAddress] = useState('14 Ikeja Industrial Estate, Lagos, Nigeria');
   const [paymentMethod, setPaymentMethod] = useState<'BankTransfer' | 'Card'>('BankTransfer');
   const [submitting, setSubmitting] = useState(false);
 
   const winningBid = auction.currentHighBid || 14500;
-  const buyerFee = winningBid * 0.03;
+  // Clearing fee and port pickup belong to the container logistics (hidden while FEATURES.containers is off).
+  const buyerFee = FEATURES.containers ? winningBid * 0.03 : 0;
   const shippingFee = deliveryOption === 'DoorstepDelivery' ? 45 : 0;
   const totalCost = winningBid + buyerFee + shippingFee;
 
@@ -41,7 +43,11 @@ export const CompletePurchaseScreen: React.FC<Props> = ({ route, navigation }) =
 
   return (
     <SafeAreaView style={styles.container}>
-      <Header title="Complete Purchase" subtitle="Select port pickup or doorstep delivery" onBack={() => navigation.goBack()} />
+      <Header
+        title="Complete Purchase"
+        subtitle={FEATURES.containers ? 'Select port pickup or doorstep delivery' : 'Choose how you receive the part'}
+        onBack={() => navigation.goBack()}
+      />
 
       <ScrollView contentContainerStyle={styles.scroll}>
         {/* Item Summary */}
@@ -52,10 +58,12 @@ export const CompletePurchaseScreen: React.FC<Props> = ({ route, navigation }) =
             <Text style={styles.key}>Winning Auction Bid:</Text>
             <Text style={styles.val}>{money(winningBid)}</Text>
           </View>
-          <View style={styles.row}>
-            <Text style={styles.key}>OKOH Clearing Fee (3%):</Text>
-            <Text style={styles.val}>{money(buyerFee, 2)}</Text>
-          </View>
+          {FEATURES.containers ? (
+            <View style={styles.row}>
+              <Text style={styles.key}>ShopCarParts Clearing Fee (3%):</Text>
+              <Text style={styles.val}>{money(buyerFee, 2)}</Text>
+            </View>
+          ) : null}
         </View>
 
         {/* Delivery Selection */}
@@ -71,10 +79,14 @@ export const CompletePurchaseScreen: React.FC<Props> = ({ route, navigation }) =
           </View>
           <View style={{ flex: 1 }}>
             <View style={styles.optionHeader}>
-              <Text style={styles.optionTitle}>Free Port Pickup Pass</Text>
+              <Text style={styles.optionTitle}>{FEATURES.containers ? 'Free Port Pickup Pass' : 'Pickup from the seller'}</Text>
               <Text style={styles.freeBadge}>FREE ({money(0)})</Text>
             </View>
-            <Text style={styles.optionSub}>Pick up directly at customs warehouse in {pickupPort} with QR pass.</Text>
+            <Text style={styles.optionSub}>
+              {FEATURES.containers
+                ? `Pick up directly at customs warehouse in ${pickupPort} with QR pass.`
+                : 'Collect the part at the item location.'}
+            </Text>
           </View>
         </TouchableOpacity>
 

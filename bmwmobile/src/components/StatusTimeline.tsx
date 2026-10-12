@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { COLORS, SPACING, RADIUS } from '../theme/colors';
+import { COLORS, SPACING } from '../theme/colors';
 
 interface TimelineStep {
   title: string;

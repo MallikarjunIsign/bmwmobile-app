@@ -48,6 +48,38 @@ public class Item
 
     public List<ItemImage> Images { get; set; } = [];
 
+    // ── Listing model (design doc §8). Null on listings created before it. ──
+    /// <summary>Common part, vehicle-specific part or whole vehicle.</summary>
+    public ListingKind? Kind { get; set; }
+    public FitmentMode? FitmentMode { get; set; }
+    public int? PartTypeId { get; set; }
+    public PartType? PartType { get; set; }
+    /// <summary>Generated title (can't be edited) + the seller's extra words.</summary>
+    [MaxLength(250)]
+    public string? Title { get; set; }
+    [MaxLength(80)]
+    public string? TitleExtra { get; set; }
+    /// <summary>Seller's country (IN, US, NG, IE) and the listing currency (INR, USD, NGN, EUR).</summary>
+    [MaxLength(2)]
+    public string? CountryCode { get; set; }
+    [MaxLength(3)]
+    public string? Currency { get; set; }
+    public DeliveryOptions DeliveryOptions { get; set; }
+    /// <summary>Shipping only: the fee in the listing currency (0 = free shipping). Ships within the listing country.</summary>
+    public int? ShippingFee { get; set; }
+    /// <summary>Pickup only, optional: the exact address – only the buyer sees it, after the sale. Publicly: the city.</summary>
+    [MaxLength(300)]
+    public string? PickupAddress { get; set; }
+    public SizeClass? SizeClass { get; set; }
+    /// <summary>1, 3, 5, 7 or 10 days (the end is set when the listing is published).</summary>
+    public int? DurationDays { get; set; }
+
+    public PartDetails? PartDetails { get; set; }
+    public List<PartFitment> Fitments { get; set; } = [];
+    public List<PartNumber> PartNumbers { get; set; } = [];
+    public List<PartSpec> Specs { get; set; } = [];
+    public VehicleDetails? VehicleDetails { get; set; }
+
     // navigation property
     public Auction? Auction { get; set; } = null;
 

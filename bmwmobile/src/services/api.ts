@@ -1,12 +1,78 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
-import { Auction, Bid, Purchase, PartRequest, ContainerSchedule, UserProfile } from '../types/models';
+import {
+  Auction,
+  Bid,
+  Purchase,
+  PartRequest,
+  ContainerSchedule,
+  UserProfile,
+  NextBid,
+  SearchFilters,
+  FilterOptions,
+  CreateCustomOrder,
+} from '../types/models';
+import type { ReverseGeocode } from '../types/location';
 import { config } from '../config';
 import { currentUsername, DEMO_OWNER, getValidAccessToken } from '../auth/session';
+
+/** A request the server answered with an error (4xx/5xx); the message is safe to show. */
+export class ServerError extends Error {
+  status: number;
+  /** Field → messages for validation problems (e.g. publishing an incomplete listing). */
+  fields: Record<string, string[]>;
+
+  constructor(message: string, status: number, fields: Record<string, string[]> = {}) {
+    super(message);
+    this.name = 'ServerError';
+    this.status = status;
+    this.fields = fields;
+  }
+}
+
+/** The server's message ("Your bid is too low. The next valid bid is 1,020") or a fallback. */
+function serverMessage(error: AxiosError, fallback: string): string {
+  const data = error.response?.data as any;
+  if (typeof data === 'string' && data.trim()) return data;
+  if (data?.message) return String(data.message);
+  if (data?.errors) {
+    const first = Object.values(data.errors as Record<string, string[]>)[0];
+    if (Array.isArray(first) && first[0]) return first[0];
+  }
+  if (data?.title) return String(data.title);
+  return fallback;
+}
+
+/** Rethrows server answers as ServerError; network errors (no answer) are returned so callers can fall back. */
+export function rethrowServerError(e: unknown, fallback: string): void {
+  const err = e as AxiosError;
+  if (err?.isAxiosError && err.response) {
+    const fields = ((err.response.data as any)?.errors ?? {}) as Record<string, string[]>;
+    throw new ServerError(serverMessage(err, fallback), err.response.status, fields);
+  }
+}
+
+/** Any failure as a ServerError (no answer from the server → "Can't reach the server"). */
+export function toServerError(e: unknown, fallback: string): ServerError {
+  if (e instanceof ServerError) return e;
+  try {
+    rethrowServerError(e, fallback);
+  } catch (server) {
+    return server as ServerError;
+  }
+  return new ServerError("Can't reach the server. Check your connection and try again.", 0);
+}
+
+/** Image URLs from the backend say "localhost"; the Android emulator reaches the PC at 10.0.2.2. */
+export function fixUrl(url?: string | null): string | undefined {
+  if (!url) return undefined;
+  const host = /^https?:\/\/([^:/]+)/.exec(config.GATEWAY_URL)?.[1] ?? 'localhost';
+  return url.replace(/^http:\/\/(localhost|127\.0\.0\.1)(?=[:/])/, `http://${host}`);
+}
 
 // Configured for local dev / GatewayService YARP proxy (http://localhost:6001 / http://10.0.2.2:6001)
 const GATEWAY_URL = config.GATEWAY_URL;
 
-const client = axios.create({
+export const http = axios.create({
   baseURL: GATEWAY_URL,
   timeout: 5000,
   headers: {
@@ -15,21 +81,21 @@ const client = axios.create({
 });
 
 // Signed-in users send their IdentityService access token; guests call the public endpoints only.
-client.interceptors.request.use(async request => {
+http.interceptors.request.use(async request => {
   const token = await getValidAccessToken().catch(() => null);
   if (token) request.headers.Authorization = `Bearer ${token}`;
   return request;
 });
 
 // Token rejected (expired / revoked): refresh once and retry; if that fails the user is signed out.
-client.interceptors.response.use(undefined, async (error: AxiosError) => {
+http.interceptors.response.use(undefined, async (error: AxiosError) => {
   const request = error.config as (InternalAxiosRequestConfig & { _retried?: boolean }) | undefined;
   if (error.response?.status === 401 && request?.headers?.Authorization && !request._retried) {
     request._retried = true;
     const token = await getValidAccessToken(true).catch(() => null);
     if (token) {
       request.headers.Authorization = `Bearer ${token}`;
-      return client(request);
+      return http(request);
     }
   }
   return Promise.reject(error);
@@ -56,8 +122,21 @@ function locationFields(raw: any): Pick<Auction, 'locationName' | 'latitude' | '
   };
 }
 
-/** The selected location the list is for: only parts within radiusKm, nearest first. */
+/** The automatic location the list is for: only parts within radiusKm, nearest first. */
 export type NearFilter = { latitude: number; longitude: number; radiusKm: number };
+
+/** Search params for the filters (pills now, the full filter sheet later). Empty values are left out. */
+function filterParams(filters?: SearchFilters, near?: NearFilter) {
+  return {
+    partCategory: filters?.partCategory || undefined,
+    make: filters?.make || undefined,
+    model: filters?.model || undefined,
+    // Country-wide only when the location is unknown (location off).
+    country: !near && filters?.country ? filters.country : undefined,
+  };
+}
+
+const hasFilters = (f?: SearchFilters) => !!(f?.partCategory || f?.make || f?.model);
 
 // Utility to normalize raw backend DTO (flat AuctionDto or SearchItem) to full mobile Auction object
 export function mapRawDtoToAuction(raw: any): Auction {
@@ -80,6 +159,7 @@ export function mapRawDtoToAuction(raw: any): Auction {
         description: raw.item.description || '',
         partName: raw.item.partName,
         partNumber: raw.item.partNumber,
+        partCategory: raw.item.partCategory,
         condition: raw.item.condition,
         images: Array.isArray(raw.item.images) && raw.item.images.length > 0
           ? raw.item.images.map((img: any, idx: number) =>
@@ -92,13 +172,13 @@ export function mapRawDtoToAuction(raw: any): Auction {
       startingPrice: Number(raw.startingPrice ?? raw.StartingPrice ?? 100),
       currentHighBid: Number(raw.currentHighBid ?? raw.CurrentHighBid ?? raw.startingPrice ?? 100),
       highBidder: raw.highBidder || raw.winner || raw.Winner || '',
-      bidCount: Number(raw.bidCount ?? 1),
+      bidCount: Number(raw.bidCount ?? 0),
       auctionEnd: raw.auctionEnd || raw.AuctionEnd || new Date(Date.now() + 86400000).toISOString(),
       status: raw.status || raw.Status || 'Live',
-      seller: raw.seller || raw.Seller || 'OKOH_Seller',
-      containerNumber: raw.containerNumber || raw.container?.containerNumber || raw.Container?.ContainerNumber || 'MSCU7821940',
-      estimatedArrival: raw.estimatedArrival || raw.container?.estimatedArrivalDate || 'Nov 15, 2026',
-      pickupPort: raw.pickupPort || raw.container?.destinationPort || 'Lagos Apapa Port',
+      seller: raw.seller || raw.Seller || 'ShopCarParts_Seller',
+      containerNumber: raw.containerNumber || raw.container?.containerNumber || raw.Container?.ContainerNumber || undefined,
+      estimatedArrival: raw.estimatedArrival || raw.container?.estimatedArrivalDate || undefined,
+      pickupPort: raw.pickupPort || raw.container?.destinationPort || undefined,
       isAutoBidActive: Boolean(raw.isAutoBidActive),
       userMaxAutoBid: raw.userMaxAutoBid ? Number(raw.userMaxAutoBid) : undefined,
       ...locationFields(raw)
@@ -106,20 +186,21 @@ export function mapRawDtoToAuction(raw: any): Auction {
   }
 
   // Flat DTO from .NET AuctionDto
-  const make = raw.make || raw.Make || 'BMW';
-  const model = raw.model || raw.Model || 'Parts';
-  const year = raw.year || raw.Year || 2021;
+  // Common parts have no make/model/year (they fit any vehicle).
+  const make = raw.make ?? raw.Make ?? '';
+  const model = raw.model ?? raw.Model ?? '';
+  const year = Number(raw.year ?? raw.Year ?? 0);
   const partName = raw.partName || raw.PartName || '';
-  const title = raw.title || `${year} ${make} ${model} ${partName}`.trim();
+  const title = raw.title || `${year || ''} ${make} ${model} ${partName}`.trim();
   const rawImages = raw.images || raw.Images || [];
-  const primaryUrl = raw.imageUrl || raw.ImageUrl || (rawImages.length > 0 ? (typeof rawImages[0] === 'string' ? rawImages[0] : rawImages[0].url) : 'https://images.unsplash.com/photo-1617814076367-b759c7d7e738?q=80&w=800&auto=format&fit=crop');
+  const primaryUrl = fixUrl(raw.imageUrl || raw.ImageUrl || (rawImages.length > 0 ? (typeof rawImages[0] === 'string' ? rawImages[0] : rawImages[0].url) : '')) ?? '';
 
   const formattedImages = Array.isArray(rawImages) && rawImages.length > 0
-    ? rawImages.map((img: any, idx: number) => 
-        typeof img === 'string' 
-          ? { id: `img-${idx}`, url: img, isPrimary: idx === 0, sortOrder: idx }
-          : { id: String(img.id || `img-${idx}`), url: img.url || primaryUrl, isPrimary: img.isPrimary ?? (idx === 0), sortOrder: img.sortOrder ?? idx })
-    : [{ id: 'img-0', url: primaryUrl, isPrimary: true, sortOrder: 0 }];
+    ? rawImages.map((img: any, idx: number) =>
+        typeof img === 'string'
+          ? { id: `img-${idx}`, url: fixUrl(img) ?? '', isPrimary: idx === 0, sortOrder: idx }
+          : { id: String(img.id || `img-${idx}`), url: fixUrl(img.url) || primaryUrl, isPrimary: img.isPrimary ?? (idx === 0), sortOrder: img.sortOrder ?? idx })
+    : primaryUrl ? [{ id: 'img-0', url: primaryUrl, isPrimary: true, sortOrder: 0 }] : [];
 
   return {
     id: String(raw.id || raw.Id),
@@ -136,6 +217,7 @@ export function mapRawDtoToAuction(raw: any): Auction {
       description: raw.description || raw.Description || '',
       partName,
       partNumber: raw.partNumber || raw.PartNumber,
+      partCategory: raw.partCategory || raw.PartCategory || undefined,
       condition: raw.condition || raw.Condition,
       images: formattedImages,
       displayName: title
@@ -143,16 +225,36 @@ export function mapRawDtoToAuction(raw: any): Auction {
     startingPrice: Number(raw.startingPrice ?? raw.StartingPrice ?? 100),
     currentHighBid: Number(raw.currentHighBid ?? raw.CurrentHighBid ?? raw.startingPrice ?? 100),
     highBidder: raw.highBidder || raw.winner || raw.Winner || '',
-    bidCount: Number(raw.bidCount ?? 1),
+    bidCount: Number(raw.bidCount ?? 0),
     auctionEnd: raw.auctionEnd || raw.AuctionEnd || new Date(Date.now() + 86400000).toISOString(),
     status: raw.status || raw.Status || 'Live',
-    seller: raw.seller || raw.Seller || 'OKOH_Seller',
-    containerNumber: raw.containerNumber || raw.container?.containerNumber || raw.Container?.ContainerNumber || 'MSCU7821940',
-    estimatedArrival: raw.estimatedArrival || raw.container?.estimatedArrivalDate || 'Nov 15, 2026',
-    pickupPort: raw.pickupPort || raw.container?.destinationPort || 'Lagos Apapa Port',
+    seller: raw.seller || raw.Seller || 'ShopCarParts_Seller',
+    containerNumber: raw.containerNumber || raw.container?.containerNumber || raw.Container?.ContainerNumber || undefined,
+    estimatedArrival: raw.estimatedArrival || raw.container?.estimatedArrivalDate || undefined,
+    pickupPort: raw.pickupPort || raw.container?.destinationPort || undefined,
     isAutoBidActive: Boolean(raw.isAutoBidActive),
     userMaxAutoBid: raw.userMaxAutoBid ? Number(raw.userMaxAutoBid) : undefined,
-      ...locationFields(raw)
+    // Listing model (search results / listing detail)
+    kind: raw.kind ?? undefined,
+    fitmentMode: raw.fitmentMode ?? undefined,
+    partType: raw.partType ?? undefined,
+    fitmentSummary: raw.fitmentSummary ?? undefined,
+    usedGrade: raw.usedGrade ?? raw.partDetails?.usedGrade ?? undefined,
+    badge: raw.badge ?? undefined,
+    thumbnailUrl: fixUrl(raw.thumbnailUrl),
+    currency: raw.currency ?? undefined,
+    countryCode: raw.countryCode ?? undefined,
+    saleType: raw.saleType === 'FixedPrice' ? 'FixedPrice' : 'Auction',
+    sellerName: raw.sellerName || undefined,
+    quantityAvailable: typeof raw.quantityAvailable === 'number' ? raw.quantityAvailable : undefined,
+    deliveryOptions: Array.isArray(raw.deliveryOptions)
+      ? raw.deliveryOptions.filter((o: string) => o === 'Pickup' || o === 'Shipping')
+      : undefined,
+    shippingFee: typeof raw.shippingFee === 'number' ? raw.shippingFee : null,
+    pickupCity: raw.pickupCity ?? null,
+    sellerRating: typeof raw.sellerRating === 'number' ? raw.sellerRating : null,
+    sellerRatingCount: typeof raw.sellerRatingCount === 'number' ? raw.sellerRatingCount : 0,
+    ...locationFields(raw)
   };
 }
 
@@ -282,9 +384,8 @@ export const MOCK_PART_REQUESTS: PartRequest[] = [
     partName: 'Carbon Ceramic Brake Kit (Front + Rear)',
     specs: '6-piston front calipers in Gold with 400mm rotors',
     maxBudget: 6500,
-    preferredPort: 'Lagos Apapa Port',
-    status: 'Feasibility Checked',
-    feasibilityNote: 'Matched with Container CN-2026-09. Cutoff in 12 days. Destination: Lagos Apapa Port.',
+    preferredPort: '',
+    status: 'Open',
     estimatedDeliveryDate: '2026-11-20',
     createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 2).toISOString()
   }
@@ -338,7 +439,7 @@ export const MOCK_CONTAINER_SCHEDULES: ContainerSchedule[] = [
 export const MOCK_USER_PROFILE: UserProfile = {
   id: 'usr-01',
   fullName: 'Tunde Afolabi',
-  email: 'tunde@okohparts.ng',
+  email: 'tunde@shopcarparts.ng',
   phoneNumber: '+234 803 123 4567',
   buyerType: 'Workshop / Garage',
   preferredPort: 'Lagos Apapa Port',
@@ -352,65 +453,115 @@ export const MOCK_USER_PROFILE: UserProfile = {
 
 // API Services mapping live endpoints with DTO normalization & fallback
 export const ApiService = {
-  getAuctions: async (searchTerm?: string, near?: NearFilter): Promise<Auction[]> => {
+  /**
+   * Live listings: within the automatic location's radius (nearest first) when `near` is given, else country-wide
+   * (filters.country). The Marketplace pills (category, make, model) and the search text all combine.
+   */
+  getAuctions: async (searchTerm?: string, near?: NearFilter, filters?: SearchFilters): Promise<Auction[]> => {
     try {
-      if (near) {
+      if (near || searchTerm || hasFilters(filters) || filters?.country) {
         // SearchService: bounding box + exact distance, each result with distanceKm.
-        const res = await client.get('/search', {
+        const res = await http.get('/search', {
           params: {
             searchTerm: searchTerm || undefined,
-            lat: near.latitude,
-            lon: near.longitude,
-            radiusKm: near.radiusKm,
-            orderBy: 'distance',
+            ...(near ? { lat: near.latitude, lon: near.longitude, radiusKm: near.radiusKm, orderBy: 'distance' } : {}),
+            ...filterParams(filters, near),
+            filterBy: 'live',
             pageSize: 50,
           },
         });
         if (res.data && Array.isArray(res.data.results)) {
           return res.data.results.map(mapRawDtoToAuction);
         }
-      } else if (searchTerm) {
-        const res = await client.get('/search', { params: { searchTerm } });
-        if (res.data && Array.isArray(res.data.results)) {
-          return res.data.results.map(mapRawDtoToAuction);
-        }
       } else {
-        const res = await client.get('/auctions');
+        const res = await http.get('/auctions');
         if (res.data && Array.isArray(res.data)) {
           return res.data.map(mapRawDtoToAuction);
         }
       }
-    } catch (e) {
+    } catch {
       // Fallback
     }
 
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      return MOCK_AUCTIONS.filter(a => 
-        a.title.toLowerCase().includes(term) || 
-        a.item.make.toLowerCase().includes(term) || 
-        a.item.model.toLowerCase().includes(term)
-      );
+    // Offline demo data (server not reachable), filtered the same way.
+    const term = searchTerm?.toLowerCase();
+    return MOCK_AUCTIONS.filter(
+      a =>
+        (!term ||
+          a.title.toLowerCase().includes(term) ||
+          a.item.make.toLowerCase().includes(term) ||
+          a.item.model.toLowerCase().includes(term)) &&
+        (!filters?.make || a.item.make === filters.make) &&
+        (!filters?.model || a.item.model === filters.model) &&
+        (!filters?.partCategory || a.item.partCategory === filters.partCategory),
+    );
+  },
+
+  /** The Marketplace pills: categories and make/model combinations that have live listings near the user. */
+  getFilterOptions: async (near?: NearFilter, country?: string): Promise<FilterOptions> => {
+    try {
+      const res = await http.get('/search/filters', {
+        params: near ? { lat: near.latitude, lon: near.longitude, radiusKm: near.radiusKm } : { country },
+      });
+      if (res.data && Array.isArray(res.data.categories)) return res.data as FilterOptions;
+    } catch {
+      // Fallback below
     }
-    return MOCK_AUCTIONS;
+    return { categories: [], makes: [], models: [], totalCount: 0 };
+  },
+
+  /** City, country and radius (60 km / 60 mi) for the phone's position. Throws when the server can't be reached. */
+  reverseGeocode: async (latitude: number, longitude: number): Promise<ReverseGeocode> => {
+    const res = await http.get('/geo/reverse', { params: { lat: latitude, lon: longitude } });
+    return res.data as ReverseGeocode;
+  },
+
+  /**
+   * The next valid bid and how it is worked out ("Current bid $1,000 + step $20 = Next bid $1,020").
+   * The step table lives only in BidService; the app never calculates it. Null when the server can't be reached.
+   */
+  getNextBid: async (auctionId: string): Promise<NextBid | null> => {
+    try {
+      const res = await http.get(`/bids/${auctionId}/next-minimum`);
+      if (res.data && typeof res.data.minimumBid === 'number') return res.data as NextBid;
+    } catch {
+      // Fallback below
+    }
+    return null;
+  },
+
+  /** Bid history, newest first. */
+  getBids: async (auctionId: string): Promise<Bid[]> => {
+    try {
+      const res = await http.get(`/bids/${auctionId}`);
+      if (Array.isArray(res.data)) return res.data as Bid[];
+    } catch {
+      // Fallback below
+    }
+    return [];
   },
 
   getAuctionById: async (id: string): Promise<Auction | undefined> => {
     try {
-      const res = await client.get(`/auctions/${id}`);
+      const res = await http.get(`/auctions/${id}`);
       if (res.data) return mapRawDtoToAuction(res.data);
-    } catch (e) {
+    } catch {
       // Fallback
     }
     return MOCK_AUCTIONS.find(a => a.id === id) || MOCK_AUCTIONS[0];
   },
 
+  /**
+   * Places a bid (the TOTAL: part price + bid). A rejected bid throws ServerError with the server's message,
+   * e.g. "Your bid is too low. The next valid bid is 1,020" or "You can't bid on your own listing".
+   */
   placeBid: async (auctionId: string, amount: number): Promise<Bid> => {
     try {
-      const res = await client.post('/bids', { auctionId, amount });
+      const res = await http.post('/bids', null, { params: { auctionId, amount } });
       if (res.data) return res.data;
     } catch (e) {
-      // Fallback
+      rethrowServerError(e, "Your bid couldn't be placed. Please try again.");
+      // No answer from the server: offline demo below.
     }
     const auction = MOCK_AUCTIONS.find(a => a.id === auctionId);
     if (auction) {
@@ -444,9 +595,9 @@ export const ApiService = {
     paymentMethod: 'BankTransfer' | 'Card';
   }): Promise<Purchase> => {
     try {
-      const res = await client.post('/purchases/checkout', params);
+      const res = await http.post('/purchases/checkout', params);
       if (res.data) return res.data;
-    } catch (e) {
+    } catch {
       // Fallback
     }
     const auction = MOCK_AUCTIONS.find(a => a.id === params.auctionId) || MOCK_AUCTIONS[0];
@@ -476,9 +627,9 @@ export const ApiService = {
 
   getPurchases: async (): Promise<Purchase[]> => {
     try {
-      const res = await client.get('/purchases');
+      const res = await http.get('/purchases');
       if (res.data && Array.isArray(res.data)) return res.data;
-    } catch (e) {
+    } catch {
       // Fallback
     }
     return MOCK_PURCHASES;
@@ -486,8 +637,8 @@ export const ApiService = {
 
   submitRating: async (purchaseId: string, rating: number, comment?: string): Promise<void> => {
     try {
-      await client.post(`/purchases/${purchaseId}/rating`, { rating, comment });
-    } catch (e) {
+      await http.post(`/purchases/${purchaseId}/rating`, { rating, comment });
+    } catch {
       const purchase = MOCK_PURCHASES.find(p => p.id === purchaseId);
       if (purchase) {
         purchase.rating = rating;
@@ -498,57 +649,64 @@ export const ApiService = {
 
   getPlannedContainers: async (): Promise<ContainerSchedule[]> => {
     try {
-      const res = await client.get('/containers/planned');
+      const res = await http.get('/containers/planned');
       if (res.data && Array.isArray(res.data)) return res.data;
-    } catch (e) {
+    } catch {
       // Fallback
     }
     return MOCK_CONTAINER_SCHEDULES;
   },
 
-  createPartRequest: async (dto: {
-    make: string;
-    model: string;
-    year: number;
-    partName: string;
-    vin?: string;
-    specs?: string;
-    maxBudget: number;
-    preferredPort: string;
-  }): Promise<PartRequest> => {
+  /**
+   * Custom order ("There are no parts available for this search ..."): saved as Open; the buyer is notified when a
+   * matching listing is published within their radius. A rejected order throws ServerError.
+   */
+  createPartRequest: async (dto: CreateCustomOrder): Promise<PartRequest> => {
     try {
-      const res = await client.post('/partrequests', dto);
+      const res = await http.post('/partrequests', dto);
       if (res.data) return res.data;
     } catch (e) {
-      // Fallback
+      rethrowServerError(e, "Your custom order couldn't be saved. Please try again.");
+      // No answer from the server: offline demo below.
     }
     const newReq: PartRequest = {
       id: 'pr-' + Date.now(),
       user: currentUsername(),
-      make: dto.make,
-      model: dto.model,
-      year: dto.year,
-      partName: dto.partName,
-      vin: dto.vin,
+      searchText: dto.searchText,
+      make: dto.make ?? '',
+      model: dto.model ?? '',
+      year: dto.year ?? 0,
+      partName: dto.partName ?? dto.searchText ?? '',
+      partNumber: dto.partNumber,
       specs: dto.specs,
-      maxBudget: dto.maxBudget,
-      preferredPort: dto.preferredPort,
-      status: 'Feasibility Checked',
-      feasibilityNote: `Matched with Container CN-2026-09. Cutoff in 12 days. Destination: ${dto.preferredPort}`,
-      estimatedDeliveryDate: new Date(Date.now() + 1000 * 60 * 60 * 24 * 35).toISOString(),
-      createdAt: new Date().toISOString()
+      maxBudget: dto.maxBudget ?? 0,
+      preferredPort: '',
+      status: 'Open',
+      createdAt: new Date().toISOString(),
     };
     MOCK_PART_REQUESTS.unshift(newReq);
     return newReq;
   },
 
+  /** The signed-in user's custom orders (Open / Matched / Closed), newest first. */
   getPartRequests: async (): Promise<PartRequest[]> => {
     try {
-      const res = await client.get('/partrequests');
+      const res = await http.get('/partrequests');
       if (res.data && Array.isArray(res.data)) return res.data;
-    } catch (e) {
+    } catch {
       // Fallback
     }
     return MOCK_PART_REQUESTS;
-  }
+  },
+
+  /** "I don't need it any more": no more notifications for this order. */
+  closePartRequest: async (id: string): Promise<PartRequest> => {
+    try {
+      const res = await http.post(`/partrequests/${id}/close`);
+      return res.data as PartRequest;
+    } catch (e) {
+      rethrowServerError(e, "Couldn't close the order. Please try again.");
+      throw new ServerError("Can't reach the server. Check your connection.", 0);
+    }
+  },
 };

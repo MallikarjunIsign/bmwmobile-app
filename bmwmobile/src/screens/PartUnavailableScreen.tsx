@@ -17,15 +17,15 @@ export const PartUnavailableScreen: React.FC<Props> = ({ route, navigation }) =>
 
       <View style={styles.content}>
         <Text style={styles.icon}>🚫</Text>
-        <Text style={styles.title}>This BMW Auction Has Ended</Text>
+        <Text style={styles.title}>This Auction Has Ended</Text>
         <Text style={styles.desc}>
-          "{auctionTitle || 'Requested BMW Part'}" has already been sold or expired from live bidding.
+          "{auctionTitle || 'This part'}" has already been sold or is no longer live.
         </Text>
 
         <View style={styles.box}>
-          <Text style={styles.boxTitle}>✨ Order it via Custom Container Packing</Text>
+          <Text style={styles.boxTitle}>✨ Create a custom order</Text>
           <Text style={styles.boxSub}>
-            Our Munich & Bremerhaven sourcing agents will find this exact part and load it directly into the next scheduled Nigerian container.
+            Tell us the part you need and get notified when a matching part is listed near you.
           </Text>
         </View>
 
@@ -34,7 +34,7 @@ export const PartUnavailableScreen: React.FC<Props> = ({ route, navigation }) =>
           onPress={() => navigation.navigate('OrderPartRequest', { prefillMake: make, prefillModel: model })}
           activeOpacity={0.8}
         >
-          <Text style={styles.btnText}>SUBMIT CUSTOM PART REQUEST NOW →</Text>
+          <Text style={styles.btnText}>CREATE CUSTOM ORDER →</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>

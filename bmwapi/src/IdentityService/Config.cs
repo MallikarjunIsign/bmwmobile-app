@@ -45,7 +45,7 @@ public static class Config
         new()
         {
             ClientId = "mobileApp",
-            ClientName = "OKOH Parts mobile app",
+            ClientName = "ShopCarParts mobile app",
             RequireClientSecret = false,
             AllowedGrantTypes = { GrantResults.GrantPassword, GrantResults.GrantOtp, GrantResults.GrantExternal },
             AllowedScopes =

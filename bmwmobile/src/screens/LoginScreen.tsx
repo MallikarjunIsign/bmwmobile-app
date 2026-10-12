@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView, type TextInputInstance } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView, type TextInputInstance } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
@@ -74,7 +74,7 @@ export const LoginScreen: React.FC<Props> = ({ navigation, route }) => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <Header title="Welcome Back" subtitle="Sign in to bid & track container shipments" />
+      <Header title="Welcome Back" subtitle="Sign in to ShopCarParts to buy and sell parts" />
 
       <KeyboardAvoidingView
         style={styles.keyboardView}
@@ -140,7 +140,7 @@ export const LoginScreen: React.FC<Props> = ({ navigation, route }) => {
 
             <TouchableOpacity style={styles.signUpRow} onPress={() => navigation.navigate('SignUp')} hitSlop={8}>
               <Text style={styles.signUpText}>
-                New to OKOH Parts? <Text style={styles.signUpLink}>Create an account</Text>
+                New to ShopCarParts? <Text style={styles.signUpLink}>Create an account</Text>
               </Text>
             </TouchableOpacity>
           </View>

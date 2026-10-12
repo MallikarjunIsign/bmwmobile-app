@@ -10,6 +10,9 @@ public class AuctionGrpcServer(AuctionDbContext dbContext) : GrpcAuction.GrpcAuc
     {
         var auction = await dbContext.Auctions.FindAsync(request.AuctionId)
                       ?? throw new RpcException(new Status(StatusCode.NotFound, "Auction not found"));
+        // Fixed-price listings are bought, not bid on: BidService must not know them.
+        if (auction.SaleType == Entities.SaleType.FixedPrice)
+            throw new RpcException(new Status(StatusCode.NotFound, "Auction not found"));
 
         return new GrpcAuctionResponse
         {

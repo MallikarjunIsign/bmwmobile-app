@@ -3,15 +3,59 @@ using BidService.Models;
 
 namespace BidService.Services;
 
+/// <summary>One row of the bid step table: from this current total (inclusive) bids go up by Step.</summary>
+public record BidStepTier(int From, int Step);
+
 /// <summary>Pure bidding rules (no I/O), shared by the endpoints and handlers and unit-tested directly.</summary>
 public static class BidRules
 {
-    /// <summary>Starting price before the first accepted bid, then current high bid + increment.</summary>
-    public static int MinimumBid(Auction auction, Bid? highBid) =>
-        highBid is null ? auction.StartingPrice : highBid.Amount + auction.BidIncrement;
+    /// <summary>
+    /// The bid step table: the ONLY place it is defined. The step depends on the current total (part price +
+    /// highest bid, i.e. the highest bid amount, or the part price before the first bid), in the listing's
+    /// currency units. Exposed to the app through GET /api/bids/steps and /api/bids/{id}/next-minimum.
+    /// </summary>
+    public static readonly IReadOnlyList<BidStepTier> StepTiers =
+    [
+        new(0, 10),
+        new(1_000, 20),
+        new(5_000, 50),
+        new(10_000, 100),
+        new(50_000, 250),
+    ];
+
+    /// <summary>How much the next bid must add to <paramref name="currentTotal"/>.</summary>
+    public static int StepFor(int currentTotal) =>
+        (StepTiers.LastOrDefault(t => currentTotal >= t.From) ?? StepTiers[0]).Step;
+
+    /// <summary>The current total: the highest bid (bids are stored as totals), or the part price before the first bid.</summary>
+    public static int CurrentTotal(Auction auction, Bid? highBid) => highBid?.Amount ?? auction.StartingPrice;
+
+    /// <summary>The next valid bid total: current total + the step for that total (e.g. 1,000 → 1,020).</summary>
+    public static int MinimumBid(Auction auction, Bid? highBid)
+    {
+        var current = CurrentTotal(auction, highBid);
+        return current + StepFor(current);
+    }
+
+    /// <summary>Quick-bid amounts: next, next + 1 step, next + 2 steps, next + 5 steps.</summary>
+    public static IReadOnlyList<int> QuickBids(int minimumBid, int step) =>
+        [minimumBid, minimumBid + step, minimumBid + 2 * step, minimumBid + 5 * step];
 
     public static string MinimumBidMessage(int minimumBid) =>
-        $"Minimum bid is {minimumBid.ToString("N0", CultureInfo.InvariantCulture)}";
+        $"Your bid is too low. The next valid bid is {minimumBid.ToString("N0", CultureInfo.InvariantCulture)}";
+
+    public const string OwnListingMessage = "You can't bid on your own listing";
+    public const string BlockedMessage = "You can't bid on this seller's listings";
+
+    public const string AlreadyHighestMessage = "You're the highest bidder";
+
+    /// <summary>My Bids: Winning / Outbid while Live; Won / Lost once ended.</summary>
+    public static string MyBidState(string status, string? highBidder, string me) => status switch
+    {
+        nameof(AuctionStatus.Live) => highBidder == me ? "Winning" : "Outbid",
+        nameof(AuctionStatus.Sold) => highBidder == me ? "Won" : "Lost",
+        _ => "Lost"
+    };
 
     public static BidStatus StatusForAcceptedBid(Auction auction, int amount) =>
         amount >= auction.ReservePrice ? BidStatus.Accepted : BidStatus.AcceptedBelowReserve;

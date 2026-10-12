@@ -11,7 +11,7 @@ namespace AuctionService.Tests;
 [Collection("auction-service")]
 public class RelistTests(AppFixture fixture) : IAsyncLifetime
 {
-    private static readonly byte[] PngBytes = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13];
+    private static readonly byte[] PngBytes = TestImages.Png();
 
     private readonly Auction _unsold = TestData.CreatePartAuction(x =>
     {

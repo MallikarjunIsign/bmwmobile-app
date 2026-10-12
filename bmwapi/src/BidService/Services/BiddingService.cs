@@ -58,7 +58,9 @@ public class BiddingService(
         var auction = await GetOrFetchAuctionAsync(auctionId);
         if (auction == null) return new BidOutcome.NotFound("Auction not found");
 
-        if (auction.Seller == bidder) return new BidOutcome.Invalid("You cannot bid on your own item");
+        if (auction.Seller == bidder) return new BidOutcome.Invalid(BidRules.OwnListingMessage);
+        // The seller blocked this user (chat "Block user").
+        if (await repository.IsBlockedAsync(auction.Seller, bidder)) return new BidOutcome.Invalid(BidRules.BlockedMessage);
 
         await using var session = await repository.BeginAsync();
         await bus.EnlistInOutboxAsync(session.Transaction);
@@ -69,6 +71,8 @@ public class BiddingService(
         if (!BidRules.IsOpenForBids(auction, now)) return new BidOutcome.Invalid("Auction has finished");
 
         var highBid = await repository.GetHighestBidAsync(auctionId, session);
+        // A buyer who is already the highest bidder can't outbid themselves.
+        if (highBid?.Bidder == bidder) return new BidOutcome.Invalid(BidRules.AlreadyHighestMessage);
         var minimumBid = BidRules.MinimumBid(auction, highBid);
 
         // Too-low bids are rejected and not stored, so they can never change the high bid.
@@ -89,11 +93,16 @@ public class BiddingService(
         {
             await repository.UpdateAuctionEndAsync(session, auctionId, extendedEnd.Value);
             await ScheduleEndCheckAsync(auctionId, extendedEnd.Value);
+            await ScheduleEndingSoonAsync(auctionId, extendedEnd.Value);
             await bus.PublishAsync(new AuctionExtended { AuctionId = auctionId, AuctionEnd = extendedEnd.Value });
             logger.LogInformation("Auction {AuctionId} extended to {AuctionEnd} by a late bid", auctionId, extendedEnd);
         }
 
-        await bus.PublishAsync(bidDto.Adapt<BidPlaced>());
+        var placed = bidDto.Adapt<BidPlaced>();
+        placed.BidCount = await repository.CountAcceptedBidsAsync(auctionId, session);
+        placed.Seller = auction.Seller;
+        placed.PreviousHighBidder = highBid?.Bidder;
+        await bus.PublishAsync(placed);
 
         await session.CommitAsync();
         await bus.FlushOutgoingMessagesAsync();
@@ -137,7 +146,8 @@ public class BiddingService(
             Amount = highBid.Amount,
             Status = nameof(AuctionStatus.Sold),
             EndReason = reason.ToString(),
-            BidId = highBid.Id
+            BidId = highBid.Id,
+            Bidders = await repository.GetBiddersAsync(auctionId, session)
         });
 
         await session.CommitAsync();
@@ -182,7 +192,8 @@ public class BiddingService(
             Status = status.ToString(),
             EndReason = nameof(EndReason.TimeEnded),
             SellerDecisionDeadline = deadline,
-            BidId = highBid?.Id
+            BidId = highBid?.Id,
+            Bidders = await repository.GetBiddersAsync(auctionId, session)
         });
 
         await session.CommitAsync();
@@ -212,7 +223,8 @@ public class BiddingService(
             Amount = highBid?.Amount,
             Status = nameof(AuctionStatus.Unsold),
             EndReason = nameof(EndReason.GracePeriodExpired),
-            BidId = highBid?.Id
+            BidId = highBid?.Id,
+            Bidders = await repository.GetBiddersAsync(auctionId, session)
         });
 
         await session.CommitAsync();
@@ -227,6 +239,21 @@ public class BiddingService(
     /// </summary>
     public async Task ApplySnapshotAsync(AuctionSnapshot snapshot)
     {
+        // Fixed-price listings are bought in AuctionService, never bid on. One switched from an auction (only possible
+        // before the first bid) leaves bidding.
+        if (snapshot.SaleType == "FixedPrice")
+        {
+            if (await repository.GetAuctionAsync(snapshot.Id) is { } tracked && tracked.Status == AuctionStatus.Live)
+            {
+                await using var check = await repository.BeginAsync();
+                var hasBids = await repository.HasAcceptedBidsAsync(check, snapshot.Id);
+                await check.CommitAsync();
+                if (hasBids) logger.LogWarning("Auction {AuctionId} has bids; ignoring the switch to fixed price", snapshot.Id);
+                else await repository.DeleteAuctionAsync(snapshot.Id);
+            }
+            return;
+        }
+
         var incoming = FromSnapshot(snapshot);
 
         if (await repository.GetAuctionAsync(snapshot.Id) == null)
@@ -252,7 +279,10 @@ public class BiddingService(
 
         await repository.UpdateAuctionTermsAsync(session, incoming);
         if (incoming.AuctionEnd != current.AuctionEnd)
+        {
             await ScheduleEndCheckAsync(incoming.Id, incoming.AuctionEnd);
+            await ScheduleEndingSoonAsync(incoming.Id, incoming.AuctionEnd);
+        }
 
         await session.CommitAsync();
         await bus.FlushOutgoingMessagesAsync();
@@ -268,7 +298,8 @@ public class BiddingService(
             AuctionEnd = DateTime.SpecifyKind(snapshot.AuctionEnd, DateTimeKind.Utc),
             Seller = snapshot.Seller,
             StartingPrice = Math.Max(snapshot.StartingPrice, 1),
-            ReservePrice = Math.Max(snapshot.ReservePrice, Math.Max(snapshot.StartingPrice, 1)),
+            // No reserve price in this phase: a bid at the end always sells (reserve = part price).
+            ReservePrice = Math.Max(snapshot.StartingPrice, 1),
             BidIncrement = Math.Max(snapshot.BidIncrement, 1),
             Status = status,
             DecisionDeadline = status == AuctionStatus.ReserveNotMet ? snapshot.SellerDecisionDeadline : null,
@@ -279,13 +310,47 @@ public class BiddingService(
     private async Task ScheduleChecksAsync(Auction auction)
     {
         if (auction.Status == AuctionStatus.Live)
+        {
             await ScheduleEndCheckAsync(auction.Id, auction.AuctionEnd);
+            await ScheduleEndingSoonAsync(auction.Id, auction.AuctionEnd);
+        }
         else if (auction.Status == AuctionStatus.ReserveNotMet && auction.DecisionDeadline != null)
             await ScheduleDecisionCheckAsync(auction.Id, auction.DecisionDeadline.Value);
     }
 
     private ValueTask ScheduleEndCheckAsync(string auctionId, DateTime auctionEnd) =>
         bus.ScheduleAsync(new CheckAuctionEnded(auctionId), AsUtc(auctionEnd));
+
+    /// <summary>"Ending in 1 hour" – only when that moment is still ahead.</summary>
+    private async ValueTask ScheduleEndingSoonAsync(string auctionId, DateTime auctionEnd)
+    {
+        var at = auctionEnd - EndingSoonBefore;
+        if (at > Now) await bus.ScheduleAsync(new CheckAuctionEndingSoon(auctionId, auctionEnd), AsUtc(at));
+    }
+
+    public static readonly TimeSpan EndingSoonBefore = TimeSpan.FromHours(1);
+
+    /// <summary>
+    /// One hour before the end: tells the seller and every bidder (AuctionEndingSoon). Ignored when the auction ended
+    /// or its end moved (a newer check was scheduled for the new end).
+    /// </summary>
+    public async Task NotifyEndingSoonAsync(string auctionId, DateTime scheduledFor)
+    {
+        var auction = await repository.GetAuctionAsync(auctionId);
+        if (auction == null || auction.Status != AuctionStatus.Live) return;
+        if (Math.Abs((auction.AuctionEnd - scheduledFor).TotalSeconds) > 1) return;
+
+        var highBid = await repository.GetHighestBidAsync(auctionId);
+        await bus.PublishAsync(new AuctionEndingSoon
+        {
+            AuctionId = auctionId,
+            Seller = auction.Seller,
+            AuctionEnd = auction.AuctionEnd,
+            Bidders = await repository.GetBiddersAsync(auctionId),
+            HighBidder = highBid?.Bidder,
+            CurrentHighBid = highBid?.Amount
+        });
+    }
 
     private ValueTask ScheduleDecisionCheckAsync(string auctionId, DateTime deadline) =>
         bus.ScheduleAsync(new CheckSellerDecision(auctionId), AsUtc(deadline));

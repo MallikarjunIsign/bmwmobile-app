@@ -1,18 +1,13 @@
 import { mapRawDtoToAuction } from '../src/services/api';
 import {
   countryFromPhone,
-  DEFAULT_RADIUS_KM,
+  fallbackRadius,
   formatDistance,
   formatMoney,
   formatRadius,
-  nearestRadiusKm,
-  radiusOptionsKm,
-  noPartsNearMessage,
   haversineKm,
-  locationChipLabel,
-  locationIcon,
-  RADIUS_OPTIONS_KM,
-  radiusSummary,
+  isCountryCode,
+  MOVE_THRESHOLD_KM,
 } from '../src/utils/geo';
 
 describe('geo helpers', () => {
@@ -22,12 +17,11 @@ describe('geo helpers', () => {
     expect(haversineKm(6.5244, 3.3792, 6.5244, 3.3792)).toBe(0);
   });
 
-  test('radius chips 5/10/25/50/100/200 with 50 as default', () => {
-    expect([...RADIUS_OPTIONS_KM]).toEqual([5, 10, 25, 50, 100, 200]);
-    expect(DEFAULT_RADIUS_KM).toBe(50);
+  test('the automatic location only moves after ~5 km', () => {
+    expect(MOVE_THRESHOLD_KM).toBe(5);
   });
 
-  test('popular-city country follows the phone code (India by default)', () => {
+  test('country follows the phone code when the location is unknown (India by default)', () => {
     expect(countryFromPhone('+919876543210')).toBe('IN');
     expect(countryFromPhone('+12015550123')).toBe('US');
     expect(countryFromPhone('+2348031234567')).toBe('NG');
@@ -35,34 +29,28 @@ describe('geo helpers', () => {
     expect(countryFromPhone(null)).toBe('IN');
   });
 
-  test('chip labels and icons', () => {
-    expect(locationChipLabel({ label: 'Home', placeName: 'Hyderabad', radiusKm: 25, countryCode: 'IN' })).toBe('Home · Hyderabad · 25 km');
-    expect(locationChipLabel({ label: 'Lagos', placeName: 'Lagos', radiusKm: 50, countryCode: 'NG' })).toBe('Lagos · 50 km');
-    expect(locationIcon({ label: 'Current location', isCurrentLocation: true })).toBe('📡');
-    expect(locationIcon({ label: 'Work', isCurrentLocation: false })).toBe('💼');
-    expect(radiusSummary(10, 'Bangalore')).toBe('Show parts within 10 km of Bangalore');
+  test('only India, USA, Nigeria and Ireland are supported countries', () => {
+    expect(isCountryCode('us')).toBe(true);
+    expect(isCountryCode('IE')).toBe(true);
+    expect(isCountryCode('GB')).toBe(false);
+    expect(isCountryCode(null)).toBe(false);
   });
 
-  test('"12 km away" and the empty-state message', () => {
+  test('offline radius fallback: 60 miles in the USA, 60 km elsewhere', () => {
+    expect(fallbackRadius('US')).toEqual({ radiusValue: 60, radiusUnit: 'mi', radiusKm: 96.56 });
+    expect(fallbackRadius('IN')).toEqual({ radiusValue: 60, radiusUnit: 'km', radiusKm: 60 });
+    expect(formatRadius(96.56, 'US')).toBe('60 mi');
+    expect(formatRadius(60, 'NG')).toBe('60 km');
+  });
+
+  test('"12 km away", or miles in the USA', () => {
     expect(formatDistance(0)).toBe('< 1 km');
     expect(formatDistance(8.5)).toBe('8.5 km');
     expect(formatDistance(9.0)).toBe('9 km');
     expect(formatDistance(12.4)).toBe('12 km');
-    expect(noPartsNearMessage({ label: 'Home', radiusKm: 25, countryCode: null })).toBe('No parts within 25 km of Home – try a bigger radius.');
-  });
-
-  test('miles in the USA, km elsewhere', () => {
-    expect(radiusOptionsKm('US')).toEqual([8, 16, 40, 80, 161]);
-    expect(radiusOptionsKm('US').map(km => formatRadius(km, 'US'))).toEqual(['5 mi', '10 mi', '25 mi', '50 mi', '100 mi']);
-    expect(radiusOptionsKm('IE')).toEqual([5, 10, 25, 50, 100, 200]);
-    expect(formatRadius(25, 'IE')).toBe('25 km');
-    expect(nearestRadiusKm(50, 'US')).toBe(40);
-    expect(nearestRadiusKm(40, 'IN')).toBe(50);
     expect(formatDistance(0.5, 'US')).toBe('< 1 mi');
     expect(formatDistance(16.09, 'US')).toBe('10 mi');
     expect(formatDistance(12.4, 'NG')).toBe('12 km');
-    expect(locationChipLabel({ label: 'Home', placeName: 'Chicago', radiusKm: 40, countryCode: 'US' })).toBe('Home · Chicago · 25 mi');
-    expect(radiusSummary(80, 'Houston', 'US')).toBe('Show parts within 50 mi of Houston');
   });
 
   test('currency follows the country', () => {
@@ -74,15 +62,20 @@ describe('geo helpers', () => {
     expect(formatMoney(300, null)).toBe('₹300');
   });
 
-  test('search results keep location and distance', () => {
+  test('search results keep location, distance and category; no container or OKOH defaults', () => {
     const a = mapRawDtoToAuction({
-      id: 'ford-gt', make: 'Ford', model: 'GT', year: 2020, seller: 'bob',
+      id: 'ford-gt', make: 'Ford', model: 'GT', year: 2020, seller: 'bob', partCategory: 'Body',
       locationName: 'Hyderabad', latitude: 17.385, longitude: 78.4867, distanceKm: 13.5,
     });
     expect(a.locationName).toBe('Hyderabad');
     expect(a.distanceKm).toBe(13.5);
+    expect(a.item.partCategory).toBe('Body');
     expect(a.highBidder).toBe('');
-    const old = mapRawDtoToAuction({ id: 'x', make: 'BMW', model: 'X1', seller: 'alice' });
+    expect(a.pickupPort).toBeUndefined();
+    expect(a.containerNumber).toBeUndefined();
+    expect(a.bidCount).toBe(0);
+    const old = mapRawDtoToAuction({ id: 'x', make: 'BMW', model: 'X1' });
     expect(old.distanceKm).toBeUndefined();
+    expect(old.seller).not.toMatch(/okoh/i);
   });
 });

@@ -6,6 +6,20 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RootStackParamList, MainTabParamList } from '../types/navigation';
 import { COLORS } from '../theme/colors';
+import { FEATURES } from '../config';
+import { CustomOrderAlerts } from '../components/CustomOrderAlerts';
+import { NotificationToasts } from '../components/NotificationToasts';
+import { SellStartScreen } from '../screens/sell/SellStartScreen';
+import { SellWizardScreen } from '../screens/sell/SellWizardScreen';
+import { MyListingsScreen } from '../screens/MyListingsScreen';
+import { SellerProfileScreen } from '../screens/SellerProfileScreen';
+import { WriteReviewScreen } from '../screens/WriteReviewScreen';
+import { InboxScreen } from '../screens/chat/InboxScreen';
+import { ConversationScreen } from '../screens/chat/ConversationScreen';
+import { ChatPushOpener } from '../components/ChatPushOpener';
+import { GarageScreen } from '../screens/GarageScreen';
+import { LocationsScreen } from '../screens/LocationsScreen';
+import { AddressFormScreen } from '../screens/AddressFormScreen';
 
 // Screens
 import { SplashScreen } from '../screens/SplashScreen';
@@ -16,8 +30,6 @@ import { ForgotPasswordScreen } from '../screens/ForgotPasswordScreen';
 import { ResetPasswordScreen } from '../screens/ResetPasswordScreen';
 import { useAuth } from '../auth/AuthContext';
 import { useLocations } from '../location/LocationContext';
-import { SetLocationScreen } from '../screens/SetLocationScreen';
-import { ManageLocationsScreen } from '../screens/ManageLocationsScreen';
 import { ProfilePreferencesScreen } from '../screens/ProfilePreferencesScreen';
 import { HomeScreen } from '../screens/HomeScreen';
 import { MarketplaceSearchScreen } from '../screens/MarketplaceSearchScreen';
@@ -56,51 +68,69 @@ function MainTabNavigator() {
   // Keep the bar's 64px look and add room for the system navigation bar (edge-to-edge).
   const insets = useSafeAreaInsets();
   return (
-    <Tab.Navigator
-      screenOptions={{
-        headerShown: false,
-        tabBarStyle: [styles.tabBar, { height: 64 + insets.bottom, paddingBottom: 6 + insets.bottom }],
-        tabBarShowLabel: false,
-        // React Navigation 7 sizes the icon box to the icon; let our icon+label use the full tab width.
-        tabBarIconStyle: styles.tabIconBox,
-      }}
-    >
-      <Tab.Screen 
-        name="Home" 
-        component={HomeScreen} 
-        options={{
-          tabBarIcon: ({ focused }) => <TabIcon icon="🏠" label="Home" focused={focused} />
+    <>
+      {/* "A part matching your request is now available" (custom orders) */}
+      <CustomOrderAlerts />
+      {/* Outbid, new bid, ending in 1 hour, won, lost, sold, ended – no bids */}
+      <NotificationToasts />
+      {/* Tapping a chat push notification opens that conversation. */}
+      <ChatPushOpener />
+      <Tab.Navigator
+        screenOptions={{
+          headerShown: false,
+          tabBarStyle: [styles.tabBar, { height: 64 + insets.bottom, paddingBottom: 6 + insets.bottom }],
+          tabBarShowLabel: false,
+          // React Navigation 7 sizes the icon box to the icon; let our icon+label use the full tab width.
+          tabBarIconStyle: styles.tabIconBox,
         }}
-      />
-      <Tab.Screen 
-        name="Marketplace" 
-        component={MarketplaceSearchScreen} 
-        options={{
-          tabBarIcon: ({ focused }) => <TabIcon icon="🔍" label="Market" focused={focused} />
-        }}
-      />
-      <Tab.Screen 
-        name="MyBids" 
-        component={MyBidsScreen} 
-        options={{
-          tabBarIcon: ({ focused }) => <TabIcon icon="⚡" label="My Bids" focused={focused} />
-        }}
-      />
-      <Tab.Screen 
-        name="MyPurchases" 
-        component={MyPurchasesScreen} 
-        options={{
-          tabBarIcon: ({ focused }) => <TabIcon icon="🛍️" label="Orders" focused={focused} />
-        }}
-      />
-      <Tab.Screen 
-        name="Tracking" 
-        component={ContainerTrackingScreen} 
-        options={{
-          tabBarIcon: ({ focused }) => <TabIcon icon="🚢" label="Tracking" focused={focused} />
-        }}
-      />
-    </Tab.Navigator>
+      >
+        <Tab.Screen 
+          name="Home" 
+          component={HomeScreen} 
+          options={{
+            tabBarIcon: ({ focused }) => <TabIcon icon="🏠" label="Home" focused={focused} />
+          }}
+        />
+        <Tab.Screen 
+          name="Marketplace" 
+          component={MarketplaceSearchScreen} 
+          options={{
+            tabBarIcon: ({ focused }) => <TabIcon icon="🔍" label="Market" focused={focused} />
+          }}
+        />
+        <Tab.Screen
+          name="Sell"
+          component={SellStartScreen}
+          options={{
+            tabBarIcon: ({ focused }) => <TabIcon icon="➕" label="Sell" focused={focused} />
+          }}
+        />
+        <Tab.Screen 
+          name="MyBids" 
+          component={MyBidsScreen} 
+          options={{
+            tabBarIcon: ({ focused }) => <TabIcon icon="⚡" label="My Bids" focused={focused} />
+          }}
+        />
+        <Tab.Screen 
+          name="MyPurchases" 
+          component={MyPurchasesScreen} 
+          options={{
+            tabBarIcon: ({ focused }) => <TabIcon icon="🛍️" label="Orders" focused={focused} />
+          }}
+        />
+        {/* Container / port logistics are hidden in this phase (FEATURES.containers). */}
+        {FEATURES.containers ? (
+          <Tab.Screen
+            name="Tracking"
+            component={ContainerTrackingScreen}
+            options={{
+              tabBarIcon: ({ focused }) => <TabIcon icon="🚢" label="Tracking" focused={focused} />
+            }}
+          />
+        ) : null}
+      </Tab.Navigator>
+    </>
   );
 }
 
@@ -113,21 +143,10 @@ export function AppNavigator() {
   const hadSession = useRef(false);
   if (signedIn) hadSession.current = true;
 
-  // Restoring a remembered session / loading the user's locations: keep the dark background.
-  if (status === 'loading' || (signedIn && (locations.status === 'idle' || locations.status === 'loading'))) {
+  // Restoring a remembered session / reading the last known location: keep the dark background.
+  // There is no location screen: the location is found automatically (LocationContext).
+  if (status === 'loading' || (signedIn && locations.status === 'idle')) {
     return <View style={styles.loading} />;
-  }
-
-  // First login without any location: "Set your location" once, before the marketplace.
-  const needsLocation = signedIn && locations.status === 'ready' && locations.locations.length === 0;
-  if (needsLocation) {
-    return (
-      <NavigationContainer>
-        <Stack.Navigator key="onboarding" screenOptions={{ headerShown: false, contentStyle: { backgroundColor: COLORS.background } }}>
-          <Stack.Screen name="SetLocation" component={SetLocationScreen} initialParams={{ mode: 'onboarding' }} options={{ gestureEnabled: false }} />
-        </Stack.Navigator>
-      </NavigationContainer>
-    );
   }
 
   return (
@@ -145,8 +164,6 @@ export function AppNavigator() {
         {signedIn ? (
           <Stack.Group>
             <Stack.Screen name="MainTabs" component={MainTabNavigator} />
-            <Stack.Screen name="SetLocation" component={SetLocationScreen} />
-            <Stack.Screen name="ManageLocations" component={ManageLocationsScreen} />
             <Stack.Screen name="ProfilePreferences" component={ProfilePreferencesScreen} />
 
             <Stack.Screen name="PartDetails" component={PartDetailsScreen} />
@@ -168,7 +185,16 @@ export function AppNavigator() {
             <Stack.Screen name="PartUnavailable" component={PartUnavailableScreen} />
             <Stack.Screen name="OrderPartRequest" component={OrderPartRequestScreen} />
             <Stack.Screen name="RequestSubmitted" component={RequestSubmittedScreen} />
-            <Stack.Screen name="PlannedContainers" component={PlannedContainersScreen} />
+            <Stack.Screen name="SellWizard" component={SellWizardScreen} />
+            <Stack.Screen name="MyListings" component={MyListingsScreen} />
+            <Stack.Screen name="SellerProfile" component={SellerProfileScreen} />
+            <Stack.Screen name="WriteReview" component={WriteReviewScreen} />
+            <Stack.Screen name="Inbox" component={InboxScreen} />
+            <Stack.Screen name="Conversation" component={ConversationScreen} />
+            <Stack.Screen name="Garage" component={GarageScreen} />
+            <Stack.Screen name="Locations" component={LocationsScreen} />
+            <Stack.Screen name="AddressForm" component={AddressFormScreen} />
+            {FEATURES.containers ? <Stack.Screen name="PlannedContainers" component={PlannedContainersScreen} /> : null}
           </Stack.Group>
         ) : (
           <Stack.Group>

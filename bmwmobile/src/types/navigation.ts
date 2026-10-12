@@ -1,4 +1,4 @@
-import { Auction, Purchase, PartRequest, ContainerSchedule } from './models';
+import { Auction, Purchase, PartRequest } from './models';
 
 export type RootStackParamList = {
   Splash: undefined;
@@ -8,12 +8,11 @@ export type RootStackParamList = {
   ForgotPassword: { email?: string } | undefined;
   ResetPassword: { email: string; resendAfterSeconds: number; devOtp?: string | null };
   ProfilePreferences: undefined;
-  SetLocation: { mode: 'onboarding' } | { mode: 'add' } | { mode: 'edit'; locationId: string } | undefined;
-  ManageLocations: undefined;
 
   MainTabs: { screen?: string } | undefined;
 
-  PartDetails: { auctionId: string; auction?: Auction };
+  /** showOutcome: opened from a "You won" / "Auction lost" notification → go on to that screen once loaded. */
+  PartDetails: { auctionId: string; auction?: Auction; showOutcome?: boolean };
   PlaceBidModal: { auction: Auction };
   HighestBidder: { auction: Auction };
   Outbid: { auction: Auction };
@@ -26,14 +25,43 @@ export type RootStackParamList = {
   PickupReceive: { purchase: Purchase };
 
   PartUnavailable: { auctionTitle?: string; make?: string; model?: string };
-  OrderPartRequest: { prefillMake?: string; prefillModel?: string; prefillPart?: string };
+  /** Custom order, pre-filled from the search text / chips that found nothing. */
+  OrderPartRequest: {
+    prefillMake?: string;
+    prefillModel?: string;
+    prefillPart?: string;
+    prefillYear?: number;
+    prefillPartNumber?: string;
+    searchText?: string;
+  } | undefined;
   RequestSubmitted: { request: PartRequest };
   PlannedContainers: undefined;
+
+  /** "+ Sell": edit a draft (or a Live listing without bids). step = open a step directly ("photos"). */
+  SellWizard: { listingId: string; step?: string };
+  MyListings: undefined;
+  /** A seller's profile: ratings, reviews and everything they have listed (tapping the seller on a card / listing). */
+  SellerProfile: { seller: string; sellerName?: string };
+  /** "How was your purchase?": write (orderId) or view / edit (reviewId) the review of an order. */
+  WriteReview: { orderId: string; reviewId?: string | null; title: string; imageUrl?: string | null; seller: string };
+  /** Messages (chat inbox), opened from the Home header. */
+  Inbox: undefined;
+  /**
+   * One chat: by id (inbox, notification), or about a listing – "Chat with seller" (listingId) or the seller's
+   * "Message buyer" on an order (listingId + buyer).
+   */
+  Conversation: { conversationId?: string; listingId?: string; buyer?: string };
+  Garage: undefined;
+  /** My locations: current location (GPS) or a saved address. */
+  Locations: undefined;
+  /** Add (no id) or edit a saved address. */
+  AddressForm: { id?: string };
 };
 
 export type MainTabParamList = {
   Home: undefined;
   Marketplace: { searchTerm?: string; category?: string } | undefined;
+  Sell: undefined;
   MyBids: undefined;
   MyPurchases: undefined;
   Tracking: { containerNumber?: string } | undefined;

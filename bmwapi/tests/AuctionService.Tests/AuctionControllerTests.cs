@@ -233,12 +233,25 @@ public class AuctionControllerTests(AppFixture fixture) : IAsyncLifetime
         Assert.Null(created.PartName);
     }
 
+    [Fact]
+    public async Task CreateAuction_WithoutBidIncrement_IsAccepted()
+    {
+        // The bid step comes from BidService's tier table; sellers no longer set an increment.
+        var dto = TestData.BuildCreatePartDto(x => x.BidIncrement = 0);
+
+        await fixture.Host.Scenario(s =>
+        {
+            s.WithClaim(new Claim("username", "bob"));
+            s.Post.Json(dto).ToUrl("/api/auctions");
+            s.StatusCodeShouldBe(HttpStatusCode.Created);
+        });
+    }
+
     public static TheoryData<string, Action<CreateAuctionDto>> InvalidCreateDtos => new()
     {
         { "mileage", dto => dto.Mileage = null },
         { "color", dto => dto.Color = null },
         { "startingPrice", dto => dto.StartingPrice = 0 },
-        { "bidIncrement", dto => dto.BidIncrement = 0 },
         { "reservePrice", dto => dto.ReservePrice = 4999 },
         { "auctionEnd", dto => dto.AuctionEnd = DateTime.UtcNow.AddMinutes(-1) },
         { "containerId", dto => dto.ContainerId = "missing-container" },

@@ -7,7 +7,7 @@ set -uo pipefail
 
 cd "$(dirname "$0")"
 
-PORTS="5001 7001 7002 7003 7004 6001"
+PORTS="5001 7001 7002 7003 7004 7005 6001"
 
 echo "== Stopping .NET services"
 for port in $PORTS; do

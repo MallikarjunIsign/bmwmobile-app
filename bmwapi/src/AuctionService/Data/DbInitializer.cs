@@ -12,8 +12,18 @@ public class DbInitializer
         using var scope = app.Services.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<AuctionDbContext>();
         var seededIds = SeedData(context, app);
+        // Master data (part catalogue, makes/models) – also in tests.
+        CatalogSeed.Seed(context);
         var locatedIds = seededIds.Count == 0 ? BackfillSeedLocations(context, app) : [];
         if (seededIds.Count == 0) seededIds = AddIrelandParts(context, app);
+
+        if (!app.Environment.IsEnvironment("Test"))
+        {
+            // Older demo items → the listing model (kind, part type, fitment, title ...); SearchService re-indexes them.
+            locatedIds = locatedIds.Union(DemoListings.ConvertExisting(context)).ToList();
+            seededIds = seededIds.Union(DemoListings.AddAsync(context, scope.ServiceProvider).GetAwaiter().GetResult()).ToList();
+            locatedIds = locatedIds.Except(seededIds).ToList();
+        }
 
         // Tell the other services (BidService schedules each auction's end, SearchService indexes it)
         // about the seed data once Wolverine is running.
