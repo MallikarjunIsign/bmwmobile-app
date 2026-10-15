@@ -10,7 +10,7 @@ import { ApiService, ServerError } from '../services/api';
 import { useCurrencyLabel } from '../location/useMoney';
 import { useLocations } from '../location/LocationContext';
 import { FEATURES } from '../config';
-import { formatRadius } from '../utils/geo';
+import { formatRadius, REGIONS } from '../utils/geo';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'OrderPartRequest'>;
 
@@ -127,7 +127,7 @@ export const OrderPartRequestScreen: React.FC<Props> = ({ route, navigation }) =
           <Text style={styles.feaTitle}>🔔 GET NOTIFIED</Text>
           <Text style={styles.feaText}>
             {location
-              ? `When a matching part is listed within ${formatRadius(location.radiusKm, country)}${location.city ? ` of ${location.city}` : ''}, we'll let you know.`
+              ? `When a matching part is listed for pickup within ${formatRadius(location.radiusKm, country)}${location.city ? ` of ${location.city}` : ''}, or with shipping anywhere in ${REGIONS[country].name}, we'll let you know.`
               : "When a matching part is listed, we'll let you know."}
           </Text>
         </View>

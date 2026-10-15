@@ -174,8 +174,10 @@ public static class SearchEndpoints
         });
     }
 
-    public const double DefaultRadiusKm = 50;
-    public const double MaxRadiusKm = 500;
+    /// <summary>Without a radius: the default (Contracts.RegionRules – 200 km, 200 mi in the USA).</summary>
+    public const double DefaultRadiusKm = RegionRules.DefaultRadiusValue;
+    /// <summary>1,000 miles (the largest radius a location can have).</summary>
+    public static readonly double MaxRadiusKm = RegionRules.MaxRadiusKm;
 
     /// <summary>Most candidates looked at for one "near" search (Meilisearch's default maxTotalHits).</summary>
     private const int MaxNearCandidates = 1000;

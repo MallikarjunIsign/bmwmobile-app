@@ -22,6 +22,16 @@ public record ShippingRateDto(
     decimal MinFee, decimal MaxFee, int MaxDistance, bool IsPlaceholder, DateTime UpdatedAt, string? UpdatedBy,
     bool IsEstimate = false, string? Source = null);
 
+public class ShippingEstimatesRequest
+{
+    public const int MaxListings = 50;
+    public List<string> ListingIds { get; set; } = [];
+    public double Lat { get; set; }
+    public double Lon { get; set; }
+    /// <summary>The buyer's country (shipping stays within the listing's country).</summary>
+    public string? Country { get; set; }
+}
+
 public class UpdateShippingRateDto
 {
     [Range(0, 10_000_000)] public decimal BaseFee { get; set; }
@@ -60,6 +70,30 @@ public class ShippingController(AuctionDbContext context, ShippingService shippi
         var shipped = options.HasFlag(DeliveryOptions.Shipping);
         var quote = shipped ? await shipping.QuoteAsync(item, country ?? item.CountryCode, lat, lon) : null;
         return new ShippingEstimateDto(listingId, options.HasFlag(DeliveryOptions.Pickup), shipped, quote);
+    }
+
+    /// <summary>
+    /// Estimates for a page of search results (the cards' "🚚 Ships to you ~$12"), one call instead of one per card.
+    /// Listings that don't ship come back with Shipping = null; unknown ids are left out.
+    /// </summary>
+    [HttpPost("estimates")]
+    public async Task<ActionResult<List<ShippingEstimateDto>>> Estimates(ShippingEstimatesRequest request)
+    {
+        if (!GeoMath.IsValidCoordinate(request.Lat, request.Lon)) return BadRequest(new { message = "lat and lon must be valid coordinates" });
+        var ids = request.ListingIds.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct().ToList();
+        if (ids.Count > ShippingEstimatesRequest.MaxListings)
+            return BadRequest(new { message = $"At most {ShippingEstimatesRequest.MaxListings} listings at a time" });
+
+        var items = await context.Set<Item>().Include(i => i.PartType).AsNoTracking().Where(i => ids.Contains(i.Id)).ToListAsync();
+        var result = new List<ShippingEstimateDto>();
+        foreach (var item in items.OrderBy(i => ids.IndexOf(i.Id)))
+        {
+            var options = OrderTracking.Normalize(item.DeliveryOptions);
+            var shipped = options.HasFlag(DeliveryOptions.Shipping);
+            var quote = shipped ? await shipping.QuoteAsync(item, request.Country ?? item.CountryCode, request.Lat, request.Lon) : null;
+            result.Add(new ShippingEstimateDto(item.Id, options.HasFlag(DeliveryOptions.Pickup), shipped, quote));
+        }
+        return result;
     }
 
     /// <summary>The rate table (a country, or all). Placeholder rows are marked.</summary>

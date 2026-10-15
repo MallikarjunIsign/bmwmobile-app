@@ -8,15 +8,13 @@ namespace Contracts;
 /// "Buyer requests" list:
 /// <list type="bullet">
 /// <item>Never a seller in another country.</item>
-/// <item>The buyer gave their location: only sellers within the buyer's radius (60 km / 60 mi by default).</item>
+/// <item>The buyer gave their location: only sellers within the buyer's radius (200 km / 200 mi by default).</item>
 /// <item>No buyer location: sellers in the buyer's country.</item>
 /// </list>
 /// A seller whose location / country isn't known can't be placed, so they aren't told.
 /// </summary>
 public static class PartRequestAudience
 {
-    public const double DefaultRadiusKm = 60;
-
     // Claims IdentityService puts in the access token from the user's primary location.
     public const string LatitudeClaim = "location_lat";
     public const string LongitudeClaim = "location_lon";
@@ -33,7 +31,7 @@ public static class PartRequestAudience
         if (requestLat is { } lat && requestLon is { } lon)
         {
             if (sellerLat is not { } sLat || sellerLon is not { } sLon) return false;
-            var radius = requestRadiusKm is > 0 ? requestRadiusKm.Value : DefaultRadiusKm;
+            var radius = requestRadiusKm is > 0 ? requestRadiusKm.Value : RegionRules.DefaultSearchRadius(buyerCountry).Km;
             return GeoMath.HaversineKm(lat, lon, sLat, sLon) <= radius;
         }
 

@@ -5,7 +5,9 @@ import { useAuth } from '../auth/AuthContext';
 import { ApiService, type NearFilter } from '../services/api';
 import { LocationApi } from '../services/locationApi';
 import type { AutoLocation, CountryCode, MyLocations, SaveLocationRequest, SavedLocation } from '../types/location';
-import { countryFromPhone, fallbackRadius, haversineKm, isCountryCode, MIN_MOVE_KM, MOVE_THRESHOLD_KM } from '../utils/geo';
+import {
+  countryFromPhone, fallbackRadius, haversineKm, isCountryCode, MIN_MOVE_KM, MOVE_THRESHOLD_KM, radiusFor, savedRadius,
+} from '../utils/geo';
 import { getCurrentPosition, GpsError, type GpsFailure, openLocationSettings } from '../utils/gps';
 
 type LocationStatus = 'idle' | 'ready';
@@ -17,7 +19,7 @@ type LocationContextValue = {
   location: AutoLocation | null;
   /** Location permission denied or GPS off: show "Turn on location to see parts near you". */
   locationOff: boolean;
-  /** Parts within the radius (60 km / 60 mi) of the automatic location; undefined = country-wide. */
+  /** The location and its radius (pickup-only listings inside it, shipping country-wide); undefined = country-wide. */
   near: NearFilter | undefined;
   /** km/miles and the currency: the location's country, else the phone number's. */
   country: CountryCode;
@@ -29,8 +31,16 @@ type LocationContextValue = {
   addresses: SavedLocation[];
   /** True while the location follows the phone's GPS; false when a saved address is chosen. */
   usingCurrentLocation: boolean;
-  /** "Use my current location": GPS again (asks for permission). Throws GpsError when it can't. */
-  switchToCurrentLocation: () => Promise<void>;
+  /**
+   * "Use my current location": GPS again (asks for permission), with the radius chosen on that screen (default 200).
+   * Throws GpsError when it can't.
+   */
+  switchToCurrentLocation: (radiusValue?: number) => Promise<void>;
+  /**
+   * Change the radius of the location in use (in its unit: mi in the USA, km elsewhere). The lists and counts update at
+   * once; saved on the server (the saved address, or the GPS location). Throws when the server refuses it.
+   */
+  setRadius: (radiusValue: number) => Promise<void>;
   /** Use a saved address as the location (GPS no longer changes it). */
   chooseAddress: (id: string) => Promise<void>;
   /** Add (and use) or edit an address. */
@@ -43,14 +53,14 @@ const LocationContext = createContext<LocationContextValue | undefined>(undefine
 const storageKey = (userId: string) => `@bidmyparts/auto-location/${userId}`;
 const addressesKey = (userId: string) => `@bidmyparts/addresses/${userId}`;
 
-/** The chosen saved address as the app's location (radius 60 km / 60 mi by its country). */
+/** The chosen saved address as the app's location, with its own radius. */
 function fromAddress(a: SavedLocation, phoneCountry: CountryCode): AutoLocation {
   return {
     latitude: a.latitude,
     longitude: a.longitude,
     city: a.placeName,
     countryCode: a.countryCode,
-    ...fallbackRadius(a.countryCode ?? phoneCountry),
+    ...savedRadius(a, phoneCountry),
     updatedAt: new Date().toISOString(),
     addressId: a.id,
     label: a.label,
@@ -206,21 +216,25 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
   const addresses = useMemo(() => (mine?.locations ?? []).filter(l => !l.isCurrentLocation), [mine]);
   const chosen = addresses.find(l => l.isPrimary) ?? null;
 
-  const switchToCurrentLocation = useCallback(async () => {
+  // The GPS row on the server ("Use my current location"), which keeps the radius chosen for the GPS location.
+  const gpsRow = useMemo(() => (mine?.locations ?? []).find(l => l.isCurrentLocation) ?? null, [mine]);
+
+  const switchToCurrentLocation = useCallback(async (radiusValue?: number) => {
     // Throws GpsError (denied / GPS off) for the screen to explain.
     const pos = await getCurrentPosition({ prompt: true });
     setFailure(null);
     const next = await describe(pos.latitude, pos.longitude, phoneCountry);
-    save(next);
-    keepAddresses(await LocationApi.setCurrent(pos.latitude, pos.longitude, next.radiusKm));
+    const radius = radiusValue ?? next.radiusValue ?? fallbackRadius(next.countryCode ?? phoneCountry).radiusValue;
+    save({ ...next, ...radiusFor(radius, next.countryCode ?? phoneCountry) });
+    keepAddresses(await LocationApi.setCurrent(pos.latitude, pos.longitude, radius));
   }, [phoneCountry, save, keepAddresses]);
 
   const chooseAddress = useCallback(async (id: string) => keepAddresses(await LocationApi.setPrimary(id)), [keepAddresses]);
 
   const saveAddress = useCallback(
     async (request: SaveLocationRequest, id?: string) => {
-      const radiusKm = fallbackRadius(isCountryCode(request.countryCode) ? (request.countryCode as CountryCode) : phoneCountry).radiusKm;
-      const body = { ...request, radiusKm: Math.round(radiusKm) };
+      const country = isCountryCode(request.countryCode) ? (request.countryCode as CountryCode) : phoneCountry;
+      const body = { ...request, radiusValue: request.radiusValue ?? fallbackRadius(country).radiusValue };
       keepAddresses(id ? await LocationApi.update(id, body) : await LocationApi.add(body));
     },
     [phoneCountry, keepAddresses],
@@ -228,11 +242,36 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
 
   const removeAddress = useCallback(async (id: string) => keepAddresses(await LocationApi.remove(id)), [keepAddresses]);
 
-  // A chosen address wins over GPS; without one, GPS (or nothing while location is off).
+  // A radius just chosen, shown at once (lists and counts update) until the server's answer arrives.
+  const [pendingRadius, setPendingRadius] = useState<number | null>(null);
+
+  // A chosen address wins over GPS; without one, GPS (or nothing while location is off). The GPS location uses the
+  // radius saved with the GPS row, else the default (200 mi / 200 km) – never an older cached one.
   const locationOff = !chosen && failure !== null;
-  const active = useMemo(
-    () => (chosen ? fromAddress(chosen, phoneCountry) : locationOff ? null : location),
-    [chosen, phoneCountry, locationOff, location],
+  const active = useMemo(() => {
+    // The GPS radius number in the unit of where the phone is now (200 mi in the USA → 200 km after moving to India).
+    const here = location?.countryCode ?? phoneCountry;
+    const base = chosen ? fromAddress(chosen, phoneCountry) : locationOff || !location ? null
+      : { ...location, ...(gpsRow ? radiusFor(savedRadius(gpsRow, here).radiusValue, here) : fallbackRadius(here)) };
+    return base && pendingRadius != null ? { ...base, ...radiusFor(pendingRadius, base.countryCode ?? phoneCountry) } : base;
+  }, [chosen, phoneCountry, locationOff, location, gpsRow, pendingRadius]);
+
+  const setRadius = useCallback(
+    async (radiusValue: number) => {
+      if (!active) return;
+      setPendingRadius(radiusValue);
+      try {
+        const next = chosen
+          ? await LocationApi.setRadius(chosen.id, radiusValue)
+          : gpsRow
+            ? await LocationApi.setRadius(gpsRow.id, radiusValue)
+            : await LocationApi.setCurrent(active.latitude, active.longitude, radiusValue);
+        keepAddresses(next);
+      } finally {
+        setPendingRadius(null);
+      }
+    },
+    [active, chosen, gpsRow, keepAddresses],
   );
 
   const near = useMemo<NearFilter | undefined>(
@@ -245,9 +284,9 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<LocationContextValue>(
     () => ({
       status, location: active, locationOff, near, country, refresh, turnOnLocation,
-      addresses, usingCurrentLocation: !chosen, switchToCurrentLocation, chooseAddress, saveAddress, removeAddress,
+      addresses, usingCurrentLocation: !chosen, switchToCurrentLocation, setRadius, chooseAddress, saveAddress, removeAddress,
     }),
-    [status, active, locationOff, near, country, refresh, turnOnLocation, addresses, chosen, switchToCurrentLocation, chooseAddress, saveAddress, removeAddress],
+    [status, active, locationOff, near, country, refresh, turnOnLocation, addresses, chosen, switchToCurrentLocation, setRadius, chooseAddress, saveAddress, removeAddress],
   );
 
   return <LocationContext.Provider value={value}>{children}</LocationContext.Provider>;

@@ -91,7 +91,8 @@ export const MarketplaceSearchScreen: React.FC<Props> = ({ navigation, route }) 
     });
   };
 
-  const where = near && location ? ` within ${formatRadius(location.radiusKm, country)}` : '';
+  // Pickup-only listings inside the radius, listings that ship from the whole country.
+  const where = near && location ? ` · pickup within ${formatRadius(location.radiusKm, country)}, shipping ${REGIONS[country].name}-wide` : '';
   const noun = parts ? (total === 1 ? 'part' : 'parts') : total === 1 ? 'vehicle' : 'vehicles';
   const sortLabel = SORTS.find(s => s.value === (filters.sort ?? 'best'))?.label ?? 'Best match';
   const activeFilters = [filters.kind, filters.condition, filters.brandType, filters.year, filters.minPrice, filters.maxPrice, filters.maxDistanceKm, filters.delivery, filters.minSellerRating, garage?.id]

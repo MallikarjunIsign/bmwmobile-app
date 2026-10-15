@@ -16,12 +16,11 @@ namespace AuctionService.Services;
 ///  - it isn't the buyer's own listing, and
 ///  - the normalised part numbers are equal, OR every word of the ordered part type appears in the listing's part
 ///    name/description and the vehicle fits (make, model and year when the order gives them), and
-///  - it is within the buyer's radius (when the buyer's location is known).
+///  - the buyer would see it (Contracts.ListingVisibility): a pickup-only listing within the buyer's radius, a listing
+///    that ships anywhere in the buyer's country – never one from another country.
 /// </summary>
 public partial class CustomOrderMatcher(AuctionDbContext context)
 {
-    public const double DefaultRadiusKm = 60;
-
     /// <summary>Marks matching open orders and enlists the notifications; the caller saves and flushes the outbox.</summary>
     public async Task<List<PartRequest>> MatchNewListingAsync(Auction auction, IDbContextOutbox<AuctionDbContext> outbox)
     {
@@ -62,7 +61,7 @@ public partial class CustomOrderMatcher(AuctionDbContext context)
         if (order.Status != CustomOrderStatus.Open || order.User == auction.Seller || item.ItemType != ItemType.Part)
             return false;
 
-        if (!WithinRadius(order, item, out distanceKm)) return false;
+        if (!Visible(order, item, out distanceKm)) return false;
 
         var orderNumber = order.PartNumberNormalized ?? PartNumbers.Normalize(order.PartNumber);
         if (orderNumber != null && orderNumber == PartNumbers.Normalize(item.PartNumber)) return true;
@@ -70,14 +69,18 @@ public partial class CustomOrderMatcher(AuctionDbContext context)
         return PartTypeMatches(order, item) && VehicleFits(order, item);
     }
 
-    private static bool WithinRadius(PartRequest order, Item item, out double? distanceKm)
+    private static bool Visible(PartRequest order, Item item, out double? distanceKm)
     {
-        distanceKm = null;
-        if (order.Latitude is null || order.Longitude is null) return true; // buyer's location unknown: anywhere
-        if (item.Latitude is null || item.Longitude is null) return false;   // can't tell: don't notify
+        distanceKm = order.Latitude is { } lat && order.Longitude is { } lon && item.Latitude is { } iLat && item.Longitude is { } iLon
+            ? GeoMath.HaversineKm(lat, lon, iLat, iLon)
+            : null;
+        // Neither the buyer's location nor their country is known: anywhere.
+        if (order.Latitude is null && ListingVisibility.CountryOf(order.CountryCode, null, null) is null) return true;
 
-        distanceKm = GeoMath.HaversineKm(order.Latitude.Value, order.Longitude.Value, item.Latitude.Value, item.Longitude.Value);
-        return distanceKm <= (order.RadiusKm is > 0 ? order.RadiusKm.Value : DefaultRadiusKm);
+        var ships = OrderTracking.Normalize(item.DeliveryOptions).HasFlag(DeliveryOptions.Shipping);
+        return ListingVisibility.IsVisible(order.CountryCode, order.Latitude, order.Longitude,
+            order.RadiusKm is > 0 ? order.RadiusKm.Value : RegionRules.DefaultSearchRadius(order.CountryCode).Km,
+            item.CountryCode, item.Latitude, item.Longitude, ships);
     }
 
     /// <summary>

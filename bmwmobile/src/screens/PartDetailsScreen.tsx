@@ -18,9 +18,9 @@ import { useNextBid } from '../hooks/useNextBid';
 import { useLiveEvent } from '../services/notifications';
 import { NextBidCalculation } from '../components/NextBidCalculation';
 import { Countdown } from '../components/Countdown';
-import { formatDistance } from '../utils/geo';
+import { formatDistance, formatRadius, haversineKm } from '../utils/geo';
 import { label, maskUsername } from '../utils/time';
-import { deliverySummary, shippingEstimateText, shipsWithinText } from '../utils/delivery';
+import { buyerDeliveryText, deliverySummary, receiveProblem, SHIPPING_NOT_AVAILABLE, shippingEstimateText, shipsWithinText } from '../utils/delivery';
 import { useShippingEstimate } from '../hooks/useShippingEstimate';
 import { ratingText } from '../utils/rating';
 import { ReviewApi } from '../services/reviewApi';
@@ -52,7 +52,7 @@ export function bidOutcome(listing: Pick<Listing, 'status' | 'seller' | 'winner'
 export const PartDetailsScreen: React.FC<Props> = ({ route, navigation }) => {
   const money = useMoney();
   const sellerAccount = isSellerAccount(useAuth().user);
-  const { country } = useLocations();
+  const { country, location } = useLocations();
   const { auctionId, auction: initialAuction } = route.params;
   const [listing, setListing] = useState<Listing | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -129,9 +129,24 @@ export const PartDetailsScreen: React.FC<Props> = ({ route, navigation }) => {
     );
   }
 
-  const auction = { ...mapRawDtoToAuction(listing), distanceKm: initialAuction?.distanceKm };
+  // The distance from the buyer's location and whether it's inside their radius (pickup offered to them).
+  const distanceKm = initialAuction?.distanceKm ??
+    (location && listing.latitude != null && listing.longitude != null
+      ? Math.round(haversineKm(location.latitude, location.longitude, listing.latitude, listing.longitude) * 10) / 10
+      : undefined);
+  const withinRadius = location && distanceKm != null ? distanceKm <= location.radiusKm : undefined;
+  const auction = { ...mapRawDtoToAuction(listing), distanceKm, withinRadius };
   const isSeller = isCurrentUser(listing.seller);
   const offersShipping = listing.deliveryOptions.includes('Shipping');
+  const forBuyer = { ...listing, distanceKm, withinRadius, shippingQuote: offersShipping ? shippingQuote ?? undefined : null };
+  const buyerDelivery = !isSeller ? buyerDeliveryText(forBuyer, money, country) : null;
+  // Shipping can't be worked out for this buyer: Buy now / Place bid say why (and stop when there's no other way).
+  const checkReceive = (go: () => void, action: string) => {
+    const problem = isSeller ? null : receiveProblem(forBuyer, country);
+    if (!problem) return go();
+    if (problem.blocking) return Alert.alert(SHIPPING_NOT_AVAILABLE, problem.message);
+    Alert.alert(SHIPPING_NOT_AVAILABLE, problem.message, [{ text: 'Cancel', style: 'cancel' }, { text: action, onPress: go }]);
+  };
   // Editing, accepting bids and relisting need a seller account (the backend refuses buyers too).
   const canManage = isSeller && sellerAccount;
   // Fixed price: bought at the price until sold out – no bids, no end time.
@@ -278,7 +293,17 @@ export const PartDetailsScreen: React.FC<Props> = ({ route, navigation }) => {
         <View style={styles.card}>
           <Text style={styles.title}>{listing.title}</Text>
           {listing.fitmentSummary ? <Text style={styles.fitment}>{listing.fitmentSummary}</Text> : null}
-          {deliverySummary(listing, money) ? <Text style={styles.delivery}>{deliverySummary(listing, money)}</Text> : null}
+          {/* For a buyer: "📍 Pickup · 12 km away · 🚚 Shipping ~₹350" or "🚚 Ships to you ~₹1,200 · 640 km away". */}
+          {buyerDelivery ? (
+            <Text style={[styles.delivery, styles.deliveryBold, shippingQuote && !shippingQuote.available && styles.deliveryWarn]}
+              testID="listing-delivery">
+              {buyerDelivery}
+            </Text>
+          ) : null}
+          {(isSeller || withinRadius === undefined) && deliverySummary(listing, money) ? <Text style={styles.delivery}>{deliverySummary(listing, money)}</Text> : null}
+          {withinRadius === false && listing.deliveryOptions.includes('Pickup') && !isSeller ? (
+            <Text style={styles.delivery}>📍 Pickup is possible in {listing.pickupCity ?? listing.locationName ?? 'the seller’s area'} – outside your {formatRadius(location!.radiusKm, country)} radius</Text>
+          ) : null}
           {/* The shipping charge to the buyer's selected location (calculated by the backend). */}
           {offersShipping && !isSeller ? (
             <Text style={[styles.delivery, shippingQuote && !shippingQuote.available && styles.deliveryWarn]}>
@@ -512,7 +537,7 @@ export const PartDetailsScreen: React.FC<Props> = ({ route, navigation }) => {
                 </TouchableOpacity>
               </View>
             ) : null}
-            <TouchableOpacity style={[styles.bidBarBtn, styles.buyBarBtn]} onPress={buy} disabled={busy}>
+            <TouchableOpacity style={[styles.bidBarBtn, styles.buyBarBtn]} onPress={() => checkReceive(buy, 'Buy anyway')} disabled={busy}>
               <Text style={styles.bidBarText}>BUY NOW – {money(listing.startingPrice * qty)}</Text>
             </TouchableOpacity>
           </View>
@@ -523,7 +548,7 @@ export const PartDetailsScreen: React.FC<Props> = ({ route, navigation }) => {
             </View>
           ) : (
             <TouchableOpacity style={styles.bidBarBtn}
-              onPress={() => navigation.navigate('PlaceBidModal', { auction: { ...auction, currentHighBid: currentTotal } })}>
+              onPress={() => checkReceive(() => navigation.navigate('PlaceBidModal', { auction: { ...auction, currentHighBid: currentTotal } }), 'Bid anyway')}>
               <Text style={styles.bidBarText}>{next ? `PLACE BID (${money(next.minimumBid)})` : 'PLACE BID'}</Text>
             </TouchableOpacity>
           )
@@ -582,6 +607,7 @@ const styles = StyleSheet.create({
   fitment: { color: COLORS.badgeText, fontSize: 13, fontWeight: '700', marginTop: 4 },
   delivery: { color: COLORS.textSecondary, fontSize: 13, fontWeight: '700', marginTop: 4 },
   deliveryWarn: { color: COLORS.warningGlow },
+  deliveryBold: { color: COLORS.text },
   seller: { color: COLORS.textMuted, fontSize: 13, marginTop: 4, marginBottom: SPACING.md },
   sellerBold: { color: COLORS.textSecondary, fontWeight: '700' },
   chatBtn: {

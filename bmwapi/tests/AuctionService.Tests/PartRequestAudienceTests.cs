@@ -38,10 +38,10 @@ public class PartRequestAudienceTests
     }
 
     [Fact]
-    public void DefaultRadius_Is60Km()
+    public void DefaultRadius_Is200Km()
     {
-        // ~50 km away: inside the default 60 km when the buyer's radius is missing.
-        Assert.True(PartRequestAudience.Reaches("IN", BuyerLat, BuyerLon, null, "IN", 17.9, 78.6));
-        Assert.False(PartRequestAudience.Reaches("IN", BuyerLat, BuyerLon, null, "IN", 18.2, 78.9));
+        // Warangal (~140 km): inside the default 200 km when the buyer's radius is missing; Vijayawada (~250 km) isn't.
+        Assert.True(PartRequestAudience.Reaches("IN", BuyerLat, BuyerLon, null, "IN", 18.0072, 79.5584));
+        Assert.False(PartRequestAudience.Reaches("IN", BuyerLat, BuyerLon, null, "IN", 16.5062, 80.6480));
     }
 }

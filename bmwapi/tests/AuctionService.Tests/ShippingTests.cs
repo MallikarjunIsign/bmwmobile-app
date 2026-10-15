@@ -228,6 +228,23 @@ public class ShippingApiTests(AppFixture fixture) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Estimates_ForAPageOfResults_InOneCall()
+    {
+        var ships = await LiveListing("Dash cam", ["Pickup", "Shipping"]);
+        var pickupOnly = await LiveListing("Dash cam", ["Pickup"]);
+
+        var estimates = await Json<List<ShippingEstimateDto>>(s => s.Post.Json(new ShippingEstimatesRequest
+        {
+            ListingIds = [ships.Id, pickupOnly.Id, "no-such-listing"], Lat = BuyerLat, Lon = BuyerLon, Country = "IN",
+        }).ToUrl("/api/shipping/estimates"), "carol", "buyer");
+
+        Assert.Equal([ships.Id, pickupOnly.Id], estimates.Select(e => e.ListingId));
+        Assert.Equal(ExpectedCharge(60, 1), estimates[0].Shipping!.Charge);
+        Assert.False(estimates[1].ShippingOffered);
+        Assert.Null(estimates[1].Shipping);
+    }
+
+    [Fact]
     public async Task ChoosingShipping_CalculatesAndFixesTheCharge_TotalIncludesIt_LaterRateChangesDontChangeIt()
     {
         var listing = await LiveListing("Dash cam", ["Pickup", "Shipping"]);
@@ -281,10 +298,13 @@ public class ShippingApiTests(AppFixture fixture) : IAsyncLifetime
     [Fact]
     public async Task Shipping_TooFar_IsRefusedWithTheReason()
     {
+        // An admin's rate with a short range (the seeded India rates go up to 4,000 km – all of India).
+        await Call(s => s.Put.Json(new UpdateShippingRateDto { BaseFee = 800, RatePerUnit = 12, MinFee = 800, MaxFee = 15000, MaxDistance = 1000 })
+            .ToUrl("/api/shipping/rates/IN/Freight"), "admin", "admin");
         var listing = await LiveListing("Dash cam", ["Shipping"], sizeClass: "Freight");
         var order = await Buy(listing.Id);
 
-        // Delhi: ~1,630 km by road; placeholder India Freight goes up to 1,500 km.
+        // Delhi: ~1,630 km by road; this rate goes up to 1,000 km.
         var body = await (await Call(s => s.Post.Json(new ChooseDeliveryDto
         {
             Method = "Shipping", Address = new AddressDto { Name = "Carol", Phone = "+919876543210", Line1 = "1 CP", City = "Delhi", Postcode = "110001", CountryCode = "IN" },
@@ -293,6 +313,54 @@ public class ShippingApiTests(AppFixture fixture) : IAsyncLifetime
 
         Assert.Contains("SHIPPING_NOT_AVAILABLE", body);
         Assert.Contains("Too far to ship", body);
+    }
+
+    [Theory]
+    // Seeded maximum road distance per country (all sizes): normal in-country shipping always works.
+    [InlineData("IN", 4000)]
+    [InlineData("NG", 1800)]
+    [InlineData("IE", 700)]
+    public async Task SeededMaxDistance_CoversTheWholeCountry(string country, int maxDistance)
+    {
+        var rates = await Json<List<ShippingRateDto>>(s => s.Get.Url($"/api/shipping/rates?country={country}"), "carol", "buyer");
+        Assert.Equal(5, rates.Count);
+        Assert.All(rates, r => Assert.Equal(maxDistance, r.MaxDistance));
+    }
+
+    [Fact]
+    public async Task Seed_RaisesTheMaxDistanceOfExistingSeededRates_NotAnAdminsRates()
+    {
+        using var scope = fixture.Host.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AuctionDbContext>();
+        // A database from before: India Freight placeholder 1,500 km, US Freight estimate 3,500 mi, an admin's Nigeria rate.
+        (await db.ShippingRates.SingleAsync(r => r.CountryCode == "IN" && r.SizeClass == SizeClass.Freight)).MaxDistance = 1500;
+        (await db.ShippingRates.SingleAsync(r => r.CountryCode == "US" && r.SizeClass == SizeClass.Freight)).MaxDistance = 3500;
+        var admins = await db.ShippingRates.SingleAsync(r => r.CountryCode == "NG" && r.SizeClass == SizeClass.Small);
+        admins.MaxDistance = 300;
+        admins.IsPlaceholder = false;
+        await db.SaveChangesAsync();
+
+        ShippingRateSeed.Seed(db);
+
+        var rates = await db.ShippingRates.AsNoTracking().ToListAsync();
+        Assert.Equal(4000, rates.Single(r => r.CountryCode == "IN" && r.SizeClass == SizeClass.Freight).MaxDistance);
+        Assert.Equal(4000, rates.Single(r => r.CountryCode == "US" && r.SizeClass == SizeClass.Freight).MaxDistance);
+        Assert.Equal(300, rates.Single(r => r.CountryCode == "NG" && r.SizeClass == SizeClass.Small).MaxDistance);
+    }
+
+    [Fact]
+    public void FarInCountryRoutes_Ship()
+    {
+        // Hyderabad → Srinagar Freight (~2,650 km by road), Lagos → Maiduguri (~1,590 km), Malin Head → Mizen Head (~610 km).
+        Assert.True(ShippingCalculator.Quote(Rate("IN", ShippingRateSeed.IndiaMaxKm), "IN", 17.385, 78.4867, "IN", 34.0837, 74.7973, SizeClass.Freight).Available);
+        Assert.True(ShippingCalculator.Quote(Rate("NG", ShippingRateSeed.NigeriaMaxKm), "NG", 6.5244, 3.3792, "NG", 11.8311, 13.151, SizeClass.Large).Available);
+        Assert.True(ShippingCalculator.Quote(Rate("IE", ShippingRateSeed.IrelandMaxKm), "IE", 55.38, -7.37, "IE", 51.45, -9.82, SizeClass.Small).Available);
+
+        static ShippingRate Rate(string country, int max) => new()
+        {
+            CountryCode = country, SizeClass = SizeClass.Freight, Currency = Contracts.RegionRules.CurrencyFor(country), Unit = "km",
+            BaseFee = 100, RatePerUnit = 1, MinFee = 100, MaxFee = 100000, MaxDistance = max,
+        };
     }
 
     [Fact]

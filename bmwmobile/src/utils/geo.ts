@@ -33,13 +33,41 @@ const regionOf = (country?: CountryCode | null) => REGIONS[country ?? DEFAULT_CO
 
 export const distanceUnit = (country?: CountryCode | null) => regionOf(country).unit;
 
-/**
- * Offline fallback only (the backend's GET /geo/reverse decides the radius): 60 miles in the USA, 60 km elsewhere.
- */
-export function fallbackRadius(country?: CountryCode | null): { radiusValue: number; radiusUnit: 'km' | 'mi'; radiusKm: number } {
+// ── The search radius: THE one app setting (the backend has the same numbers in Contracts/RegionRules.cs). ──
+// Values are in the location's unit: miles in the USA, km elsewhere.
+export const DEFAULT_RADIUS = 200;
+export const MIN_RADIUS = 5;
+export const MAX_RADIUS = 1000;
+/** Quick choices in the radius picker. */
+export const RADIUS_CHOICES = [25, 50, 100, 200, 500] as const;
+
+export type Radius = { radiusValue: number; radiusUnit: 'km' | 'mi'; radiusKm: number };
+
+/** A radius in the country's unit: 200 → 200 mi (321.87 km) in the USA, 200 km elsewhere. */
+export function radiusFor(value: number, country?: CountryCode | null): Radius {
   return distanceUnit(country) === 'mi'
-    ? { radiusValue: 60, radiusUnit: 'mi', radiusKm: Math.round(60 * KM_PER_MILE * 100) / 100 }
-    : { radiusValue: 60, radiusUnit: 'km', radiusKm: 60 };
+    ? { radiusValue: value, radiusUnit: 'mi', radiusKm: Math.round(value * KM_PER_MILE * 100) / 100 }
+    : { radiusValue: value, radiusUnit: 'km', radiusKm: value };
+}
+
+/** The value in the country's unit for a radius in km (321.87 → 200 in the USA). */
+export const radiusValueOf = (radiusKm: number, country?: CountryCode | null) =>
+  Math.round(distanceUnit(country) === 'mi' ? radiusKm / KM_PER_MILE : radiusKm);
+
+/** A saved location's radius as the user chose it, in its country's unit (older servers only send radiusKm). */
+export function savedRadius(
+  a: { radiusKm: number; radiusValue?: number; countryCode: CountryCode | null },
+  fallbackCountry?: CountryCode | null,
+): Radius {
+  const country = a.countryCode ?? fallbackCountry;
+  return radiusFor(a.radiusValue ?? radiusValueOf(a.radiusKm, country), country);
+}
+
+export const isValidRadius =(value: number) => Number.isInteger(value) && value >= MIN_RADIUS && value <= MAX_RADIUS;
+
+/** The default radius (200 mi in the USA, 200 km elsewhere) – used when the backend doesn't say. */
+export function fallbackRadius(country?: CountryCode | null): Radius {
+  return radiusFor(DEFAULT_RADIUS, country);
 }
 
 const EARTH_RADIUS_KM = 6371;
@@ -67,12 +95,14 @@ export function formatRadius(radiusKm: number, country?: CountryCode | null): st
   return distanceUnit(country) === 'mi' ? `${Math.round(radiusKm / KM_PER_MILE)} mi` : `${Math.round(radiusKm)} km`;
 }
 
-/** "< 1 km", "8.5 km", "12 km" (or the same in miles in the USA). */
+/** "< 1 km", "8.5 km", "12 km", "1,366 mi" (miles in the USA). */
 export function formatDistance(km: number, country?: CountryCode | null): string {
   const unit = distanceUnit(country);
   const value = unit === 'mi' ? km / KM_PER_MILE : km;
   if (value < 1) return `< 1 ${unit}`;
-  return value < 10 ? `${value.toFixed(1).replace(/\.0$/, '')} ${unit}` : `${Math.round(value)} ${unit}`;
+  if (value < 10) return `${value.toFixed(1).replace(/\.0$/, '')} ${unit}`;
+  const whole = Math.round(value);
+  return `${whole >= 1000 ? whole.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',') : whole} ${unit}`;
 }
 
 /** "₹1,50,000", "$1,500", "€1,500", "₦1,500". Amounts are shown as they are (no exchange rates). */

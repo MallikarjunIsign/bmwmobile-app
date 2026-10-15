@@ -12,6 +12,7 @@ All commands are for **Git Bash**. Folder paths:
 
 ## 0. One-time setup
 
+
 You need: Docker Desktop, .NET 10 SDK, Node 22.11+, JDK 17, Android Studio (SDK + an emulator, e.g. `Pixel_8`), Git Bash.
 Keep at least **10 GB free** on C: (the Android build alone needs about 5 GB).
 
@@ -194,7 +195,11 @@ Run the search UI test (backend, Metro and emulator running): `cd /c/Bmwmobile/b
 
 It logs in as the e2e test buyer and seller (accounts from `bmwapi/.run/e2e.env`, created by the pre-demo check below), types
 `bumper` on Home, taps the suggestion and checks that only bumpers are shown, then a category suggestion, a category tile and
-Market. Flows: `e2e/search-filters.yaml`, `e2e/subflows/login.yaml`. Screenshots of a failed run: `~/.maestro/tests/<latest>`.
+Market. Then, as the buyer in **Houston** (USA), the radius test `e2e/radius.yaml`: the location shows **200 mi** → the far
+shipping-only listing (Long Beach) is shown with "🚚 Ships to you" and the far pickup-only one (Round Rock) is shown → radius
+**25 mi** on Home → Round Rock disappears, Long Beach stays, "See All (N)" matches the API at 200 and 25 mi → back to 200 mi.
+The e2e accounts' saved locations are reset first (only these test accounts), so they start with the default radius.
+Flows: `e2e/search-filters.yaml`, `e2e/radius.yaml`, `e2e/subflows/login.yaml`. Screenshots of a failed run: `~/.maestro/tests/<latest>`.
 
 Seller application form ("Want to sell?", signed out from Sign up → stored → admin API lists it → admins notified):
 `cd /c/Bmwmobile/bmwmobile && bash e2e/run-seller-application-e2e.sh` (needs the e2e admin – start the backend once with the pre-demo check below).
@@ -218,9 +223,10 @@ It starts from clean and tests search the way a user uses it (10–15 minutes):
 1. stops the .NET services and Metro (data is kept)
 2. backend search tests: every filter alone and combined with text, category counts = results, index settings re-applied after a restart
 3. starts the backend with `./start-backend.sh` (fresh build) plus an e2e test seller; creates the e2e test buyer
-4. live API tests: app → Gateway → Search → Meilisearch with the demo data (each category tile's count = what tapping it returns, …)
+4. live API tests: app → Gateway → Search → Meilisearch with the demo data (each category tile's count = what tapping it returns,
+   far shipping listings shown / far pickup-only hidden in the USA and India, …)
 5. app unit tests (`npx jest`)
-6. Metro with `--reset-cache`, clears the app data, then the UI test (3A) as buyer **and** seller
+6. Metro with `--reset-cache`, clears the app data, then the UI tests (3A): search as buyer **and** seller, the radius test as the buyer in Houston
 
 It ends with `=> READY for the demo` or `=> NOT READY` and the failed step. Logs: `bmwmobile/.e2e-results/`.
 The e2e accounts (`e2e.buyer@…`, `e2e.seller@…`) and their random passwords are in `bmwapi/.run/e2e.env` (git-ignored, never printed).
@@ -416,10 +422,12 @@ Next time start again with section 1.
 
 | Place | Command | Expected |
 |---|---|---|
-| Hyderabad, India | `adb emu geo fix 78.4867 17.3850` | 60 km radius, ₹, distances in km |
-| New York, USA | `adb emu geo fix -74.0060 40.7128` | 60 mi radius, $, distances in miles |
-| Lagos, Nigeria | `adb emu geo fix 3.3792 6.5244` | 60 km, ₦ |
-| Dublin, Ireland | `adb emu geo fix -6.2603 53.3498` | 60 km, € |
+| Hyderabad, India | `adb emu geo fix 78.4867 17.3850` | 200 km radius, ₹, distances in km |
+| New York, USA | `adb emu geo fix -74.0060 40.7128` | 200 mi radius, $, distances in miles |
+| Lagos, Nigeria | `adb emu geo fix 3.3792 6.5244` | 200 km, ₦ |
+| Dublin, Ireland | `adb emu geo fix -6.2603 53.3498` | 200 km, € |
+
+(200 is the default radius until the user chooses another one – see "Radius" below.)
 
 - The location changes only after a move of more than ~5 km (or into another city).
 - Check what the backend answers: `curl -s -H "Authorization: Bearer <token>" "http://localhost:6001/geo/reverse?lat=17.385&lon=78.4867"`.
@@ -433,7 +441,7 @@ Next time start again with section 1.
 5. Home: no "Parts near you" block, no location text, no container banner; tabs are Home / Market / My Bids / Orders (no Tracking).
 6. Market: tap a category pill → only that category; add a make/model pill → narrowed further; both show as chips in the search bar; "All" / "All Models" clear them; the count updates.
 7. Search something that doesn't exist (e.g. `zzz`) → "There are no parts available for this search. Create a custom order …" → **Create custom order** (pre-filled) → Orders tab shows it as **OPEN**.
-8. With another account, publish a matching part within 60 km (e.g. Swagger `POST http://localhost:7001/api/auctions` or the
+8. With another account, publish a matching part within the buyer's radius, or one that ships (e.g. Swagger `POST http://localhost:7001/api/auctions` or the
    API with the same part name/make/model) → the requester gets "A part matching your request is now available" (live, or the next time the app opens) → **View part** opens the listing; the order shows **MATCHED**.
 9. Place Bid: "Current bid $1,000 + step $20 = Next bid $1,020" and "Part price … + your bid … = Total …"; quick bids next/+1/+2/+5 steps.
    Totals 100 → 110, 1,000 → 1,020, 5,000 → 5,050. A lower bid through the API is rejected with the next valid amount:
@@ -490,11 +498,12 @@ Use two accounts (A = seller, B = buyer). Rebuild the app first (section 3, imag
    **not** reschedule it). To test quickly, before any bid move the end to ~65 minutes from now:
    `curl -X PUT -H "Authorization: Bearer <seller token>" -H "Content-Type: application/json" -d '{"auctionEnd":"<UTC time>"}' http://localhost:6001/auctions/<id>`,
    then bid with B and wait ~5 minutes.
-35. **Location on Home**: under your name "📍 Kukatpally, Hyderabad, India ▾" (GPS city, or the address you chose).
-    Tap it → **My locations**: *Use my current location* or a saved address (**Use this address**, Edit, Delete) →
+35. **Location on Home**: under your name "📍 Kukatpally, Hyderabad, India · 200 km ▾" (GPS city, or the address you chose,
+    and its radius). Tap it → a sheet to change the radius or the location without leaving Home (see "Radius" below);
+    **Manage locations** → **My locations**: *Use my current location* or a saved address (**Use this address**, Edit, Delete) →
     **+ Add new address** (city from search or *Use my current position*, house/street, area, landmark, PIN/ZIP code,
-    Home/Work/Other). A chosen address is used for the 60 km / 60 mi search and as the default item location; GPS no
-    longer changes it until you pick *Use my current location* again.
+    radius, Home/Work/Other). A chosen address is used for the search with its own radius and as the default item location;
+    GPS no longer changes it until you pick *Use my current location* again.
 36. Cancel a live listing without bids → Cancelled; once it has bids the Cancel link is gone (the API refuses with "A listing with bids can't be cancelled").
 
 ### Roles – buyer, seller, admin (section 5A)
@@ -533,7 +542,8 @@ After pulling the change, restart the backend once so the Search service re-inde
 45. Home (as B): no "All vehicles" / "+ Add your vehicle" / garage chips. Under the search box: **[Parts] [Vehicles]** and
     **[All] [Auction] [Direct sale]**. Parts shows **SHOP BY CATEGORY** tiles with counts, e.g. "🛑 Brakes (3)"; categories with 0 are hidden.
 46. Tap **Direct sale** → the tiles' counts and the list below show only direct sales; **Auction** → only auctions.
-47. Change the location (Home → 📍) to another city / country → the counts change (only listings within 60 km / 60 mi).
+47. Change the location (Home → 📍) to another city / country → the counts change (pickup-only listings within the radius,
+    listings that ship from anywhere in that country – see "Who sees which listings" below).
 48. Tap a tile (e.g. Body – Exterior) → it is highlighted, a **Body – Exterior ✕** chip appears in the search box and the list below
     and "See All (n)" update at once (Home stays open). **See All →** opens Market with the same filter and the part types as chips with counts ("Bumper (2)").
 49. **Vehicles** → "N vehicles near you", make chips with counts ("Toyota (2)"); tap one → only that make. Market shows models as chips.
@@ -577,7 +587,7 @@ Accounts: **B** (buyer) and **S** (seller), on two emulators/phones (or switch a
     **Buyer requests** (also in Profile → Buyer requests). The list shows the part, vehicle, the buyer's city and budget – never their name.
     With push set up, S also gets it as a phone notification when the app is closed; tapping opens Buyer requests.
 63. B (or any buyer) never gets this banner; a seller who makes a request doesn't get their own.
-    **Only sellers near the buyer are told:** within the buyer's radius (60 km / 60 mi) when the buyer's location is on, otherwise
+    **Only sellers near the buyer are told:** within the buyer's radius (200 km / 200 mi by default) when the buyer's location is on, otherwise
     anywhere in the buyer's country – **never in another country**. Try it: move S to Delhi (`adb emu geo fix 77.2090 28.6139`)
     → S no longer gets B's Hyderabad requests (and doesn't see them in Buyer requests); move S to Lagos → never India's requests.
     The seller's location is the app's current location (re-sent when it moves ~10 km) – for the live banner, the one in their
@@ -606,4 +616,70 @@ Prices come from the official USPS Notice 123 list (effective 4 Oct 2026) – no
     order. When a carrier is chosen: `PUT /shipping/rates/US/Freight` (and `/Vehicle`) with the carrier's numbers and a `source`
     → the label disappears (existing orders keep their charge).
 71. A buyer outside the US → "Shipping not available: Ships within USA only".
+
+### Who sees which listings: pickup inside the radius, shipping country-wide
+
+Rule (Search service, design doc §7.7): **pickup only** → shown when the item is inside the buyer's radius; **shipping only** or
+**pickup + shipping** → shown anywhere in the buyer's country; **never** a listing from another country. Restart the backend once:
+the Search service re-indexes every listing (index version 3: `country`, `offersPickup`, `offersShipping`) and AuctionService adds
+the far-away demo listings below. No app rebuild needed (Metro reload is enough).
+
+Demo listings for this (US first):
+
+| Listing | Where | Delivery | Houston buyer, 200 mi (default) | 25 mi |
+|---|---|---|---|---|
+| Silverado alternator (`demo-us-la-alternator`) | Long Beach, CA (~1,366 mi) | shipping only | **shown** – "🚚 Ships to you ~$… · 1,366 mi away" | shown |
+| Camry radiator (`demo-us-austin-radiator`) | Round Rock, TX (~147 mi) | pickup only | **shown** – "📍 Pickup · 147 mi away" | hidden |
+| F-150 starter (`demo-us-phoenix-starter`) | Tempe, AZ (~1,006 mi) | pickup only | hidden | hidden |
+| Tyre 265/65 R17 (`demo-us-tyre-265-65-17`) | Dallas (~225 mi) | pickup + shipping | **shown** – "🚚 Ships to you …" | shown |
+| F-150 headlamp, Silverado tail lamp | Houston / Pasadena | pickup + shipping | **shown** – "📍 Pickup · 11 mi away · 🚚 Shipping ~$…" | shown |
+
+India (Hyderabad buyer, 200 km): `demo-in-bengaluru-alternator` (shipping only, ~500 km) and `demo-in-warangal-radiator` (pickup
+only, ~135 km) are shown; `demo-in-mumbai-gearbox` (pickup only, ~620 km) isn't. With 50 km the Warangal radiator disappears.
+
+72. Buyer B, location **Houston** (`adb emu geo fix -95.3698 29.7604`) → Home: the Silverado alternator is in LIVE LISTINGS with
+    "🚚 Ships to you ~$… · 1,366 mi away" (no pickup badge); the Houston headlamp shows "📍 Pickup · … mi away · 🚚 Shipping ~$…".
+    No India / Nigeria / Ireland listings anywhere. The category tile counts, the vehicle total / make counts and "See All (N)" match the lists.
+73. Market → filter sheet → **Delivery: Pickup** → only the listings you can pick up inside your radius (Houston, Pasadena, Round Rock
+    at 200 mi); **Shipping** → every listing that ships in the USA (Long Beach, Dallas, Houston …). The counts next to Pickup / Shipping are what you get.
+74. Sort **Nearest first** → Houston first, Long Beach last; every card shows its distance.
+75. Type `84130` → the part-number suggestion **84130813** (the Long Beach alternator) appears; as a buyer in India it doesn't.
+76. Open the Long Beach alternator → "🚚 Ships to you ~$… · 1,366 mi away", "Shipping to Houston: ~$… (USPS Ground Advantage, estimate)".
+    Buy now → Orders: shipping only, the address sheet opens.
+77. Checkout outside the radius: buy a **pickup + shipping** item outside 200 mi (the Dallas tyre) → Orders → "How do you want to
+    receive it?" has **🚚 Ship it to me** pre-selected; "📍 I will pick it up" says "… 225 mi away, outside your 200 mi radius" and can still be chosen.
+78. Shipping not available: the seeded maximum distances cover every country (USA freight / vehicles 4,000 road mi, India 4,000 km,
+    Nigeria 1,800 km, Ireland 700 km), so to see it an admin sets a short range: `PUT /shipping/rates/US/Freight`
+    `{ "baseFee": 250, "ratePerUnit": 0.35, "minFee": 250, "maxFee": 1500, "maxDistance": 500 }`. As S list a **Freight**-size part in
+    Long Beach with pickup off → as B (Houston) the card says "🚚 Shipping not available to your location"; Buy now / Place bid explain
+    why and don't continue (pickup isn't offered). With pickup on they warn and offer "Buy anyway" / "Bid anyway". Put the rate back
+    afterwards (maxDistance 4000, or delete the row and restart AuctionService to re-seed the estimate).
+79. Seller profile (tap the seller on the Long Beach card) → only the listings this buyer can get; your own profile shows all of yours.
+80. Part request: as B (Houston) request "Alternator – Chevrolet Silverado 2016"; as a seller anywhere in the USA list a matching part
+    **with shipping** → B is told; a matching **pickup-only** part 1,000 mi away doesn't match.
+
+### Radius: default 200, chosen per location (USA: miles)
+
+One setting: `Contracts/RegionRules.cs` (backend: default 200, 5–1,000) and `src/utils/geo.ts` (app: `DEFAULT_RADIUS`,
+`RADIUS_CHOICES`). The radius is in the location's unit – miles in the USA, km elsewhere – and is what the pickup rule above
+uses. Restart the backend once: IdentityService runs migration `LocationRadius200` (saved locations with the old default –
+60 km, or 60 mi in the USA – get 200; any other value, e.g. 50 km, is kept because it may have been chosen). No app rebuild
+needed (Metro reload).
+
+Accounts: B = the e2e buyer (`bmwapi/.run/e2e.env`) or a new buyer; S = the seeded test seller. Location: Houston
+(`adb emu geo fix -95.3698 29.7604`).
+
+81. Log in as a new buyer (or after clearing the app) → Home: "📍 Houston, …, USA · **200 mi** ▾". Same for a seller.
+82. Tap the location line → **Location and radius** sheet: quick choices **25 / 50 / 100 / 200 / 500 mi** (200 selected) and
+    "Or type a radius" (5–1,000; 1,200 or 3 → "Enter a radius from 5 to 1,000 mi."). Tap **25 mi** → **APPLY RADIUS** → the
+    line shows "· 25 mi ▾" and, without leaving Home, the list and counts update: the Round Rock radiator (pickup only, ~147 mi)
+    is gone, the Long Beach alternator (ships) stays. Back to **200 mi** → Round Rock comes back.
+83. The same sheet: **Use my current location**, your saved addresses, **Manage locations / add an address →**.
+84. My locations → **Use my current location** → the same radius sheet (the radius in use, 200 for a new user) →
+    **USE MY CURRENT LOCATION**. The GPS card shows "Parts within 200 mi".
+85. **+ Add new address** (or Edit) → **SEARCH RADIUS** with the same choices, 200 pre-selected; units follow the address's
+    country (a Hyderabad address shows km). Save → the address card shows "Parts within … km / mi"; Edit → the radius is kept.
+86. API: `PUT http://localhost:5001/api/me/locations/{id}/radius` `{ "radiusValue": 2000 }` → 400 `INVALID_RADIUS`
+    "Choose a radius between 5 and 1,000 miles."
+87. India check: location Hyderabad → "· 200 km ▾"; 50 km → the Warangal radiator (pickup only) disappears, the Bengaluru alternator (ships) stays.
 

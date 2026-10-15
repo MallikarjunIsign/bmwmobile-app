@@ -56,18 +56,13 @@ public class RoleBackfillOptions
     public int RetrySeconds { get; set; } = 10;
 }
 
+/// <summary>Saved locations. The radius rules (default 200, 5–1,000 km / mi) are Contracts.RegionRules – one setting for all services.</summary>
 public class LocationOptions
 {
-    public int MinRadiusKm { get; set; } = 5;
-    public int MaxRadiusKm { get; set; } = 200;
-    public int DefaultRadiusKm { get; set; } = 50;
     public int MaxLocationsPerUser { get; set; } = 10;
 
     /// <summary>GPS moves smaller than this don't change the primary location (avoids constant updates).</summary>
     public double MoveThresholdKm { get; set; } = 1;
-
-    /// <summary>Missing radius → default; anything outside Min..Max is pulled back into range.</summary>
-    public int ClampRadius(int? radiusKm) => Math.Clamp(radiusKm ?? DefaultRadiusKm, MinRadiusKm, MaxRadiusKm);
 }
 
 public class SocialAuthOptions

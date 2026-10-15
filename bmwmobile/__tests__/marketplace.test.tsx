@@ -114,7 +114,7 @@ test('market: pills and counts come from the same search; results show fitment, 
   expect(t).toContain('Brakes (24)');
   expect(t).toContain('Lighting (12)');
   expect(t).toContain('Toyota Hilux (2)');
-  expect(t).toContain('1 part found within 60 km');
+  expect(t).toContain('1 part found · pickup within 60 km, shipping India-wide');
   expect(t).toContain('Fits Toyota Hilux 2016–2020');
   expect(t).toContain('✓ Fits your 2016 Toyota Hilux');
   expect(t).toContain('₹14,000');
@@ -146,7 +146,8 @@ test('THE SEARCH BUG: picking a suggestion ADDS its chips and every active filte
   await typeAndPick(tree, '2016 hilux front bum', 'Front bumper – 2016 Toyota Hilux');
 
   // Suggestions were asked for parts only.
-  expect(suggest).toHaveBeenCalledWith('2016 hilux front bum', 'IN', 'Part');
+  // …and only from listings this buyer can see (their location and radius).
+  expect(suggest).toHaveBeenCalledWith('2016 hilux front bum', 'IN', 'Part', near);
   // One request with the text's chips AND all filters (Parts, Direct sale, category, radius).
   expect(lastQuery()).toEqual(expect.objectContaining({
     itemType: 'Part', saleType: 'FixedPrice', category: 'Body – Exterior',
@@ -184,7 +185,7 @@ test('market: Vehicles → vehicle results, make pills with counts, vehicle-only
 
   expect(lastQuery()).toEqual(expect.objectContaining({ itemType: 'Vehicle', category: undefined }));
   let t = texts(tree);
-  expect(t).toContain('128 vehicles found within 60 km');
+  expect(t).toContain('128 vehicles found · pickup within 60 km, shipping India-wide');
   expect(t).toContain('Toyota (12)');
   expect(t).toContain('Honda (8)');
 
@@ -197,7 +198,7 @@ test('market: Vehicles → vehicle results, make pills with counts, vehicle-only
   await ReactTestRenderer.act(async () => input.props.onFocus());
   await ReactTestRenderer.act(async () => input.props.onChangeText('hilux'));
   await ReactTestRenderer.act(async () => new Promise(resolve => setTimeout(resolve, 300)));
-  expect(suggest).toHaveBeenCalledWith('hilux', 'IN', 'Vehicle');
+  expect(suggest).toHaveBeenCalledWith('hilux', 'IN', 'Vehicle', near);
 });
 
 test('market: no matches → "no parts available" message and a pre-filled custom order', async () => {

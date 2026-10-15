@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, Alert, Linking, Modal, TextInput } from 'react-native';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
 import { Badge } from './Badge';
@@ -9,6 +9,8 @@ import { ShippingAddressSheet, addressText } from './ShippingAddressSheet';
 import type { Address, DeliveryOption, Order, OrderStatus } from '../types/listing';
 import { formatWhen } from '../utils/time';
 import { orderShippingText } from '../utils/delivery';
+import { formatDistance, formatRadius, haversineKm } from '../utils/geo';
+import { useLocations } from '../location/LocationContext';
 
 export const methodLabel = (method?: string | null) =>
   method === 'Pickup' ? 'Pickup' : method === 'Shipping' ? 'Shipping' : 'Not chosen yet';
@@ -47,6 +49,27 @@ export const OrderTrackingCard: React.FC<Props> = ({ order, money, onChange, onO
   const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [method, setMethod] = useState<DeliveryOption | null>(order.deliveryMethod ?? null);
+  const { location, country } = useLocations();
+  const choosing = order.deliveryChoices.length > 1;
+  // How far the item is from the buyer's location: outside their radius, Shipping is pre-selected (Pickup stays
+  // possible – the buyer may want to travel).
+  const [awayKm, setAwayKm] = useState<number | null>(null);
+  useEffect(() => {
+    if (!choosing || !location) return;
+    let alive = true;
+    MarketApi.listingDetail(order.auctionId)
+      .then(l => {
+        if (!alive || l.latitude == null || l.longitude == null) return;
+        const km = haversineKm(location.latitude, location.longitude, l.latitude, l.longitude);
+        setAwayKm(km);
+        if (km > location.radiusKm && order.deliveryChoices.includes('Shipping')) setMethod(m => m ?? 'Shipping');
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [choosing, order.auctionId, location?.latitude, location?.longitude, location?.radiusKm]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pickupFar = awayKm != null && location != null && awayKm > location.radiusKm;
   const [addressSheet, setAddressSheet] = useState(false);
   const [dispatch, setDispatch] = useState<{ status: OrderStatus; label: string } | null>(null);
   const [courier, setCourier] = useState('');
@@ -218,7 +241,9 @@ export const OrderTrackingCard: React.FC<Props> = ({ order, money, onChange, onO
               <Text style={styles.optionTitle}>{c === 'Pickup' ? '📍 I will pick it up · free' : '🚚 Ship it to me'}</Text>
               <Text style={styles.metaSmall}>
                 {c === 'Pickup'
-                  ? `In ${order.locationName ?? 'the seller’s area'} – the exact address is shown once you choose`
+                  ? pickupFar
+                    ? `In ${order.locationName ?? 'the seller’s area'} – ${formatDistance(awayKm!, country)} away, outside your ${formatRadius(location!.radiusKm, country)} radius`
+                    : `In ${order.locationName ?? 'the seller’s area'} – the exact address is shown once you choose`
                   : 'Choose your delivery location next – you see the exact shipping charge before confirming'}
               </Text>
             </TouchableOpacity>

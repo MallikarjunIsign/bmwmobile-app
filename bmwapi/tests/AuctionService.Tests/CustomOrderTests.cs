@@ -69,6 +69,34 @@ public class CustomOrderMatcherTests
     public void OutsideTheBuyersRadius_DoesNotMatch() =>
         Assert.False(CustomOrderMatcher.Matches(Order(), Listing(x => { x.Item.Latitude = 17.9689; x.Item.Longitude = 79.5941; }), out _));
 
+    // Same visibility rule as the search: a listing that ships is seen anywhere in the buyer's country.
+    [Fact]
+    public void FarListingThatShips_InTheBuyersCountry_Matches()
+    {
+        var order = Order(x => x.CountryCode = "IN");
+        var bengaluru = Listing(x =>
+        {
+            x.Item.Latitude = 12.9698; x.Item.Longitude = 77.75; x.Item.CountryCode = "IN";
+            x.Item.DeliveryOptions = DeliveryOptions.Shipping;
+        });
+        Assert.True(CustomOrderMatcher.Matches(order, bengaluru, out var km));
+        Assert.InRange(km!.Value, 450, 550);
+    }
+
+    [Fact]
+    public void FarPickupOnlyListing_DoesNotMatch() =>
+        Assert.False(CustomOrderMatcher.Matches(Order(x => x.CountryCode = "IN"),
+            Listing(x => { x.Item.Latitude = 12.9698; x.Item.Longitude = 77.75; x.Item.CountryCode = "IN"; x.Item.DeliveryOptions = DeliveryOptions.Pickup; }), out _));
+
+    [Fact]
+    public void ListingThatShips_FromAnotherCountry_DoesNotMatch() =>
+        Assert.False(CustomOrderMatcher.Matches(Order(x => x.CountryCode = "IN"),
+            Listing(x =>
+            {
+                x.Item.Latitude = 29.76; x.Item.Longitude = -95.37; x.Item.CountryCode = "US";
+                x.Item.DeliveryOptions = DeliveryOptions.Pickup | DeliveryOptions.Shipping;
+            }), out _));
+
     [Fact]
     public void ListingWithoutLocation_DoesNotMatchABuyerWithLocation() =>
         Assert.False(CustomOrderMatcher.Matches(Order(), Listing(x => { x.Item.Latitude = null; x.Item.Longitude = null; }), out _));

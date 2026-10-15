@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CompositeScreenProps } from '@react-navigation/native';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
@@ -21,6 +21,8 @@ import { categoryChip, useBrowse } from '../search/BrowseContext';
 import { BrowseSearchBox } from '../search/BrowseSearchBox';
 import { REGIONS, formatRadius, locationText } from '../utils/geo';
 import { useChat } from '../chat/ChatContext';
+import { RadiusSheet } from '../components/RadiusSheet';
+import { errorMessage } from '../services/authApi';
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<MainTabParamList, 'Home'>,
@@ -31,7 +33,7 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
   const { user } = useAuth();
   const { unread } = useChat();
   // Listings within 60 km / 60 mi of the location (GPS or a chosen address), or country-wide while location is off.
-  const { country, location, locationOff, near } = useLocations();
+  const { country, location, locationOff, near, addresses, usingCurrentLocation, setRadius, chooseAddress, switchToCurrentLocation } = useLocations();
   // Parts / Vehicles and All / Auction / Direct sale: shared with Market, so they apply to every search too.
   const browse = useBrowse();
   const { itemType, saleType } = browse;
@@ -50,6 +52,21 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
   const seeAll = () => navigation.navigate('Marketplace');
 
   const where = near && location ? 'near you' : `in ${REGIONS[country].name}`;
+
+  // The location line's sheet: the radius (applied at once – lists and counts update), or another location.
+  const [locationSheet, setLocationSheet] = useState(false);
+  const [switching, setSwitching] = useState<string | null>(null);
+  const switchTo = async (key: string, action: () => Promise<void>) => {
+    setSwitching(key);
+    try {
+      await action();
+      setLocationSheet(false);
+    } catch (e) {
+      Alert.alert('Location not changed', errorMessage(e, 'Please try again.'));
+    } finally {
+      setSwitching(null);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -75,14 +92,17 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
             <RoleBadge role={user?.role} />
             <TouchableOpacity
               style={styles.locationTouch}
-              onPress={() => navigation.navigate('Locations')}
+              onPress={() => (location ? setLocationSheet(true) : navigation.navigate('Locations'))}
               hitSlop={8}
               activeOpacity={0.7}
               accessibilityRole="button"
-              accessibilityLabel="Change location"
+              accessibilityLabel="Change location or radius"
+              testID="home-location"
             >
-              <Text style={styles.locationLine} numberOfLines={1} ellipsizeMode="tail">
+              {/* "📍 Houston, USA · 200 mi ▾" – the radius is what pickup-only listings must be inside. */}
+              <Text style={styles.locationLine} numberOfLines={1} ellipsizeMode="middle">
                 📍 {locationText(location) ?? (locationOff ? 'Location off – set your location' : 'Finding your location…')}
+                {location ? <Text style={styles.linkBold}> · {formatRadius(location.radiusKm, location.countryCode ?? country)} ▾</Text> : null}
               </Text>
             </TouchableOpacity>
           </View>
@@ -164,7 +184,7 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
             {/* All available vehicles: the total and make chips with counts. */}
             <Text style={styles.vehicleTotal}>
               {loading && !total ? 'Finding vehicles…' : `${total} ${total === 1 ? 'vehicle' : 'vehicles'} ${where}`}
-              {near && location ? <Text style={styles.vehicleWithin}> · within {formatRadius(location.radiusKm, country)}</Text> : null}
+              {near && location ? <Text style={styles.vehicleWithin}> · pickup within {formatRadius(location.radiusKm, country)}, shipping {REGIONS[country].name}-wide</Text> : null}
             </Text>
             {makeFacets.length > 0 ? (
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll} keyboardShouldPersistTaps="handled">
@@ -226,6 +246,41 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
           </View>
         )}
       </ScrollView>
+
+      {location ? (
+        <RadiusSheet
+          visible={locationSheet}
+          title="Location and radius"
+          subtitle={locationText(location)}
+          initial={location.radiusValue}
+          country={location.countryCode ?? country}
+          confirmLabel="APPLY RADIUS"
+          onConfirm={async value => {
+            await setRadius(value);
+            setLocationSheet(false);
+          }}
+          onClose={() => setLocationSheet(false)}
+        >
+          <Text style={[styles.sectionHeader, styles.sheetHeader]}>CHANGE LOCATION</Text>
+          {!usingCurrentLocation ? (
+            <TouchableOpacity style={styles.sheetRow} disabled={switching !== null}
+              onPress={() => switchTo('gps', () => switchToCurrentLocation())}>
+              <Text style={styles.sheetRowText}>🎯 Use my current location</Text>
+              {switching === 'gps' ? <ActivityIndicator color={COLORS.primaryGlow} /> : null}
+            </TouchableOpacity>
+          ) : null}
+          {(addresses ?? []).filter(a => !a.isPrimary).map(a => (
+            <TouchableOpacity key={a.id} style={styles.sheetRow} disabled={switching !== null}
+              onPress={() => switchTo(a.id, () => chooseAddress(a.id))}>
+              <Text style={styles.sheetRowText} numberOfLines={1}>📍 {[a.label, a.area || a.placeName].filter(Boolean).join(' · ')}</Text>
+              {switching === a.id ? <ActivityIndicator color={COLORS.primaryGlow} /> : null}
+            </TouchableOpacity>
+          ))}
+          <TouchableOpacity style={styles.sheetRow} onPress={() => { setLocationSheet(false); navigation.navigate('Locations'); }}>
+            <Text style={[styles.sheetRowText, styles.linkBold]}>Manage locations / add an address →</Text>
+          </TouchableOpacity>
+        </RadiusSheet>
+      ) : null}
     </SafeAreaView>
   );
 };
@@ -388,6 +443,23 @@ const styles = StyleSheet.create({
     color: COLORS.primaryGlow,
     fontWeight: '700',
     fontSize: 13,
+  },
+  sheetHeader: {
+    marginTop: SPACING.lg,
+  },
+  sheetRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: SPACING.sm + 2,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  sheetRowText: {
+    color: COLORS.text,
+    fontSize: 14,
+    fontWeight: '600',
+    flexShrink: 1,
   },
   sectionHeader: {
     color: COLORS.textMuted,

@@ -90,8 +90,16 @@ public class Item
 
     // ── Computed for filtering / ranking (see Prepare) ──
     /// <summary>Bumped when computed fields are added: older documents are re-fetched at startup (DbInitializer).</summary>
-    public const int CurrentIndexVersion = 2;
+    public const int CurrentIndexVersion = 3;
     public int IndexVersion { get; set; }
+
+    /// <summary>
+    /// Who sees the listing (Contracts.ListingVisibility): pickup-only listings inside the buyer's radius, listings that
+    /// ship anywhere in their country. Country = CountryCode, or from the coordinates on older listings.
+    /// </summary>
+    public string? Country { get; set; }
+    public bool OffersPickup { get; set; }
+    public bool OffersShipping { get; set; }
 
     /// <summary>Meilisearch geo point: exact "within X km" filtering (_geoRadius) so facet counts match the radius.</summary>
     [JsonPropertyName("_geo")]
@@ -150,6 +158,10 @@ public class Item
             _ => ItemType == "Part" ? "Part" : "Vehicle",
         };
         Geo = Latitude is { } lat && Longitude is { } lon ? new GeoPoint(lat, lon) : null;
+        Country = ListingVisibility.CountryOf(CountryCode, Latitude, Longitude);
+        OffersShipping = DeliveryOptions.Contains("Shipping");
+        // Older listings without delivery options are picked up.
+        OffersPickup = DeliveryOptions.Contains("Pickup") || !OffersShipping;
         IndexVersion = CurrentIndexVersion;
 
         var numbers = PartNumbers.Count > 0 ? PartNumbers : string.IsNullOrWhiteSpace(PartNumber) ? [] : [PartNumber];
@@ -179,6 +191,11 @@ public record GeoPoint(double Lat, double Lng);
 public class SearchResultItem : Item
 {
     public double? DistanceKm { get; set; }
+    /// <summary>
+    /// Inside the buyer's radius (only when lat/lon were given): pickup is offered to them ("📍 Pickup · 12 km away").
+    /// False for a listing shown because it ships ("🚚 Ships to you · 640 km away").
+    /// </summary>
+    public bool? WithinRadius { get; set; }
     /// <summary>"Fits your 2016 Toyota Hilux", "Universal", "Fits by size" or "Check fitment".</summary>
     public string? Badge { get; set; }
     /// <summary>0 part number · 1 exact vehicle + part type · 2 make + model · 3 universal / size · 4 keyword only.</summary>

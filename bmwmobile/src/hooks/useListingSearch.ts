@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { MarketApi } from '../services/marketApi';
-import { mapRawDtoToAuction } from '../services/api';
+import { mapRawDtoToAuction, type NearFilter } from '../services/api';
 import { useLocations } from '../location/LocationContext';
 import { useGarage } from '../location/GarageContext';
 import type { Auction } from '../types/models';
@@ -65,8 +65,25 @@ export function buildQuery(input: SearchInput, garageVehicle: GarageVehicle | nu
 }
 
 /**
- * Live listings for the search (within 60 km / 60 mi, or country-wide while location is off), with the total and
- * the facet counts from the same query. applyGarage = false: ignore the My Garage choice (Home's overview).
+ * Adds the shipping estimate to the buyer's location (one call for the page) to the listings that ship – the cards'
+ * "🚚 Ships to you ~$12". Listings stay as they are when it can't be loaded.
+ */
+export async function withShippingEstimates(list: Auction[], near: NearFilter | undefined, country?: string | null): Promise<Auction[]> {
+  const ids = list.filter(a => a.deliveryOptions?.includes('Shipping')).map(a => a.id);
+  if (!near || ids.length === 0) return list;
+  try {
+    const estimates = await MarketApi.shippingEstimates(ids, near.latitude, near.longitude, country);
+    const byId = new Map(estimates.map(e => [e.listingId, e.shipping ?? null]));
+    return list.map(a => (byId.has(a.id) ? { ...a, shippingQuote: byId.get(a.id) } : a));
+  } catch {
+    return list;
+  }
+}
+
+/**
+ * Live listings the buyer can get, with the total and the facet counts from the same query: pickup-only listings
+ * inside the location's radius, listings that ship anywhere in the country (the Search service applies the rule);
+ * country-wide while location is off. applyGarage = false: ignore the My Garage choice (Home's overview).
  */
 export function useListingSearch(input: SearchInput, enabled = true, applyGarage = true) {
   const { near, country } = useLocations();
@@ -88,9 +105,12 @@ export function useListingSearch(input: SearchInput, enabled = true, applyGarage
     MarketApi.search(query, near, country)
       .then(r => {
         if (!alive) return;
-        setResults(r.results.map(hit => ({ ...mapRawDtoToAuction(hit), currentHighBid: hit.currentPrice, bidCount: hit.bidCount })));
+        const list = r.results.map(hit => ({ ...mapRawDtoToAuction(hit), currentHighBid: hit.currentPrice, bidCount: hit.bidCount }));
+        setResults(list);
         setFacets(r.facets ?? {});
         setTotal(r.totalCount);
+        // Then the shipping charges on the cards.
+        withShippingEstimates(list, near, country).then(withQuotes => alive && withQuotes !== list && setResults(withQuotes));
       })
       .catch(e => alive && setError(e?.message ?? "Couldn't search right now"))
       .finally(() => alive && setLoading(false));

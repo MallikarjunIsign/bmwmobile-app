@@ -358,6 +358,8 @@ export interface SearchHit {
   thumbnailUrl?: string | null;
   locationName?: string | null;
   distanceKm?: number | null;
+  /** Inside the buyer's radius (pickup is offered to them); false = shown because it ships. Only with a location. */
+  withinRadius?: boolean | null;
   badge?: string | null;
   matchTier: number;
   currency?: string | null;

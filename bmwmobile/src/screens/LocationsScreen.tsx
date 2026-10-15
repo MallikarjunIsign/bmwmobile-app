@@ -10,7 +10,8 @@ import { Notice } from '../components/Notice';
 import { useLocations } from '../location/LocationContext';
 import { errorMessage } from '../services/authApi';
 import type { SavedLocation } from '../types/location';
-import { countryName, formatRadius, locationText } from '../utils/geo';
+import { countryName, DEFAULT_RADIUS, formatRadius, locationText, savedRadius } from '../utils/geo';
+import { RadiusSheet } from '../components/RadiusSheet';
 import { GpsError } from '../utils/gps';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Locations'>;
@@ -26,8 +27,11 @@ export const addressLines = (a: SavedLocation) =>
  * a saved address. The chosen one is where the app looks for parts (60 km / 60 mi) and the default item location.
  */
 export const LocationsScreen: React.FC<Props> = ({ navigation }) => {
-  const { location, usingCurrentLocation, addresses, switchToCurrentLocation, chooseAddress, removeAddress } = useLocations();
+  const { location, country, usingCurrentLocation, addresses, switchToCurrentLocation, chooseAddress, removeAddress } = useLocations();
   const [busy, setBusy] = useState<string | null>(null);
+  // "Use my current location": choose the radius first (200 pre-selected, or the one in use).
+  const [gpsSheet, setGpsSheet] = useState(false);
+  const gpsRadius = usingCurrentLocation && location ? location.radiusValue : DEFAULT_RADIUS;
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -62,7 +66,7 @@ export const LocationsScreen: React.FC<Props> = ({ navigation }) => {
         {/* GPS */}
         <TouchableOpacity
           style={[styles.card, usingCurrentLocation && styles.cardActive]}
-          onPress={() => run('gps', switchToCurrentLocation, () => navigation.goBack())}
+          onPress={() => setGpsSheet(true)}
           disabled={busy !== null}
           accessibilityRole="button"
           accessibilityState={{ selected: usingCurrentLocation }}
@@ -75,6 +79,7 @@ export const LocationsScreen: React.FC<Props> = ({ navigation }) => {
                 {usingCurrentLocation ? <Badge label="IN USE" variant="success" size="sm" /> : null}
               </View>
               <Text style={styles.lines}>{current ?? 'Follows your phone (GPS) as you move'}</Text>
+              {usingCurrentLocation && location ? <Text style={styles.small}>Parts within {formatRadius(location.radiusKm, location.countryCode ?? country)}</Text> : null}
             </View>
             {busy === 'gps' ? <ActivityIndicator color={COLORS.primaryGlow} /> : null}
           </View>
@@ -105,7 +110,7 @@ export const LocationsScreen: React.FC<Props> = ({ navigation }) => {
                 </View>
                 <Text style={styles.lines}>{addressLines(a)}</Text>
                 {a.landmark ? <Text style={styles.small}>Near {a.landmark}</Text> : null}
-                <Text style={styles.small}>Parts within {formatRadius(location?.addressId === a.id ? location.radiusKm : a.radiusKm, a.countryCode)}</Text>
+                <Text style={styles.small}>Parts within {formatRadius(location?.addressId === a.id ? location.radiusKm : savedRadius(a).radiusKm, a.countryCode)}</Text>
               </View>
               {busy === `use-${a.id}` ? <ActivityIndicator color={COLORS.primaryGlow} /> : null}
             </TouchableOpacity>
@@ -132,6 +137,21 @@ export const LocationsScreen: React.FC<Props> = ({ navigation }) => {
           <Text style={styles.addText}>+ ADD NEW ADDRESS</Text>
         </TouchableOpacity>
       </ScrollView>
+
+      <RadiusSheet
+        visible={gpsSheet}
+        title="Use my current location"
+        subtitle="Your phone's position (GPS)"
+        initial={gpsRadius}
+        country={location?.countryCode ?? country}
+        confirmLabel="USE MY CURRENT LOCATION"
+        onConfirm={async value => {
+          await switchToCurrentLocation(value);
+          setGpsSheet(false);
+          navigation.goBack();
+        }}
+        onClose={() => setGpsSheet(false)}
+      />
     </SafeAreaView>
   );
 };

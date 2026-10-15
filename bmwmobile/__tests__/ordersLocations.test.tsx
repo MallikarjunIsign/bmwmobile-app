@@ -34,7 +34,7 @@ const mockLocations = {
 };
 jest.mock('../src/location/LocationContext', () => ({ useLocations: () => mockLocations }));
 jest.mock('../src/services/marketApi', () => ({
-  MarketApi: { orderStep: jest.fn(), chooseDelivery: jest.fn(), shippingAddresses: jest.fn(), addShippingAddress: jest.fn(), shippingEstimate: jest.fn() },
+  MarketApi: { orderStep: jest.fn(), chooseDelivery: jest.fn(), shippingAddresses: jest.fn(), addShippingAddress: jest.fn(), shippingEstimate: jest.fn(), listingDetail: jest.fn() },
 }));
 jest.mock('../src/services/locationApi', () => ({ LocationApi: { searchCities: jest.fn().mockResolvedValue([]) } }));
 
@@ -42,6 +42,7 @@ const orderStep = MarketApi.orderStep as jest.Mock;
 const chooseDelivery = MarketApi.chooseDelivery as jest.Mock;
 const shippingAddresses = MarketApi.shippingAddresses as jest.Mock;
 const shippingEstimate = MarketApi.shippingEstimate as jest.Mock;
+const listingDetail = MarketApi.listingDetail as jest.Mock;
 const quote = (patch: object = {}) => ({
   listingId: 'a1', pickupOffered: true, shippingOffered: true,
   shipping: { available: true, charge: 350, distance: 22, unit: 'km', currency: 'INR', sizeClass: 'Large', reason: null, placeholderRates: true, ...patch },
@@ -89,6 +90,8 @@ beforeEach(() => {
   chooseDelivery.mockReset();
   shippingAddresses.mockReset().mockResolvedValue([]);
   shippingEstimate.mockReset().mockResolvedValue(quote());
+  // The item is in Kukatpally (inside the buyer's 60 km).
+  listingDetail.mockReset().mockResolvedValue({ id: 'a1', latitude: 17.4849, longitude: 78.4138 });
   Object.values(mockLocations).forEach(v => typeof v === 'function' && (v as jest.Mock).mockReset?.());
 });
 
@@ -157,6 +160,25 @@ test('both offered: the buyer chooses Shipping and enters a new address (saved f
   const where = { latitude: 17.4849, longitude: 78.4138 };
   expect(chooseDelivery).toHaveBeenCalledWith('o1', 'Shipping', { address: { ...aliceAddress, ...where }, ...where });
   expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ deliveryMethod: 'Shipping', total: 14600 }));
+});
+
+test('both offered, the item is outside the buyer\'s radius: Shipping is pre-selected, Pickup is still possible', async () => {
+  // Bengaluru, ~500 km from the buyer's 60 km.
+  listingDetail.mockResolvedValue({ id: 'a1', latitude: 12.9698, longitude: 77.75 });
+  chooseDelivery.mockResolvedValue({ ...undecided, deliveryMethod: 'Pickup', deliveryChoices: [] });
+  const tree = await renderCard(undecided);
+
+  const options = tree.root.findAll(n => n.props.accessibilityState && n.props.onPress);
+  const selected = (label: string) => options.find(o => textOf(o).includes(label))!.props.accessibilityState.selected;
+  expect(selected('Ship it to me')).toBe(true);
+  expect(selected('I will pick it up')).toBe(false);
+  expect(texts(tree)).toMatch(/\d+ km away, outside your 60 km radius/);
+  expect(texts(tree)).toContain('Next: shipping address');
+
+  // The buyer may still travel for it.
+  await press(tree, x => x === '📍 I will pick it up · free');
+  await press(tree, x => x === 'Confirm pickup');
+  expect(chooseDelivery).toHaveBeenCalledWith('o1', 'Pickup');
 });
 
 test('both offered: the buyer chooses Pickup and then sees the exact pickup address', async () => {

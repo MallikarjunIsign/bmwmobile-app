@@ -82,7 +82,7 @@ public class PartRequestsController(AuctionDbContext context, IDbContextOutbox<A
             CountryCode = NullIfEmpty(Clean(dto.CountryCode, 2).ToUpperInvariant()),
             Latitude = dto.Latitude,
             Longitude = dto.Longitude,
-            RadiusKm = dto.RadiusKm is > 0 ? Math.Min(dto.RadiusKm.Value, 500) : null,
+            RadiusKm = dto.RadiusKm is > 0 ? Math.Min(dto.RadiusKm.Value, RegionRules.MaxRadiusKm) : null,
             PreferredPort = Clean(dto.PreferredPort, 100),
             Status = CustomOrderStatus.Open,
         };

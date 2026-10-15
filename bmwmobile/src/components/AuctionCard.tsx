@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, Image, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, Image, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { Auction } from '../types/models';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
 import { Badge } from './Badge';
@@ -10,7 +10,7 @@ import { useMoney } from '../location/useMoney';
 import { useLocations } from '../location/LocationContext';
 import { FEATURES } from '../config';
 import { label } from '../utils/time';
-import { deliverySummary } from '../utils/delivery';
+import { buyerDeliveryText, receiveProblem, SHIPPING_NOT_AVAILABLE } from '../utils/delivery';
 import { ratingText } from '../utils/rating';
 
 /** The seller's name, or their username on older listings. */
@@ -41,7 +41,20 @@ export const AuctionCard: React.FC<AuctionCardProps> = ({ auction, onPress, onBi
   const hasBids = auction.currentHighBid > auction.startingPrice;
   const ending = !isFixed && new Date(auction.auctionEnd).getTime() - Date.now() < 6 * 3600 * 1000;
   const left = auction.quantityAvailable ?? 1;
-  const delivery = deliverySummary(auction, money);
+  // What this buyer can do: "📍 Pickup · 12 km away · 🚚 Shipping ~₹350" or "🚚 Ships to you ~₹1,200 · 640 km away".
+  const delivery = buyerDeliveryText(auction, money, country);
+  const knowsRadius = auction.withinRadius != null;
+  const shippingProblem = !isMine && auction.shippingQuote != null && !auction.shippingQuote.available;
+  // Place bid when the item can't be shipped to this buyer: say why first.
+  const bid = () => {
+    const problem = receiveProblem(auction, country);
+    if (!problem) return (onBidPress || onPress)();
+    if (problem.blocking) return Alert.alert(SHIPPING_NOT_AVAILABLE, problem.message);
+    Alert.alert(SHIPPING_NOT_AVAILABLE, problem.message, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Bid anyway', onPress: onBidPress || onPress },
+    ]);
+  };
   const condition = [label(auction.item.condition), auction.usedGrade ? `Grade ${auction.usedGrade}` : null].filter(Boolean).join(' · ');
   const fitment = auction.fitmentSummary ?? (auction.item.make ? `Fits ${auction.item.make} ${auction.item.model}` : undefined);
 
@@ -112,7 +125,10 @@ export const AuctionCard: React.FC<AuctionCardProps> = ({ auction, onPress, onBi
           <Text style={styles.rating} numberOfLines={1}>{ratingText(auction.sellerRating, auction.sellerRatingCount, compact)}</Text>
         </TouchableOpacity>
 
-        {auction.distanceKm !== undefined || auction.locationName ? (
+        {/* Where it is. With a location the distance is in the delivery line below. */}
+        {knowsRadius ? (
+          auction.locationName && !compact ? <Text style={styles.distanceText} numberOfLines={1}>{auction.locationName}</Text> : null
+        ) : auction.distanceKm !== undefined || auction.locationName ? (
           <Text style={styles.distanceText} numberOfLines={1}>
             📍 {auction.distanceKm !== undefined ? <Text style={styles.distanceBold}>{formatDistance(auction.distanceKm, country)} away</Text> : null}
             {auction.distanceKm !== undefined && auction.locationName && !compact ? ' · ' : ''}
@@ -120,8 +136,13 @@ export const AuctionCard: React.FC<AuctionCardProps> = ({ auction, onPress, onBi
           </Text>
         ) : null}
 
-        {/* What the buyer can get: "📍 Pickup in Hyderabad · 🚚 Shipping ₹500" */}
-        {delivery ? <Text style={styles.deliveryText} numberOfLines={1}>{delivery}</Text> : null}
+        {/* What this buyer can do: pickup inside their radius, shipping (with the charge) from further away. */}
+        {delivery ? (
+          <Text style={[styles.deliveryText, knowsRadius && styles.deliveryBold, shippingProblem && styles.deliveryWarn]}
+            numberOfLines={compact ? 2 : 1} testID="card-delivery">
+            {delivery}
+          </Text>
+        ) : null}
 
         {/* Port Logistics Strip (hidden while FEATURES.containers is off) */}
         {FEATURES.containers && auction.pickupPort && (
@@ -137,7 +158,7 @@ export const AuctionCard: React.FC<AuctionCardProps> = ({ auction, onPress, onBi
             </TouchableOpacity>
             {/* The seller can't bid on (or buy) their own listing. Buying happens on the listing page (quantity). */}
             {!isMine ? (
-              <TouchableOpacity style={[styles.bidBtn, isFixed && styles.buyBtn]} onPress={isFixed ? onPress : onBidPress || onPress} activeOpacity={0.8}>
+              <TouchableOpacity style={[styles.bidBtn, isFixed && styles.buyBtn]} onPress={isFixed ? onPress : bid} activeOpacity={0.8}>
                 <Text style={styles.bidBtnText} numberOfLines={1}>
                   {isFixed ? `Buy now – ${money(auction.startingPrice)}` : isWinning ? "You're winning" : 'Place Bid'}
                 </Text>
@@ -295,6 +316,13 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     marginTop: 2,
+  },
+  deliveryBold: {
+    color: COLORS.text,
+    fontWeight: '700',
+  },
+  deliveryWarn: {
+    color: COLORS.warningGlow,
   },
   distanceBold: {
     color: COLORS.primaryGlow,

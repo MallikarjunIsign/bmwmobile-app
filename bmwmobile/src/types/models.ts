@@ -85,6 +85,13 @@ export interface Auction {
   longitude?: number;
   /** Distance from the selected location (only for "parts near" searches). */
   distanceKm?: number;
+  /**
+   * Inside the buyer's radius: pickup is offered to them. False: shown because it ships (pickup is too far).
+   * Undefined without a location.
+   */
+  withinRadius?: boolean;
+  /** The shipping estimate to the buyer's location (search results that ship; loaded after the results). */
+  shippingQuote?: import('./listing').ShippingQuote | null;
   /** Listing model (search results). */
   kind?: 'CommonPart' | 'VehicleSpecificPart' | 'Vehicle';
   fitmentMode?: 'Universal' | 'SizeBased' | 'VehicleSpecific';

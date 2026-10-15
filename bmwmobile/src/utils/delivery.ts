@@ -1,5 +1,5 @@
 import type { DeliveryOption, Order, ShippingQuote } from '../types/listing';
-import { countryName } from './geo';
+import { countryName, formatDistance } from './geo';
 import type { CountryCode } from '../types/location';
 
 interface DeliveryInfo {
@@ -24,6 +24,63 @@ export function deliverySummary(info: DeliveryInfo, _money?: (n: number) => stri
   if (pickup) return `📍 Pickup only${city ? ` · ${city}` : ''}`;
   if (shipping) return '🚚 Shipping only';
   return null;
+}
+
+/** A listing as one buyer sees it: the distance from their location and whether it's inside their radius. */
+export interface BuyerDeliveryInfo extends DeliveryInfo {
+  distanceKm?: number | null;
+  /** Inside the buyer's radius (pickup offered to them); undefined without a location. */
+  withinRadius?: boolean | null;
+  /** The shipping estimate to the buyer (undefined while loading). */
+  shippingQuote?: ShippingQuote | null;
+}
+
+const chargeText = (quote: ShippingQuote | null | undefined, money: (n: number) => string) =>
+  quote?.available && quote.charge != null ? (quote.charge === 0 ? ' free' : ` ~${money(quote.charge)}`) : '';
+
+export const SHIPPING_NOT_AVAILABLE = 'Shipping not available to your location';
+
+/**
+ * What THIS buyer can do, for cards and the listing:
+ *  - inside the radius: "📍 Pickup · 12 km away · 🚚 Shipping ~₹350" (each when offered)
+ *  - outside, it ships: "🚚 Ships to you ~₹1,200 · 640 km away" (no pickup badge – pickup is too far)
+ *  - shipping can't be worked out for this buyer: "🚚 Shipping not available to your location"
+ * Without a location (withinRadius undefined) the listing's own summary (deliverySummary).
+ */
+export function buyerDeliveryText(info: BuyerDeliveryInfo, money: (n: number) => string, country?: CountryCode | null): string | null {
+  if (info.withinRadius == null) return deliverySummary(info);
+  const options = (info.deliveryOptions ?? []) as string[];
+  const pickup = options.includes('Pickup') || !options.includes('Shipping');
+  const shipping = options.includes('Shipping');
+  const away = info.distanceKm != null ? `${formatDistance(info.distanceKm, country)} away` : null;
+  const notAvailable = info.shippingQuote != null && !info.shippingQuote.available;
+
+  if (info.withinRadius) {
+    const parts: string[] = [];
+    if (pickup) parts.push(`📍 Pickup${away ? ` · ${away}` : ''}`);
+    if (shipping) parts.push(notAvailable ? `🚚 ${SHIPPING_NOT_AVAILABLE}` : `🚚 Shipping${chargeText(info.shippingQuote, money)}`);
+    return parts.join(' · ');
+  }
+  if (!shipping) return `📍 Pickup only${away ? ` · ${away}` : ''}`;
+  if (notAvailable) return `🚚 ${SHIPPING_NOT_AVAILABLE}${away ? ` · ${away}` : ''}`;
+  return `🚚 Ships to you${chargeText(info.shippingQuote, money)}${away ? ` · ${away}` : ''}`;
+}
+
+/**
+ * Why this buyer may not be able to receive the item, for Buy now / Place bid – null when it's fine.
+ * blocking = there is no way to get it (it only ships, and not to them); otherwise they can still pick it up.
+ */
+export function receiveProblem(info: BuyerDeliveryInfo, country?: CountryCode | null): { message: string; blocking: boolean } | null {
+  const quote = info.shippingQuote;
+  const options = (info.deliveryOptions ?? []) as string[];
+  if (!options.includes('Shipping') || !quote || quote.available) return null;
+  const reason = quote.reason ? ` (${quote.reason})` : '';
+  if (!options.includes('Pickup'))
+    return { message: `${SHIPPING_NOT_AVAILABLE}${reason}, and the seller doesn't offer pickup – you can't receive this item.`, blocking: true };
+  const away = info.distanceKm != null ? ` It is ${formatDistance(info.distanceKm, country)} away.` : '';
+  return info.withinRadius === false
+    ? { message: `${SHIPPING_NOT_AVAILABLE}${reason}. You would have to pick it up yourself.${away}`, blocking: false }
+    : { message: `${SHIPPING_NOT_AVAILABLE}${reason}. You can pick it up for free.${away}`, blocking: false };
 }
 
 /** "USPS Ground Advantage, zone 2" / "Freight, estimated rate" (US), or null elsewhere. */

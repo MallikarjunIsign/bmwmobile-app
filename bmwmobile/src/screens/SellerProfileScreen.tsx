@@ -14,6 +14,8 @@ import { Stars } from '../components/Stars';
 import { MarketApi } from '../services/marketApi';
 import { ReviewApi } from '../services/reviewApi';
 import { isCurrentUser } from '../auth/session';
+import { useLocations } from '../location/LocationContext';
+import { withShippingEstimates } from '../hooks/useListingSearch';
 import { countryName } from '../utils/geo';
 import { memberSince, NEW_SELLER_BELOW } from '../utils/rating';
 
@@ -35,13 +37,21 @@ export const SellerProfileScreen: React.FC<Props> = ({ route, navigation }) => {
   const [loading, setLoading] = useState(true);
   const [photo, setPhoto] = useState<string | null>(null);
 
+  const { near, country } = useLocations();
+  const own = isCurrentUser(seller);
   const load = useCallback(async () => {
     setLoading(true);
     const [p, r, l] = await Promise.all([
       ReviewApi.publicProfile(seller).catch(() => null),
       ReviewApi.seller(seller).catch(() => null),
-      // No location or country: the seller's listings wherever they are.
-      MarketApi.search({ seller, sort: 'newest', pageSize: 50 }).then(res => res.results.map(MarketApi.hitToAuction)).catch(() => []),
+      // A buyer sees what they could get (pickup-only inside their radius, shipping in their country), with the
+      // shipping charges; your own profile shows all your listings.
+      (own
+        ? MarketApi.search({ seller, sort: 'newest', pageSize: 50 })
+        : MarketApi.search({ seller, sort: 'newest', pageSize: 50 }, near, country))
+        .then(res => res.results.map(MarketApi.hitToAuction))
+        .then(list => (own ? list : withShippingEstimates(list, near, country)))
+        .catch(() => [] as Auction[]),
     ]);
     setProfile(p);
     setRating(r);
@@ -50,7 +60,7 @@ export const SellerProfileScreen: React.FC<Props> = ({ route, navigation }) => {
     setPage(1);
     setListings(l);
     setLoading(false);
-  }, [seller]);
+  }, [seller, own, near, country]);
 
   useEffect(() => {
     load();

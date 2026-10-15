@@ -23,7 +23,9 @@ public class DbInitializer
         "kind", "fitmentMode", "partType", "partTypeId", "category", "brandType", "position", "side",
         "fitKeys", "partNumbersNormalized", "specKeys", "currentPrice", "countryCode", "saleType", "deliveryOptions", "sellerRating",
         // Home / Market: exact radius (_geoRadius), Parts / Vehicles, facet counts, re-index marker.
-        "_geo", "listingType", "makes", "models", "years", "indexVersion"
+        "_geo", "listingType", "makes", "models", "years", "indexVersion",
+        // Who sees a listing: pickup-only inside the radius, shipping within the country (ListingVisibility).
+        "country", "offersPickup", "offersShipping"
     ];
 
     public static readonly string[] SortableAttributes =

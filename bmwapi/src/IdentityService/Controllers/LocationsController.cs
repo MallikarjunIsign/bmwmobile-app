@@ -69,6 +69,11 @@ public class MyLocationsController(LocationService locations) : ControllerBase
     public Task<MyLocationsResponse> Update(Guid id, SaveLocationRequest req, CancellationToken ct) =>
         locations.UpdateAsync(UserId, id, req, ct);
 
+    /// <summary>Only the radius, in the location's unit (5–1,000 mi in the USA, km elsewhere). 400 INVALID_RADIUS otherwise.</summary>
+    [HttpPut("{id:guid}/radius")]
+    public Task<MyLocationsResponse> Radius(Guid id, RadiusRequest req, CancellationToken ct) =>
+        locations.SetRadiusAsync(UserId, id, req.RadiusValue, ct);
+
     /// <summary>Delete a saved place. The primary location can't be deleted.</summary>
     [HttpDelete("{id:guid}")]
     public Task<MyLocationsResponse> Delete(Guid id, CancellationToken ct) => locations.DeleteAsync(UserId, id, ct);

@@ -25,10 +25,14 @@ public class ListingSearchRequest
     public int? MaxPrice { get; set; }
     public double? Lat { get; set; }
     public double? Lon { get; set; }
+    /// <summary>The buyer's radius: pickup-only listings must be inside it (listings that ship are shown country-wide).</summary>
     public double? RadiusKm { get; set; }
-    /// <summary>A smaller radius than the default one (filter sheet "Distance").</summary>
+    /// <summary>Filter sheet "Distance": nothing further than this (pickup or shipping).</summary>
     public double? MaxDistanceKm { get; set; }
-    /// <summary>Country-wide results when the location is unknown (IN, US, NG, IE).</summary>
+    /// <summary>
+    /// The buyer's country (IN, US, NG, IE): listings that ship are shown from anywhere in it, never from another one.
+    /// Without it the country comes from lat/lon. Without lat/lon: the whole country.
+    /// </summary>
     public string? Country { get; set; }
     /// <summary>Part or Vehicle (Home's Parts / Vehicles switch); empty = both.</summary>
     public string? ItemType { get; set; }
@@ -36,7 +40,7 @@ public class ListingSearchRequest
     public string? Seller { get; set; }
     /// <summary>Auction or FixedPrice.</summary>
     public string? SaleType { get; set; }
-    /// <summary>Pickup or Shipping: only listings that offer it.</summary>
+    /// <summary>Pickup: listings offering pickup inside the radius. Shipping: listings that ship, anywhere in the country.</summary>
     public string? Delivery { get; set; }
     /// <summary>"Seller rating 4★ &amp; up": only sellers with at least this average.</summary>
     public double? MinSellerRating { get; set; }
@@ -93,16 +97,22 @@ public static class ListingSearchEndpoints
             Facets = FacetFields.Values.ToList(),
         });
 
-        // Exact distance, ranking tier and badge.
+        // Exact distance (every result, also the ones that ship from far away), inside the radius, ranking tier and badge.
         var results = new List<SearchResultItem>();
         var order = 0;
         var meiliOrder = new Dictionary<string, int>();
+        var radius = Radius(request);
         foreach (var item in hits.Hits)
         {
             meiliOrder[item.Id] = order++;
             var hit = Mapster.TypeAdapter.Adapt<SearchResultItem>(item);
             if (near && item.Latitude is not null && item.Longitude is not null)
-                hit.DistanceKm = Math.Round(GeoMath.HaversineKm(request.Lat!.Value, request.Lon!.Value, item.Latitude.Value, item.Longitude.Value), 1);
+            {
+                var km = GeoMath.HaversineKm(request.Lat!.Value, request.Lon!.Value, item.Latitude.Value, item.Longitude.Value);
+                hit.DistanceKm = Math.Round(km, 1);
+                hit.WithinRadius = km <= radius;
+            }
+            else if (near) hit.WithinRadius = false;
             hit.MatchTier = Tier(item, parsed);
             hit.Badge = Badge(item, parsed);
             results.Add(hit);
@@ -124,6 +134,21 @@ public static class ListingSearchEndpoints
             foreach (var (name, values) in ToFacets(other.FacetDistribution).Where(f => names.Contains(f.Key)))
                 facets[name] = values;
         }
+
+        // Delivery counts are what choosing Pickup / Shipping returns (pickup = inside the radius, shipping = the whole
+        // country), so they can't come from the deliveryOptions facet of the results.
+        var delivery = new List<FacetValue>();
+        foreach (var option in DeliveryChoices)
+        {
+            var count = (PaginatedSearchResult<Item>)await client.Auctions().SearchAsync<Item>(parsed.Keywords, new SearchQuery
+            {
+                Filter = string.Join(" AND ", Filters(request, parsed, Exclude.None, option)),
+                HitsPerPage = 0,
+                Page = 1,
+            });
+            if (count.TotalHits > 0) delivery.Add(new FacetValue(option, count.TotalHits));
+        }
+        facets["delivery"] = delivery.OrderByDescending(f => f.Count).ThenBy(f => f.Value).ToList();
 
         var size = Math.Clamp(request.PageSize ?? 20, 1, 50);
         var page = Math.Max(request.Page ?? 1, 1);
@@ -167,7 +192,7 @@ public static class ListingSearchEndpoints
 
     private static double Radius(ListingSearchRequest request)
     {
-        var radius = Math.Clamp(request.RadiusKm ?? SearchEndpoints.DefaultRadiusKm, 1, SearchEndpoints.MaxRadiusKm);
+        var radius = Math.Clamp(request.RadiusKm ?? RegionRules.DefaultSearchRadius(BuyerCountry(request)).Km, 1, RegionRules.MaxRadiusKm);
         return request.MaxDistanceKm is > 0 ? Math.Min(radius, request.MaxDistanceKm.Value) : radius;
     }
 
@@ -179,16 +204,59 @@ public static class ListingSearchEndpoints
         _ => null,
     };
 
+    private static readonly string[] DeliveryChoices = ["Pickup", "Shipping"];
+
+    /// <summary>The buyer's country: the one sent, else where lat/lon are (null outside the supported countries).</summary>
+    public static string? BuyerCountry(ListingSearchRequest request) =>
+        ListingVisibility.CountryOf(request.Country, request.Lat, request.Lon);
+
+    private static string GeoRadius(ListingSearchRequest request, double km) =>
+        string.Create(CultureInfo.InvariantCulture, $"_geoRadius({request.Lat!.Value}, {request.Lon!.Value}, {Math.Round(km * 1000)})");
+
+    /// <summary>
+    /// Which listings the buyer sees (Contracts.ListingVisibility), as a Meilisearch filter:
+    /// (pickup only AND inside the radius) OR (ships AND in the buyer's country). Never another country.
+    /// <paramref name="delivery"/> Pickup = listings offering pickup inside the radius; Shipping = listings that ship, in
+    /// the country. Without lat/lon: the whole country. Null = no location at all (everything).
+    /// </summary>
+    public static string? VisibilityFilter(ListingSearchRequest request, string? delivery)
+    {
+        var country = BuyerCountry(request);
+        var inCountry = country is null ? null : $"country = {Quote(country)}";
+
+        if (request.Lat is null || request.Lon is null)
+        {
+            var parts = new List<string>();
+            if (inCountry is not null) parts.Add(inCountry);
+            if (delivery == "Pickup") parts.Add("offersPickup = true");
+            else if (delivery == "Shipping") parts.Add("offersShipping = true");
+            return parts.Count == 0 ? null : $"({string.Join(" AND ", parts)})";
+        }
+
+        var radius = GeoRadius(request, Radius(request));
+        // The filter sheet's "Distance" also limits listings that ship.
+        var ships = inCountry is null ? null
+            : request.MaxDistanceKm is > 0 ? $"(offersShipping = true AND {inCountry} AND {GeoRadius(request, request.MaxDistanceKm.Value)})"
+            : $"(offersShipping = true AND {inCountry})";
+        var near = inCountry is null ? radius : $"{inCountry} AND {radius}";
+
+        return delivery switch
+        {
+            "Pickup" => $"(offersPickup = true AND {near})",
+            // Outside the supported countries nothing ships to the buyer.
+            "Shipping" => ships ?? "(offersShipping = true AND country = \"\")",
+            _ => ships is null ? $"({near})" : $"((offersShipping = false AND {near}) OR {ships})",
+        };
+    }
+
     /// <summary>The Meilisearch filter for a search. <paramref name="exclude"/> leaves filters out (for sibling facet counts).</summary>
-    public static List<string> Filters(ListingSearchRequest request, ParsedQuery parsed, Exclude exclude = Exclude.None)
+    public static List<string> Filters(ListingSearchRequest request, ParsedQuery parsed, Exclude exclude = Exclude.None) =>
+        Filters(request, parsed, exclude, request.Delivery);
+
+    private static List<string> Filters(ListingSearchRequest request, ParsedQuery parsed, Exclude exclude, string? delivery)
     {
         var filters = new List<string> { $"status = \"Live\" AND auctionEnd > \"{DateTime.UtcNow:o}\"" };
-        if (request.Lat is not null && request.Lon is not null)
-        {
-            var meters = Math.Round(Radius(request) * 1000);
-            filters.Add(string.Create(CultureInfo.InvariantCulture, $"_geoRadius({request.Lat.Value}, {request.Lon.Value}, {meters})"));
-        }
-        else if (SearchEndpoints.CountryFilter(request.Country) is { } countryFilter) filters.Add(countryFilter);
+        if (VisibilityFilter(request, delivery is "Pickup" or "Shipping" ? delivery : null) is { } visible) filters.Add(visible);
 
         if (ListingType(request.ItemType) is { } listingType) filters.Add($"listingType = {Quote(listingType)}");
         if (!string.IsNullOrEmpty(request.Category) && !exclude.HasFlag(Exclude.Category)) filters.Add($"category = {Quote(request.Category)}");
@@ -196,7 +264,6 @@ public static class ListingSearchEndpoints
         if (!string.IsNullOrEmpty(request.Condition)) filters.Add($"condition = {Quote(request.Condition)}");
         if (!string.IsNullOrEmpty(request.BrandType)) filters.Add($"brandType = {Quote(request.BrandType)}");
         if (!string.IsNullOrEmpty(request.Seller)) filters.Add($"seller = {Quote(request.Seller)}");
-        if (request.Delivery is "Pickup" or "Shipping") filters.Add($"deliveryOptions = {Quote(request.Delivery)}");
         if (request.MinSellerRating is > 0 and <= 5)
             filters.Add($"sellerRating >= {request.MinSellerRating.Value.ToString(CultureInfo.InvariantCulture)}");
         // Older documents have no saleType: they are auctions.
@@ -342,10 +409,16 @@ public static class ListingSearchEndpoints
     /// vehicles ("Toyota Hilux 2016–2020"), part numbers ("52119-0K935"). Recent searches are added by the app.
     /// itemType limits them to the Parts / Vehicles choice: Vehicles → only vehicles; Parts → parts, part numbers and
     /// "Parts for Toyota Hilux 2016–2020" (group "fits").
+    /// What comes from listings (part numbers, the years a vehicle's listings cover) follows the same visibility rule as
+    /// the search: lat / lon / radiusKm / country like /listings.
     /// </summary>
     public static async Task<IResult> Suggest(MeilisearchClient client, SearchDictionaryProvider dictionaries,
-        string? q, string? country, string? itemType = null, int limit = 5)
+        string? q, string? country, string? itemType = null, int limit = 5, double? lat = null, double? lon = null, double? radiusKm = null)
     {
+        if ((lat is not null || lon is not null) && (lat is null || lon is null || !GeoMath.IsValidCoordinate(lat.Value, lon.Value)))
+            return Results.BadRequest(new { message = "lat and lon must both be valid coordinates" });
+        var visible = VisibilityFilter(new ListingSearchRequest { Lat = lat, Lon = lon, RadiusKm = radiusKm, Country = country }, null);
+        var liveVisible = $"status = \"Live\" AND auctionEnd > \"{DateTime.UtcNow:o}\"" + (visible is null ? "" : $" AND {visible}");
         var listingType = ListingType(itemType);
         var text = q?.Trim() ?? "";
         if (text.Length < 2) return Results.Ok(new { suggestions = Array.Empty<Suggestion>() });
@@ -399,7 +472,7 @@ public static class ListingSearchEndpoints
         var vehicleGroup = listingType == "Part" ? "fits" : "vehicles";
         string VehicleLabel(string label) => listingType == "Part" ? $"Parts for {label}" : label;
         if (parsed.Make is not null && parsed.Model is not null)
-            suggestions.Add(new Suggestion(vehicleGroup, VehicleLabel(await VehicleWithYearsAsync(client, parsed, listingType)), vehicleChips));
+            suggestions.Add(new Suggestion(vehicleGroup, VehicleLabel(await VehicleWithYearsAsync(client, parsed, listingType, liveVisible)), vehicleChips));
         if (lastWord.Length >= 2)
         {
             var c = country?.ToUpperInvariant();
@@ -430,7 +503,7 @@ public static class ListingSearchEndpoints
         {
             var hits = await client.Auctions().SearchAsync<Item>(text, new SearchQuery
             {
-                Filter = $"status = \"Live\"",
+                Filter = liveVisible,
                 AttributesToSearchOn = ["partNumbers", "partNumbersNormalized"],
                 Limit = 20,
             });
@@ -454,13 +527,13 @@ public static class ListingSearchEndpoints
         parsed.Chips().Where(c => c.Type is "make" or "model" or "year").ToList();
 
     /// <summary>"Toyota Hilux 2016–2020": the years live listings cover (or the year typed).</summary>
-    private static async Task<string> VehicleWithYearsAsync(MeilisearchClient client, ParsedQuery parsed, string? listingType)
+    private static async Task<string> VehicleWithYearsAsync(MeilisearchClient client, ParsedQuery parsed, string? listingType, string liveVisible)
     {
         if (parsed.YearFrom is not null) return parsed.VehicleLabel()!;
         var key = $"{Item.Key(parsed.Make)}|{Item.Key(parsed.Model)}";
         var hits = await client.Auctions().SearchAsync<FitKeysOnly>("", new SearchQuery
         {
-            Filter = $"fitKeys = {Quote(key)} AND status = \"Live\"" + (listingType is null ? "" : $" AND listingType = {Quote(listingType)}"),
+            Filter = $"fitKeys = {Quote(key)} AND {liveVisible}" + (listingType is null ? "" : $" AND listingType = {Quote(listingType)}"),
             Limit = 50,
             AttributesToRetrieve = ["fitKeys"],
         });

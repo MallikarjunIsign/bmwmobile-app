@@ -113,12 +113,13 @@ export function setDemoOwner(username: string | null) {
 }
 
 // Item location and, for "parts near" searches, the distance from the selected location.
-function locationFields(raw: any): Pick<Auction, 'locationName' | 'latitude' | 'longitude' | 'distanceKm'> {
+function locationFields(raw: any): Pick<Auction, 'locationName' | 'latitude' | 'longitude' | 'distanceKm' | 'withinRadius'> {
   return {
     locationName: raw.locationName ?? raw.LocationName ?? undefined,
     latitude: typeof raw.latitude === 'number' ? raw.latitude : undefined,
     longitude: typeof raw.longitude === 'number' ? raw.longitude : undefined,
     distanceKm: typeof raw.distanceKm === 'number' ? raw.distanceKm : undefined,
+    withinRadius: typeof raw.withinRadius === 'boolean' ? raw.withinRadius : undefined,
   };
 }
 

@@ -8,7 +8,10 @@
 # 5. app unit tests (jest)
 # 6. Metro with a reset cache, the emulator, then the UI test on the emulator (Maestro) as buyer and seller:
 #    cleared app data → log in → type "bumper" → tap the suggestion → only bumpers; category suggestion; category tile;
-#    Market shows the same; counts match the API
+#    Market shows the same; counts match the API.
+#    Then the radius test as the buyer in Houston (USA): location shows 200 mi → the far shipping-only listing is shown
+#    with "Ships to you" → radius 25 mi on Home → the far pickup-only listing disappears, the shipping one stays
+#    (counts match the API at 200 and 25 mi) → back to 200 mi
 # Ends with PASSED or FAILED per step. Logs: bmwmobile/.e2e-results/
 set -uo pipefail
 
@@ -97,6 +100,6 @@ fi
 echo "  emulator ready"
 # The UI test clears the app's data itself when it starts the app; this is only a head start.
 timeout 60 adb shell pm clear com.bidmywork.app > /dev/null 2>&1 && echo "  app data cleared"
-bash "$APP_DIR/e2e/run-search-e2e.sh"; record "UI test on the emulator (buyer + seller)" $?
+bash "$APP_DIR/e2e/run-search-e2e.sh"; record "UI tests on the emulator (search: buyer + seller; radius: buyer in Houston)" $?
 
 finish

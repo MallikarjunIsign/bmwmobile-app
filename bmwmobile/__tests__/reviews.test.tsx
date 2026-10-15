@@ -181,7 +181,8 @@ test('seller profile: who, average and count, 5★…1★ breakdown, quick-ratin
   expect(t).toContain('40');
   expect(t).toContain('Exactly as shown.');
   expect(t).toContain('Show more reviews');
-  expect(market.search).toHaveBeenCalledWith({ seller: 'bob', sort: 'newest', pageSize: 50 });
+  // A buyer sees the seller's listings they could get (here no location: the buyer's country).
+  expect(market.search).toHaveBeenCalledWith({ seller: 'bob', sort: 'newest', pageSize: 50 }, undefined, 'IN');
 });
 
 test('order card: the buyer is asked to rate right after completing; then "Rate your purchase" opens the review', async () => {

@@ -48,7 +48,7 @@ test('home: ShopCarParts header with the user and their location (tap to change)
   expect(t).toContain('Test User');
   // The location (city, country) is shown under the name; tapping it opens My locations.
   expect(t).toContain('Dublin, Ireland');
-  const line = tree!.root.find(n => n.props.accessibilityLabel === 'Change location' && n.props.onPress);
+  const line = tree!.root.find(n => n.props.accessibilityLabel === 'Change location or radius' && n.props.onPress);
   expect(line).toBeTruthy();
   expect(t).not.toContain('SHOWING PARTS NEAR');
   // Container / port logistics are hidden (FEATURES.containers = false).

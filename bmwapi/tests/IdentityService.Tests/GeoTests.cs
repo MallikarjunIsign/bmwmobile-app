@@ -132,13 +132,32 @@ public class CityCatalogTests
     }
 }
 
-public class LocationOptionsTests
+/// <summary>The radius setting (Contracts.RegionRules): default 200, 5–1,000 in the country's unit.</summary>
+public class RadiusRulesTests
 {
     [Theory]
-    [InlineData(null, 50)]
-    [InlineData(25, 25)]
-    [InlineData(1, 5)]
-    [InlineData(999, 200)]
-    public void Radius_DefaultsAndClamps(int? input, int expected) =>
-        Assert.Equal(expected, new LocationOptions().ClampRadius(input));
+    [InlineData("US", 200, "mi", 321.87)]
+    [InlineData("IN", 200, "km", 200)]
+    [InlineData("NG", 200, "km", 200)]
+    [InlineData("IE", 200, "km", 200)]
+    public void Default_Is200InTheCountrysUnit(string country, int value, string unit, double km)
+    {
+        var r = RegionRules.DefaultSearchRadius(country);
+        Assert.Equal((value, unit, km), (r.Value, r.Unit, r.Km));
+    }
+
+    [Theory]
+    [InlineData(4, false)]
+    [InlineData(5, true)]
+    [InlineData(1000, true)]
+    [InlineData(1001, false)]
+    public void Limits(int value, bool valid) => Assert.Equal(valid, RegionRules.IsValidRadius(value));
+
+    [Fact]
+    public void Km_BackToTheValue_Exactly()
+    {
+        // Stored as whole km: every mile value from 5 to 1,000 comes back unchanged.
+        for (var mi = RegionRules.MinRadiusValue; mi <= RegionRules.MaxRadiusValue; mi++)
+            Assert.Equal(mi, RegionRules.RadiusValue(Math.Round(RegionRules.Radius(mi, "US").Km), "US"));
+    }
 }

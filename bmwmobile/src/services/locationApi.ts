@@ -31,7 +31,11 @@ export const LocationApi = {
   /** Use this address from now on (GPS no longer changes the location). */
   setPrimary: async (id: string) => identityJson<MyLocations>('post', `/api/me/locations/${id}/primary`, undefined, await token()),
 
-  /** "Use my current location": the GPS position becomes the location again and follows the phone. */
-  setCurrent: async (latitude: number, longitude: number, radiusKm: number) =>
-    identityJson<MyLocations>('put', '/api/me/locations/current', { latitude, longitude, radiusKm, explicit: true }, await token()),
+  /** "Use my current location": the GPS position becomes the location again and follows the phone, with this radius. */
+  setCurrent: async (latitude: number, longitude: number, radiusValue: number) =>
+    identityJson<MyLocations>('put', '/api/me/locations/current', { latitude, longitude, radiusValue, explicit: true }, await token()),
+
+  /** Only the radius of a saved location or the GPS row, in its unit (5–1,000). */
+  setRadius: async (id: string, radiusValue: number) =>
+    identityJson<MyLocations>('put', `/api/me/locations/${id}/radius`, { radiusValue }, await token()),
 };

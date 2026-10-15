@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Keyboa
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
 import { MarketApi } from '../services/marketApi';
+import type { NearFilter } from '../services/api';
 import type { ItemTypeFilter, QueryChip, Suggestion } from '../types/listing';
 
 const RECENT_KEY = '@bidmyparts/recent-searches';
@@ -49,6 +50,8 @@ interface SearchBoxProps {
   /** ✕: clear the text and the chips. */
   onClear: () => void;
   country?: string;
+  /** The buyer's location and radius: suggestions from listings follow the same visibility rule as the results. */
+  near?: NearFilter;
   /** Suggestions only for Parts or only for Vehicles (Home's first filter). */
   itemType?: ItemTypeFilter;
   placeholder?: string;
@@ -61,7 +64,7 @@ interface SearchBoxProps {
  * only closes the keyboard and is lost (that was the Home search bug).
  */
 export const SearchBox: React.FC<SearchBoxProps> = ({
-  text, chips, onChangeText, onPick, onRemoveChip, onSubmit, onClear, country, itemType, placeholder,
+  text, chips, onChangeText, onPick, onRemoveChip, onSubmit, onClear, country, near, itemType, placeholder,
 }) => {
   const [focused, setFocused] = useState(false);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -80,13 +83,13 @@ export const SearchBox: React.FC<SearchBoxProps> = ({
     }
     let alive = true;
     const timer = setTimeout(() => {
-      MarketApi.suggest(q, country, itemType).then(list => alive && setSuggestions(list));
+      MarketApi.suggest(q, country, itemType, near).then(list => alive && setSuggestions(list));
     }, SUGGEST_DEBOUNCE_MS);
     return () => {
       alive = false;
       clearTimeout(timer);
     };
-  }, [text, focused, country, itemType]);
+  }, [text, focused, country, itemType, near]);
 
   const pick = (picked: QueryChip[], pickedText = '') => {
     setFocused(false);

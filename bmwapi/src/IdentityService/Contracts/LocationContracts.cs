@@ -9,20 +9,23 @@ public record PopularCitiesResponse(string CountryCode, string CountryName, IRea
 /// <summary>Name for a GPS point. CountryCode is null when it is far from every known city.</summary>
 public record NearestCityResponse(string Name, string? CountryCode, double DistanceKm);
 
+/// <summary>RadiusValue / RadiusUnit: the radius the user chose, in the location's unit (mi in the USA, km elsewhere).</summary>
 public record UserLocationDto(
     Guid Id,
     string Label,
     string PlaceName,
     double Latitude,
     double Longitude,
-    int RadiusKm,
+    double RadiusKm,
     string? CountryCode,
     bool IsPrimary,
     bool IsCurrentLocation,
     string? AddressLine = null,
     string? Area = null,
     string? Landmark = null,
-    string? PostalCode = null);
+    string? PostalCode = null,
+    int RadiusValue = 0,
+    string RadiusUnit = "km");
 
 /// <summary>All of the user's locations (primary first) and the auto-update setting.</summary>
 public record MyLocationsResponse(bool AutoUpdatePrimary, IReadOnlyList<UserLocationDto> Locations);
@@ -32,8 +35,8 @@ public record SaveLocationRequest(
     [Required(ErrorMessage = "Choose a place first."), StringLength(120, MinimumLength = 1)] string PlaceName,
     [Required(ErrorMessage = "Latitude is missing.")] double? Latitude,
     [Required(ErrorMessage = "Longitude is missing.")] double? Longitude,
-    // Missing → default (50 km). Out of range → pulled into 5..200 km.
-    int? RadiusKm = null,
+    // Older apps: the radius in km (pulled into range). Missing (and no RadiusValue) → default 200 km / 200 mi.
+    double? RadiusKm = null,
     string? CountryCode = null,
     // Add only: also make it the primary location (turns auto-update off).
     bool MakePrimary = false,
@@ -41,7 +44,12 @@ public record SaveLocationRequest(
     [StringLength(200)] string? AddressLine = null,
     [StringLength(100)] string? Area = null,
     [StringLength(100)] string? Landmark = null,
-    [StringLength(12)] string? PostalCode = null);
+    [StringLength(12)] string? PostalCode = null,
+    // The radius in the location's unit (mi in the USA, km elsewhere), 5–1,000. Wins over RadiusKm.
+    int? RadiusValue = null);
+
+/// <summary>Change only the radius of a saved location or the GPS row (Home → location line).</summary>
+public record RadiusRequest([Required(ErrorMessage = "Choose a radius.")] int? RadiusValue);
 
 /// <summary>
 /// The phone's GPS position. Explicit = the user tapped "Use my current location" (also turns auto-update on).
@@ -50,7 +58,9 @@ public record SaveLocationRequest(
 public record CurrentLocationRequest(
     [Required] double? Latitude,
     [Required] double? Longitude,
-    int? RadiusKm = null,
-    bool Explicit = false);
+    double? RadiusKm = null,
+    bool Explicit = false,
+    // The radius in the location's unit, 5–1,000 (wins over RadiusKm).
+    int? RadiusValue = null);
 
 public record LocationSettingsRequest(bool AutoUpdatePrimary);

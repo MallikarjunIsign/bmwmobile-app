@@ -144,13 +144,18 @@ export const MarketApi = {
       .then(list => list.map(i => ({ ...i, url: fixUrl(i.url) ?? i.url, thumbnailUrl: fixUrl(i.thumbnailUrl) }))),
 
   // ── search ──
+  /**
+   * Live listings the buyer can get: pickup-only ones inside `near`'s radius, ones that ship anywhere in `country`
+   * (never another country). Without `near`: the whole country. The rule is applied by the Search service.
+   */
   search: async (query: ListingSearchQuery, near?: NearFilter, country?: string): Promise<ListingSearchResult> => {
     const result = await call<ListingSearchResult>(
       () =>
         http.get('/search/listings', {
           params: {
             ...query,
-            ...(near ? { lat: near.latitude, lon: near.longitude, radiusKm: near.radiusKm } : { country }),
+            ...(near ? { lat: near.latitude, lon: near.longitude, radiusKm: near.radiusKm } : {}),
+            country,
             pageSize: query.pageSize ?? 40,
           },
         }),
@@ -162,10 +167,12 @@ export const MarketApi = {
     };
   },
 
-  /** Suggestions while typing, limited to the Parts / Vehicles choice. */
-  suggest: async (q: string, country?: string, itemType?: ItemTypeFilter): Promise<Suggestion[]> => {
+  /** Suggestions while typing, limited to the Parts / Vehicles choice and the listings the buyer can see (like search). */
+  suggest: async (q: string, country?: string, itemType?: ItemTypeFilter, near?: NearFilter): Promise<Suggestion[]> => {
     try {
-      const res = await http.get('/search/suggest', { params: { q, country, itemType } });
+      const res = await http.get('/search/suggest', {
+        params: { q, country, itemType, ...(near ? { lat: near.latitude, lon: near.longitude, radiusKm: near.radiusKm } : {}) },
+      });
       return (res.data?.suggestions ?? []) as Suggestion[];
     } catch {
       return [];
@@ -214,6 +221,13 @@ export const MarketApi = {
     call<ShippingEstimate>(
       () => http.get('/shipping/estimate', { params: { listingId, lat: latitude, lon: longitude, country: country ?? undefined } }),
       "Couldn't work out the shipping charge",
+    ),
+
+  /** Estimates for a page of results (the cards' "🚚 Ships to you ~$12"), in one call. At most 50 listings. */
+  shippingEstimates: (listingIds: string[], latitude: number, longitude: number, country?: string | null) =>
+    call<ShippingEstimate[]>(
+      () => http.post('/shipping/estimates', { listingIds: listingIds.slice(0, 50), lat: latitude, lon: longitude, country: country ?? undefined }),
+      "Couldn't work out the shipping charges",
     ),
 
   // ── shipping address book ──

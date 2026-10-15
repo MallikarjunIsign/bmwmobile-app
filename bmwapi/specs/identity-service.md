@@ -67,7 +67,7 @@ street), `area`, `landmark`, `postalCode` – accepted on add / edit and returne
 chosen location under the user's name on Home ("My locations"); a chosen saved address replaces GPS until the user
 picks "Use my current location" again, and is offered as the ship-to address on orders.
 
-Like Home / Work in food-delivery apps. Each user has up to 10 locations (`UserLocations` table): `Label` (Home / Work / Other / custom), `PlaceName`, `Latitude`, `Longitude`, `RadiusKm` (5–200, default 50), `CountryCode`, `IsPrimary`, `IsCurrentLocation`. `AspNetUsers.AutoUpdatePrimaryLocation` (default true) is the "Auto-update primary from my current location" switch.
+Like Home / Work in food-delivery apps. Each user has up to 10 locations (`UserLocations` table): `Label` (Home / Work / Other / custom), `PlaceName`, `Latitude`, `Longitude`, `RadiusKm` (whole km; chosen as 5–1,000 in the location's unit – miles in the USA, km elsewhere – default 200, `Contracts.RegionRules`), `CountryCode`, `IsPrimary`, `IsCurrentLocation`. `AspNetUsers.AutoUpdatePrimaryLocation` (default true) is the "Auto-update primary from my current location" switch.
 
 **Rules**
 - Exactly one primary location (a filtered unique index). The first saved location becomes primary.
@@ -83,12 +83,13 @@ Like Home / Work in food-delivery apps. Each user has up to 10 locations (`UserL
 |GET|`/api/locations/popular-cities?country=IN\|US\|NG`|6 popular cities (anonymous)|
 |GET|`/api/locations/cities?q=&country=`|Search all three countries, given country first (anonymous)|
 |GET|`/api/locations/nearest-city?lat=&lon=`|Name for a GPS point (anonymous)|
-|GET|`/api/me/locations`|`{ autoUpdatePrimary, locations[] }`, primary first|
-|POST|`/api/me/locations`|Add `{ label, placeName, latitude, longitude, radiusKm, countryCode, makePrimary }`|
-|PUT|`/api/me/locations/{id}`|Edit (GPS row: radius only)|
+|GET|`/api/me/locations`|`{ autoUpdatePrimary, locations[] }`, primary first; each with `radiusValue`, `radiusUnit` (mi / km) and `radiusKm`|
+|POST|`/api/me/locations`|Add `{ label, placeName, latitude, longitude, radiusValue, countryCode, makePrimary }` (`radiusValue` 5–1,000 in the location's unit, else 400 `INVALID_RADIUS`; missing → 200; older apps' `radiusKm` is pulled into range)|
+|PUT|`/api/me/locations/{id}`|Edit (GPS row: radius only); no radius → kept|
+|PUT|`/api/me/locations/{id}/radius`|`{ radiusValue }` – only the radius (Home's location line)|
 |DELETE|`/api/me/locations/{id}`|Not the primary (409 `PRIMARY_CANNOT_BE_DELETED`)|
 |POST|`/api/me/locations/{id}/primary`|Manual primary, auto-update off|
-|PUT|`/api/me/locations/current`|`{ latitude, longitude, radiusKm?, explicit }` — phone GPS → primary|
+|PUT|`/api/me/locations/current`|`{ latitude, longitude, radiusValue?, explicit }` — phone GPS → primary (new GPS row without a radius: 200)|
 |PUT|`/api/me/locations/settings`|`{ autoUpdatePrimary }`|
 
 The `/api/me/*` endpoints need an access token with the `IdentityServerApi` scope. Every change returns the full updated list. `UserDto.hasLocation` tells the app whether to show "Set your location".

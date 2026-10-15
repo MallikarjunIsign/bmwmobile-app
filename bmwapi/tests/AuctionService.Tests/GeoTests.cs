@@ -24,28 +24,28 @@ public class GeoControllerTests(AppFixture fixture)
     }
 
     [Fact]
-    public async Task Hyderabad_IsIndia_With60Km()
+    public async Task Hyderabad_IsIndia_With200Km()
     {
         var place = await Reverse(17.4849, 78.4138);
 
         Assert.Equal("Hyderabad", place.City);
         Assert.Equal("IN", place.CountryCode);
         Assert.True(place.Supported);
-        Assert.Equal(60, place.RadiusValue);
+        Assert.Equal(200, place.RadiusValue);
         Assert.Equal("km", place.RadiusUnit);
-        Assert.Equal(60, place.RadiusKm);
+        Assert.Equal(200, place.RadiusKm);
     }
 
     [Fact]
-    public async Task NewYork_IsUsa_With60Miles()
+    public async Task NewYork_IsUsa_With200Miles()
     {
         var place = await Reverse(40.73, -73.99);
 
         Assert.Equal("New York", place.City);
         Assert.Equal("US", place.CountryCode);
-        Assert.Equal(60, place.RadiusValue);
+        Assert.Equal(200, place.RadiusValue);
         Assert.Equal("mi", place.RadiusUnit);
-        Assert.Equal(96.56, place.RadiusKm, 2);
+        Assert.Equal(321.87, place.RadiusKm, 2);
     }
 
     [Fact]
@@ -155,11 +155,11 @@ public class GeocoderTests
     }
 
     [Theory]
-    [InlineData("US", 60, "mi")]
-    [InlineData("IN", 60, "km")]
-    [InlineData("NG", 60, "km")]
-    [InlineData("IE", 60, "km")]
-    public void DefaultRadius_IsSixtyInTheCountrysUnit(string country, int value, string unit)
+    [InlineData("US", 200, "mi")]
+    [InlineData("IN", 200, "km")]
+    [InlineData("NG", 200, "km")]
+    [InlineData("IE", 200, "km")]
+    public void DefaultRadius_Is200InTheCountrysUnit(string country, int value, string unit)
     {
         var radius = RegionRules.DefaultSearchRadius(country);
         Assert.Equal(value, radius.Value);

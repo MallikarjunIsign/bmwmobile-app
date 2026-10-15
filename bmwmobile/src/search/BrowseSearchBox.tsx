@@ -10,7 +10,7 @@ import type { QueryChip } from '../types/listing';
  * active filter; the results on both screens update at once.
  */
 export const BrowseSearchBox: React.FC = () => {
-  const { country } = useLocations();
+  const { country, near } = useLocations();
   const browse = useBrowse();
   const { chips, draftText, itemType } = browse;
 
@@ -35,6 +35,7 @@ export const BrowseSearchBox: React.FC = () => {
       onSubmit={submit}
       onClear={browse.clearSearch}
       country={country}
+      near={near}
       itemType={itemType}
     />
   );

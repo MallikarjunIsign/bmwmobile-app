@@ -14,6 +14,15 @@ public sealed class LiveGatewayFactAttribute : FactAttribute
     }
 }
 
+public sealed class LiveGatewayTheoryAttribute : TheoryAttribute
+{
+    public LiveGatewayTheoryAttribute()
+    {
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("GATEWAY_URL")))
+            Skip = "Live test: set GATEWAY_URL (e.g. http://localhost:6001) with the backend running";
+    }
+}
+
 /// <summary>
 /// The real path the app uses: app → Gateway (/search/...) → SearchService → Meilisearch, on the running backend
 /// with its demo data around Hyderabad. Every filter the app sends must be applied, and the counts must be the results.
@@ -95,6 +104,30 @@ public class GatewaySearchLiveTests
         {
             var r = await Search($"itemType=Vehicle&make={Uri.EscapeDataString(make.Value)}");
             Assert.Equal(make.Count, r.TotalCount);
+        }
+    }
+
+    /// <summary>
+    /// Who sees what, on the demo data: pickup-only listings inside the radius, listings that ship from anywhere in the
+    /// country, nothing from another country; the delivery counts are the results.
+    /// </summary>
+    [LiveGatewayTheory]
+    [InlineData("lat=29.7604&lon=-95.3698&country=US&radiusKm=80.47", "US", "demo-us-la-alternator", "demo-us-phoenix-starter")]
+    [InlineData("lat=17.385&lon=78.4867&country=IN&radiusKm=50", "IN", "demo-in-bengaluru-alternator", "demo-in-mumbai-gearbox")]
+    public async Task DemoData_FarShippingListingShown_FarPickupOnlyHidden_NothingAbroad(string where, string country, string farShipping, string farPickup)
+    {
+        var r = (await Http.GetFromJsonAsync<ListingSearchResponse>($"search/listings?{where}&pageSize=50&itemType=Part", Json))!;
+
+        Assert.Contains(r.Results, x => x.Id == farShipping && x.WithinRadius == false);
+        Assert.DoesNotContain(r.Results, x => x.Id == farPickup);
+        Assert.All(r.Results, x => Assert.Equal(country, x.Country));
+        Assert.All(r.Results, x => Assert.True(x.OffersShipping || x.WithinRadius == true, $"{x.Id}: pickup only and outside the radius"));
+        TotalIsTheResults(r);
+
+        foreach (var option in r.Facets["delivery"])
+        {
+            var picked = (await Http.GetFromJsonAsync<ListingSearchResponse>($"search/listings?{where}&pageSize=50&itemType=Part&delivery={option.Value}", Json))!;
+            Assert.Equal(option.Count, picked.TotalCount);
         }
     }
 

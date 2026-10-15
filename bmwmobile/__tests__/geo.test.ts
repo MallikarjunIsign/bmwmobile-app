@@ -36,9 +36,9 @@ describe('geo helpers', () => {
     expect(isCountryCode(null)).toBe(false);
   });
 
-  test('offline radius fallback: 60 miles in the USA, 60 km elsewhere', () => {
-    expect(fallbackRadius('US')).toEqual({ radiusValue: 60, radiusUnit: 'mi', radiusKm: 96.56 });
-    expect(fallbackRadius('IN')).toEqual({ radiusValue: 60, radiusUnit: 'km', radiusKm: 60 });
+  test('default radius: 200 miles in the USA, 200 km elsewhere', () => {
+    expect(fallbackRadius('US')).toEqual({ radiusValue: 200, radiusUnit: 'mi', radiusKm: 321.87 });
+    expect(fallbackRadius('IN')).toEqual({ radiusValue: 200, radiusUnit: 'km', radiusKm: 200 });
     expect(formatRadius(96.56, 'US')).toBe('60 mi');
     expect(formatRadius(60, 'NG')).toBe('60 km');
   });

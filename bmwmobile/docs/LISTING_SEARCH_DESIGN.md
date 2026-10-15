@@ -257,7 +257,7 @@ Top of Home, applied to everything below **and** to every search (Home and Marke
 Below them:
 
 - **Parts:** the part **categories** as tiles with the number of parts available, e.g. "🛑 Brakes (24)", "💡 Lighting (12)" – inside the
-  selected location's radius and the Auction / Direct sale choice; categories with 0 are hidden. A tile opens Market filtered by that
+  listings the buyer can get (§7.7: pickup-only inside the radius, shipping country-wide) and the Auction / Direct sale choice; categories with 0 are hidden. A tile opens Market filtered by that
   category, with its **part types** as chips with counts ("Brake pads (5)").
 - **Vehicles:** the total ("128 vehicles near you") and all available vehicles, with **make** chips and counts ("Toyota (12)") to
   narrow down; Market then shows models as chips.
@@ -284,6 +284,83 @@ make keeps its siblings with their counts (a second facet query without that one
 - Picking a suggestion **adds** its chips to the existing ones (a chip of the same kind is replaced); filters stay.
 - Result counts and category counts come from the same query, so they update with the search.
 - Clearing the search (✕) keeps the filters; **Clear all** clears the search and the filters (Parts / Vehicles stays).
+
+## 7.7 Which listings a buyer sees (pickup radius, shipping country-wide)
+
+The listing's delivery options decide it – the same rule everywhere listings appear (Home tiles and counts, vehicle total and
+make counts, live listings, Market results, suggestions, "See All", a seller's profile seen by a buyer, the part-request
+auto-match):
+
+| Listing delivery | Shown to the buyer when |
+|---|---|
+| Pickup only | the item is **inside the buyer's radius** |
+| Shipping only | the item is in the **buyer's country** – any distance |
+| Pickup + Shipping | the item is in the **buyer's country** – any distance |
+
+Never a listing from another country (shipping stays within the seller's country). Older listings without delivery options
+count as pickup only.
+
+**Where:** in the Search service's Meilisearch filter (never in the app), `ListingSearchEndpoints.VisibilityFilter`:
+
+```
+(offersShipping = false AND country = "US" AND _geoRadius(lat, lon, radius))
+OR (offersShipping = true AND country = "US")
+```
+
+The buyer's country is the `country` the app sends (the selected location's country), or the country at lat/lon
+(`Contracts.ListingVisibility.CountryAt`). Without lat/lon (location off): `country = "US"` – the whole country. The same rule
+in C# (`ListingVisibility.IsVisible`) is used by the part-request matcher.
+
+**Index fields** (computed in `Item.Prepare`, filterable, applied and checked on every start like the other settings):
+`country` (CountryCode, or from the coordinates on older listings), `offersPickup`, `offersShipping`, `_geo`.
+`Item.CurrentIndexVersion` = 3, so every existing listing is fetched and re-indexed once at startup.
+
+**Counts = results:** the category / part type / make facets come from the same query. The Delivery filter's counts are two
+extra count queries, because they can't come from the `deliveryOptions` facet (a far pickup + shipping listing is visible, but
+not for pickup):
+
+- **Pickup** = listings offering pickup **inside the radius** (pickup only and pickup + shipping).
+- **Shipping** = listings that ship, anywhere in the country.
+
+The filter sheet's **Distance** limits everything (pickup and shipping). **Nearest first** sorts by distance – every result has
+its `distanceKm`. Each result also has `withinRadius` (pickup offered to this buyer).
+
+**Suggestions** (`/search/suggest?lat=&lon=&radiusKm=&country=`): what comes from listings (part numbers, the years a vehicle's
+listings cover) uses the same filter. Category / part type / make suggestions come from the catalogue, as before.
+
+**In the app** (cards and the listing):
+
+- inside the radius: "📍 Pickup · 12 mi away" and / or "🚚 Shipping ~$12"
+- outside the radius, it ships: "🚚 Ships to you ~$95 · 1,370 mi away" (no pickup badge – pickup is too far)
+- shipping can't be worked out for this buyer (e.g. over the size class's maximum distance): the listing still shows,
+  "🚚 Shipping not available to your location"; Buy now / Place bid explain why (and stop when the item only ships).
+
+The charges come from one call for the page of results, `POST /shipping/estimates` (at most 50 listings). At checkout
+(Orders → "How do you want to receive it?") an item outside the radius has **Shipping** pre-selected; Pickup can still be
+chosen ("… 640 mi away, outside your 200 mi radius").
+
+**Shipping range:** the seeded maximum road distance (straight line × 1.3) covers every country, so normal in-country
+shipping always works: USA freight / vehicles 4,000 mi (corner to corner ≈ 3,550 mi; parcels go by USPS with no limit),
+India 4,000 km, Nigeria 1,800 km, Ireland 700 km, all sizes. Seeded rows that are still placeholders / estimates get the new
+values at startup; rates an admin has set are left alone.
+
+## 7.8 The radius (default 200, chosen per location)
+
+- **One setting** for the backend, `Contracts.RegionRules`: `DefaultRadiusValue = 200`, `MinRadiusValue = 5`,
+  `MaxRadiusValue = 1,000`, in the location's unit (**miles in the USA**, km elsewhere); and for the app, `src/utils/geo.ts`
+  (`DEFAULT_RADIUS`, `MIN_RADIUS`, `MAX_RADIUS`, `RADIUS_CHOICES` = 25 / 50 / 100 / 200 / 500). The Search service, the
+  part-request audience and matcher and `/geo/reverse` all use it (no other defaults).
+- **Stored with the location** (IdentityService `UserLocations.RadiusKm`, whole km – every value 5–1,000 mi comes back exactly).
+  The API takes `radiusValue` in the location's unit and returns `radiusValue`, `radiusUnit` and the exact `radiusKm`. Outside
+  5–1,000 → 400 `INVALID_RADIUS`. Older apps' `radiusKm` is still accepted (pulled into range).
+- **Where it is chosen:** *Use my current location* (a radius sheet), *Add / Edit address* (SEARCH RADIUS), and Home's location
+  line ("📍 Houston, USA · 200 mi ▾" → sheet; `PUT /api/me/locations/{id}/radius`, or the GPS location is saved with it).
+  The lists and counts update at once (the app uses the new radius before the server answers).
+- **GPS without a saved radius** → the default 200 for the country the phone is in. A GPS radius saved in the USA (200 mi)
+  reads as 200 km after moving to India – the number follows the location's unit.
+- **Old data:** migration `LocationRadius200` changes saved locations with the previous default – 60 km, or 60 mi (96 / 97 km)
+  in the USA – to 200. Those values were never a radius choice in the app; everything else (e.g. 50 km, which was both an
+  older default and a chip) is kept.
 
 # 8. Data model
 
@@ -456,14 +533,15 @@ When USPS publishes a new Notice 123, replace the CSV (same format) and restart 
 
 1. **A buyer requests a part they can't find** (search found nothing → "Create a custom order": part, vehicle, part number,
    budget, their area). **The sellers near the buyer are notified** – within the
-   buyer's radius (60 km / 60 mi by default) when the buyer's location is known, otherwise anywhere in the buyer's country, and
+   buyer's radius (200 km / 200 mi by default) when the buyer's location is known, otherwise anywhere in the buyer's country, and
    **never a seller in another country** (a seller whose location / country isn't known isn't told). Live in the app ("🔎 A buyer is looking for a part – Front bumper –
    2016 Toyota Hilux (Hyderabad)") and by push when the app is closed. Sellers see all open requests in **Buyer requests**
    (Profile, or tap the notification) – the same rule decides which requests they see: what is wanted, the vehicle, the buyer's **city** and budget – never the buyer's name or exact
    location. "I have this – list it" opens Sell. Buyers aren't notified, and a seller isn't told about their own request.
 2. **A seller lists a matching part** (auction or direct sale) → **every buyer with a matching open request is notified** ("A part
    matching your request is now available", live and by push; tap → the listing) and the request becomes *Matched*. A match is
-   the same part number, or the same part type that fits the buyer's vehicle, within the buyer's radius (60 km by default).
+   the same part number, or the same part type that fits the buyer's vehicle, **and a listing the buyer would see** (§7.7):
+   pickup only → within the buyer's radius; it ships → anywhere in the buyer's country; never another country.
 
 How it flows: AuctionService publishes `PartRequestCreated` → NotificationService sends it to the SignalR group of connected sellers
 (joined from the token's role) and ChatService pushes it to every phone registered by a seller account; on publish,

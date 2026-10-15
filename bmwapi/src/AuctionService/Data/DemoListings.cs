@@ -16,7 +16,11 @@ public static class DemoListings
 {
     private record Demo(
         string Id, string Seller, string Country, string Place, double Lat, double Lon, ListingKind Kind, string? PartType,
-        int Price, SaveListingDto Details, double DurationHours = 0, int Days = 7, int FixedPriceUnits = 0);
+        int Price, SaveListingDto Details, double DurationHours = 0, int Days = 7, int FixedPriceUnits = 0, string[]? Delivery = null);
+
+    // Delivery for the far-away demo listings (who sees them: ListingVisibility).
+    private static readonly string[] PickupOnly = ["Pickup"];
+    private static readonly string[] ShippingOnly = ["Shipping"];
 
     private static FitmentDto Fit(int from, int to, string make, string model, string? trim = null) =>
         new() { YearFrom = from, YearTo = to, Make = make, Model = model, Trim = trim };
@@ -82,6 +86,29 @@ public static class DemoListings
                     Papers = new() { ["RcAvailable"] = "Yes", ["Noc"] = "Not needed", ["InsuranceValidUntil"] = "2027-03-31" }
                 },
             }),
+
+        // ── India, far from Hyderabad: who sees what (pickup only → inside the radius, shipping → anywhere in India) ──
+        new("demo-in-warangal-radiator", "BidMyParts_Warangal", "IN", "Hanamkonda, Warangal", 18.0072, 79.5584,
+            ListingKind.VehicleSpecificPart, "Radiator", 4200, new SaveListingDto
+            {
+                Description = "Radiator from a 2017 Innova, no leaks, pressure tested. Pickup only – too heavy to post.",
+                Fitments = [Fit(2016, 2022, "Toyota", "Innova")],
+                PartDetails = Part("GenuineOem", "Used", "A"),
+            }, Delivery: PickupOnly),
+        new("demo-in-mumbai-gearbox", "BidMyParts_Mumbai", "IN", "Andheri, Mumbai", 19.1136, 72.8697,
+            ListingKind.VehicleSpecificPart, "Gearbox", 38000, new SaveListingDto
+            {
+                Description = "Manual gearbox from a 2019 Swift Dzire, 38,000 km, smooth shifts. Pickup in Mumbai only.",
+                Fitments = [Fit(2017, 2023, "Maruti Suzuki", "Swift")],
+                PartDetails = Part("GenuineOem", "Used", "A", warranty: "1 month"),
+            }, Delivery: PickupOnly),
+        new("demo-in-bengaluru-alternator", "BidMyParts_Bengaluru", "IN", "Whitefield, Bengaluru", 12.9698, 77.7500,
+            ListingKind.VehicleSpecificPart, "Alternator", 5400, new SaveListingDto
+            {
+                Description = "Remanufactured alternator, 90 A, tested on the bench. Shipped anywhere in India.",
+                Fitments = [Fit(2015, 2020, "Hyundai", "Creta")],
+                PartDetails = Part("OemEquivalent", "Refurbished", brand: "Lucas TVS", warranty: "6 months"),
+            }, Delivery: ShippingOnly),
 
         // ── Nigeria (Lagos, Abuja) ──
         new("demo-ng-camry-bumper", "BidMyParts_Lagos", "NG", "Ikeja, Lagos", 6.6018, 3.3515,
@@ -157,6 +184,31 @@ public static class DemoListings
                     Papers = new() { ["TitleStatus"] = "Clean" }
                 },
             }),
+
+        // ── USA, far from Houston: pickup only → inside the radius, shipping → anywhere in the USA ──
+        new("demo-us-austin-radiator", "BidMyParts_Austin", "US", "Round Rock, TX", 30.5083, -97.6789,
+            ListingKind.VehicleSpecificPart, "Radiator", 140, new SaveListingDto
+            {
+                Description = "OEM radiator from a 2019 Camry, no leaks, all tabs intact. Local pickup only.",
+                Fitments = [Fit(2018, 2023, "Toyota", "Camry")],
+                PartNumbers = [new() { Value = "16400-F0010" }],
+                PartDetails = Part("GenuineOem", "Used", "A"),
+            }, Delivery: PickupOnly),
+        new("demo-us-phoenix-starter", "BidMyParts_Phoenix", "US", "Tempe, AZ", 33.4255, -111.9400,
+            ListingKind.VehicleSpecificPart, "Starter motor", 85, new SaveListingDto
+            {
+                Description = "Starter motor from a 2016 F-150 5.0, tested before removal. Pickup in Tempe only.",
+                Fitments = [Fit(2015, 2020, "Ford", "F-150")],
+                PartDetails = Part("GenuineOem", "Used", "B"),
+            }, Delivery: PickupOnly),
+        new("demo-us-la-alternator", "BidMyParts_California", "US", "Long Beach, CA", 33.7701, -118.1937,
+            ListingKind.VehicleSpecificPart, "Alternator", 165, new SaveListingDto
+            {
+                Description = "Remanufactured 150 A alternator, bench tested, 1-year warranty. Ships anywhere in the USA.",
+                Fitments = [Fit(2014, 2018, "Chevrolet", "Silverado")],
+                PartNumbers = [new() { Value = "84130813" }],
+                PartDetails = Part("OemEquivalent", "Refurbished", brand: "ACDelco", warranty: "12 months"),
+            }, FixedPriceUnits: 3, Delivery: ShippingOnly),
 
         // ── Ireland (Dublin, Cork) ──
         new("demo-ie-golf-mirror", "BidMyParts_Dublin", "IE", "Dublin", 53.3498, -6.2603,
@@ -260,10 +312,14 @@ public static class DemoListings
             d.Latitude = demo.Lat;
             d.Longitude = demo.Lon;
             // Vehicles are picked up; parts can also be shipped within the country (the dash cam ships free).
-            d.DeliveryOptions = demo.Kind == ListingKind.Vehicle ? ["Pickup"] : ["Pickup", "Shipping"];
-            if (demo.Kind != ListingKind.Vehicle)
+            d.DeliveryOptions = demo.Delivery?.ToList() ?? (demo.Kind == ListingKind.Vehicle ? ["Pickup"] : ["Pickup", "Shipping"]);
+            if (d.DeliveryOptions.Contains("Shipping"))
                 d.ShippingFee = demo.PartType == "Dash cam" ? 0 : DemoShippingFees.GetValueOrDefault(demo.Country, 0);
-            d.SizeClass = demo.Kind == ListingKind.Vehicle ? null : demo.PartType is "Bumper" or "Bonnet" ? "Large" : demo.PartType == "Gearbox" ? "Freight" : "Small";
+            d.SizeClass = demo.Kind == ListingKind.Vehicle ? null
+                : demo.PartType is "Bumper" or "Bonnet" ? "Large"
+                : demo.PartType == "Gearbox" ? "Freight"
+                : demo.PartType is "Radiator" or "Alternator" or "Starter motor" ? "Medium"
+                : "Small";
             if (demo.FixedPriceUnits > 0)
             {
                 d.SaleType = nameof(SaleType.FixedPrice);

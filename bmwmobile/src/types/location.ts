@@ -11,7 +11,7 @@ export interface AutoLocation {
   city: string | null;
   /** Null when the place is outside India, USA, Nigeria and Ireland. */
   countryCode: CountryCode | null;
-  /** Search radius: 60 miles in the USA, 60 km elsewhere (as km). */
+  /** Search radius (as km); radiusValue / radiusUnit as the user chose it (default 200 mi in the USA, 200 km elsewhere). */
   radiusKm: number;
   radiusValue: number;
   radiusUnit: 'km' | 'mi';
@@ -47,6 +47,9 @@ export interface SavedLocation {
   latitude: number;
   longitude: number;
   radiusKm: number;
+  /** The radius in the location's unit (mi in the USA, km elsewhere) – what the user chose. Older servers: missing. */
+  radiusValue?: number;
+  radiusUnit?: 'km' | 'mi';
   countryCode: CountryCode | null;
   isPrimary: boolean;
   /** The row that follows the phone's GPS ("Use my current location"). */
@@ -67,7 +70,8 @@ export interface SaveLocationRequest {
   placeName: string;
   latitude: number;
   longitude: number;
-  radiusKm?: number;
+  /** The radius in the location's unit (mi in the USA, km elsewhere), 5–1,000. */
+  radiusValue?: number;
   countryCode?: string | null;
   makePrimary?: boolean;
   addressLine?: string | null;

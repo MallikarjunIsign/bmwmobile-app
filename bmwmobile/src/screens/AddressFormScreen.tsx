@@ -11,7 +11,8 @@ import { ApiService } from '../services/api';
 import { LocationApi } from '../services/locationApi';
 import { errorMessage } from '../services/authApi';
 import type { City, CountryCode } from '../types/location';
-import { countryName, isCountryCode } from '../utils/geo';
+import { countryName, DEFAULT_RADIUS, isCountryCode, savedRadius } from '../utils/geo';
+import { RadiusPicker } from '../components/RadiusPicker';
 import { getCurrentPosition, GpsError } from '../utils/gps';
 import { ChipGroup, Field, PickerField, PickerModal } from './sell/sellUi';
 
@@ -43,6 +44,8 @@ export const AddressFormScreen: React.FC<Props> = ({ route, navigation }) => {
   const [area, setArea] = useState(existing?.area ?? '');
   const [landmark, setLandmark] = useState(existing?.landmark ?? '');
   const [postalCode, setPostalCode] = useState(existing?.postalCode ?? '');
+  // The radius for this address, in its country's unit (200 pre-selected for a new address).
+  const [radius, setRadius] = useState<number | null>(existing ? savedRadius(existing).radiusValue : DEFAULT_RADIUS);
   const [pickCity, setPickCity] = useState(false);
   const [busy, setBusy] = useState<'gps' | 'save' | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -73,6 +76,7 @@ export const AddressFormScreen: React.FC<Props> = ({ route, navigation }) => {
     const problems: Record<string, string> = {};
     if (!place) problems.city = 'Choose the city (or use your current position)';
     if (!addressLine.trim()) problems.addressLine = 'Enter the house / flat and street';
+    if (radius == null) problems.radius = 'Choose a radius';
     setErrors(problems);
     if (Object.keys(problems).length > 0) return;
 
@@ -90,6 +94,7 @@ export const AddressFormScreen: React.FC<Props> = ({ route, navigation }) => {
           area: area.trim() || null,
           landmark: landmark.trim() || null,
           postalCode: postalCode.trim() || null,
+          radiusValue: radius!,
           makePrimary: !existing,
         },
         existing?.id,
@@ -136,9 +141,12 @@ export const AddressFormScreen: React.FC<Props> = ({ route, navigation }) => {
             <Field label="Name" optional value={label === 'Other' ? '' : label} onChangeText={t => setLabel(t || 'Other')} placeholder="Workshop, Mum's place…" maxLength={40} />
           ) : null}
 
+          {/* Units follow the address's country: miles in the USA, km elsewhere. */}
+          <RadiusPicker value={radius} country={countryCode} onChange={setRadius} />
+          {errors.radius && radius == null ? <Text style={styles.error}>{errors.radius}</Text> : null}
+
           <Text style={styles.hint}>
-            We look for parts within 60 {countryCode === 'US' ? 'miles' : 'km'} of this address. Your full address is only shared with the seller
-            when you choose delivery on an order you won.
+            Your full address is only shared with the seller when you choose delivery on an order you won.
           </Text>
 
           <TouchableOpacity style={styles.saveBtn} onPress={save} disabled={busy !== null}>

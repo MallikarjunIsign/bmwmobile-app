@@ -113,8 +113,11 @@ public static class ShippingCalculator
 /// <summary>Seeds PLACEHOLDER rates per country and size class (only when missing). An admin replaces them.</summary>
 public static class ShippingRateSeed
 {
-    /// <summary>Road miles (straight line × 1.3): coast to coast, so freight and vehicles are delivered anywhere in the US.</summary>
-    public const int UsFreightMaxMiles = 3500;
+    /// <summary>
+    /// Road miles (straight line × 1.3): corner to corner (Miami → Seattle ≈ 3,550 mi), so freight and vehicles are
+    /// delivered anywhere in the US.
+    /// </summary>
+    public const int UsFreightMaxMiles = 4000;
 
     /// <summary>
     /// US freight and vehicle transport: industry averages (October 2026), labelled "estimated rate" in the app until a
@@ -137,15 +140,19 @@ public static class ShippingRateSeed
             "US open car transport average (estimate): FreightWaves 2026, Ship A Car 2026, Kelley Blue Book ($1/mi at ~1,000 mi), AmeriFreight"),
     ];
 
+    // Maximum road distance per country (all sizes), so normal in-country shipping always works:
+    // India: Srinagar → Kanyakumari ≈ 3,800 km; Nigeria: Lagos → Maiduguri ≈ 1,600 km; Ireland: Malin Head → Mizen Head ≈ 610 km.
+    public const int IndiaMaxKm = 4000, NigeriaMaxKm = 1800, IrelandMaxKm = 700;
+
     // (size, base fee, rate per unit, min, max, max distance) – PLACEHOLDER numbers, not real courier prices.
     private static readonly Dictionary<string, (SizeClass Size, decimal Base, decimal Rate, decimal Min, decimal Max, int MaxDistance)[]> Placeholders = new()
     {
         // India, ₹ per km
         ["IN"] =
         [
-            (SizeClass.Small, 60, 1, 60, 600, 2500), (SizeClass.Medium, 120, 2, 120, 1500, 2500),
-            (SizeClass.Large, 300, 5, 300, 4000, 2000), (SizeClass.Freight, 800, 12, 800, 15000, 1500),
-            (SizeClass.Vehicle, 2000, 25, 2000, 60000, 1500),
+            (SizeClass.Small, 60, 1, 60, 600, IndiaMaxKm), (SizeClass.Medium, 120, 2, 120, 1500, IndiaMaxKm),
+            (SizeClass.Large, 300, 5, 300, 4000, IndiaMaxKm), (SizeClass.Freight, 800, 12, 800, 15000, IndiaMaxKm),
+            (SizeClass.Vehicle, 2000, 25, 2000, 60000, IndiaMaxKm),
         ],
         // USA, $ per mile. Small / Medium / Large parcels are priced from the USPS Ground Advantage list
         // (UspsGroundAdvantage); these Small / Medium / Large rows are not used for US quotes. Freight and Vehicle are the
@@ -158,26 +165,31 @@ public static class ShippingRateSeed
         // Nigeria, ₦ per km
         ["NG"] =
         [
-            (SizeClass.Small, 1500, 30, 1500, 20000, 1200), (SizeClass.Medium, 3000, 60, 3000, 50000, 1200),
-            (SizeClass.Large, 8000, 150, 8000, 120000, 1000), (SizeClass.Freight, 25000, 400, 25000, 400000, 800),
-            (SizeClass.Vehicle, 60000, 800, 60000, 1200000, 800),
+            (SizeClass.Small, 1500, 30, 1500, 20000, NigeriaMaxKm), (SizeClass.Medium, 3000, 60, 3000, 50000, NigeriaMaxKm),
+            (SizeClass.Large, 8000, 150, 8000, 120000, NigeriaMaxKm), (SizeClass.Freight, 25000, 400, 25000, 400000, NigeriaMaxKm),
+            (SizeClass.Vehicle, 60000, 800, 60000, 1200000, NigeriaMaxKm),
         ],
         // Ireland, € per km
         ["IE"] =
         [
-            (SizeClass.Small, 6, 0.15m, 6, 40, 500), (SizeClass.Medium, 12, 0.30m, 12, 80, 500),
-            (SizeClass.Large, 30, 0.80m, 30, 200, 500), (SizeClass.Freight, 90, 2.00m, 90, 600, 500),
-            (SizeClass.Vehicle, 200, 2.50m, 200, 1200, 500),
+            (SizeClass.Small, 6, 0.15m, 6, 40, IrelandMaxKm), (SizeClass.Medium, 12, 0.30m, 12, 80, IrelandMaxKm),
+            (SizeClass.Large, 30, 0.80m, 30, 200, IrelandMaxKm), (SizeClass.Freight, 90, 2.00m, 90, 600, IrelandMaxKm),
+            (SizeClass.Vehicle, 200, 2.50m, 200, 1200, IrelandMaxKm),
         ],
     };
 
     public static void Seed(AuctionDbContext context)
     {
-        var existing = context.ShippingRates.Select(r => new { r.CountryCode, r.SizeClass }).ToList();
+        var existing = context.ShippingRates.ToList();
         foreach (var (country, rows) in Placeholders)
         foreach (var row in rows)
         {
-            if (existing.Any(e => e.CountryCode == country && e.SizeClass == row.Size)) continue;
+            // Seeded rows that are still placeholders get the current maximum distance (an admin's rates are left alone).
+            if (existing.FirstOrDefault(e => e.CountryCode == country && e.SizeClass == row.Size) is { } seeded)
+            {
+                if (seeded.IsPlaceholder && seeded.MaxDistance < row.MaxDistance) seeded.MaxDistance = row.MaxDistance;
+                continue;
+            }
             context.ShippingRates.Add(new ShippingRate
             {
                 CountryCode = country, SizeClass = row.Size, Currency = RegionRules.CurrencyFor(country), Unit = RegionRules.DistanceUnit(country),
@@ -195,6 +207,12 @@ public static class ShippingRateSeed
             {
                 rate = new ShippingRate { CountryCode = "US", SizeClass = e.Size, Currency = "USD", Unit = "mi", IsPlaceholder = true };
                 context.ShippingRates.Add(rate);
+            }
+            // Already the seeded estimate: only a larger maximum distance.
+            if (!rate.IsPlaceholder && rate.IsEstimate)
+            {
+                if (rate.MaxDistance < UsFreightMaxMiles) rate.MaxDistance = UsFreightMaxMiles;
+                continue;
             }
             if (!rate.IsPlaceholder) continue;
             rate.BaseFee = e.Base;

@@ -1,6 +1,6 @@
 # Search / filter UI test (Home + Market), run by e2e/run-search-e2e.sh as a buyer and as a seller.
-# Env (from the script): EMAIL, PASSWORD, ROLE (BUYER / SELLER), BUMPERS = number of parts with part type Bumper near Hyderabad,
-# LIGHTING = number of parts in the Lighting category near Hyderabad (both asked from the API first).
+# Env (from the script): EMAIL, PASSWORD, ROLE (BUYER / SELLER), BUMPERS = number of parts with part type Bumper the buyer in
+# Hyderabad can get (default 200 km), LIGHTING = the same for the Lighting category (both asked from the API first).
 appId: com.bidmywork.app
 ---
 - runFlow: subflows/login.yaml
@@ -70,7 +70,7 @@ appId: com.bidmywork.app
     visible: "Lighting ✕"
     timeout: 10000
 - extendedWaitUntil:
-    visible: "${LIGHTING} parts? found within 60 km"
+    visible: "${LIGHTING} parts? found · pickup within 200 km, shipping India-wide"
     timeout: 15000
 - tapOn: "Clear all"
 - assertNotVisible: "Lighting ✕"
@@ -84,7 +84,7 @@ appId: com.bidmywork.app
     visible: "Bumper ✕"
     timeout: 10000
 - extendedWaitUntil:
-    visible: "${BUMPERS} parts? found within 60 km"
+    visible: "${BUMPERS} parts? found · pickup within 200 km, shipping India-wide"
     timeout: 15000
 - takeScreenshot: market-bumper
 

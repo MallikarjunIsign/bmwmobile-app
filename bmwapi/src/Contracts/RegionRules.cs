@@ -1,6 +1,6 @@
 namespace Contracts;
 
-/// <summary>Default search radius for a country: 60 miles in the USA, 60 km elsewhere.</summary>
+/// <summary>A search radius in the country's unit (miles in the USA, km elsewhere) and as km.</summary>
 public record SearchRadius(int Value, string Unit, double Km);
 
 /// <summary>Per-country rules shared by the services (and sent to the app, so it never hard-codes them).</summary>
@@ -38,9 +38,27 @@ public static class RegionRules
     public static string DistanceUnit(string? countryCode) =>
         string.Equals(countryCode, "US", StringComparison.OrdinalIgnoreCase) ? "mi" : "km";
 
-    /// <summary>USA → 60 miles; India, Nigeria, Ireland (and anything else) → 60 km.</summary>
-    public static SearchRadius DefaultSearchRadius(string? countryCode) =>
-        string.Equals(countryCode, "US", StringComparison.OrdinalIgnoreCase)
-            ? new SearchRadius(60, "mi", Math.Round(60 * KmPerMile, 2))
-            : new SearchRadius(60, "km", 60);
+    // ── The search radius: THE one setting for every service (the app has the same numbers in utils/geo.ts). ──
+    // Values are in the location's unit: 200 miles in the USA, 200 km elsewhere.
+    public const int DefaultRadiusValue = 200;
+    public const int MinRadiusValue = 5;
+    public const int MaxRadiusValue = 1000;
+
+    /// <summary>The largest radius in km (1,000 miles).</summary>
+    public static readonly double MaxRadiusKm = Math.Round(MaxRadiusValue * KmPerMile, 2);
+
+    /// <summary>A radius in the country's unit: 200 → 200 mi (321.87 km) in the USA, 200 km elsewhere.</summary>
+    public static SearchRadius Radius(int value, string? countryCode) =>
+        DistanceUnit(countryCode) == "mi"
+            ? new SearchRadius(value, "mi", Math.Round(value * KmPerMile, 2))
+            : new SearchRadius(value, "km", value);
+
+    /// <summary>The value in the country's unit for a radius in km (321.87 km → 200 in the USA).</summary>
+    public static int RadiusValue(double km, string? countryCode) =>
+        (int)Math.Round(DistanceUnit(countryCode) == "mi" ? km / KmPerMile : km, MidpointRounding.AwayFromZero);
+
+    public static bool IsValidRadius(int value) => value is >= MinRadiusValue and <= MaxRadiusValue;
+
+    /// <summary>USA → 200 miles; India, Nigeria, Ireland (and anything else) → 200 km.</summary>
+    public static SearchRadius DefaultSearchRadius(string? countryCode) => Radius(DefaultRadiusValue, countryCode);
 }

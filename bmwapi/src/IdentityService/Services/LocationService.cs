@@ -43,6 +43,7 @@ public class LocationService(ApplicationDbContext db, IOptions<LocationOptions> 
             throw AppException.BadRequest($"You can save up to {_opt.MaxLocationsPerUser} locations. Delete one first.", "TOO_MANY_LOCATIONS");
 
         var now = DateTime.UtcNow;
+        var country = CleanCountry(req.CountryCode) ?? CityCatalog.Describe(lat, lon).CountryCode;
         var row = new UserLocation
         {
             UserId = userId,
@@ -50,8 +51,8 @@ public class LocationService(ApplicationDbContext db, IOptions<LocationOptions> 
             PlaceName = CleanPlace(req.PlaceName),
             Latitude = lat,
             Longitude = lon,
-            RadiusKm = _opt.ClampRadius(req.RadiusKm),
-            CountryCode = CleanCountry(req.CountryCode) ?? CityCatalog.Describe(lat, lon).CountryCode,
+            RadiusKm = RadiusKm(req.RadiusValue, req.RadiusKm, country),
+            CountryCode = country,
             CreatedAt = now,
             UpdatedAt = now,
         };
@@ -69,7 +70,7 @@ public class LocationService(ApplicationDbContext db, IOptions<LocationOptions> 
     public async Task<MyLocationsResponse> UpdateAsync(string userId, Guid id, SaveLocationRequest req, CancellationToken ct)
     {
         var row = await FindAsync(userId, id, ct);
-        row.RadiusKm = _opt.ClampRadius(req.RadiusKm ?? row.RadiusKm);
+        var country = row.CountryCode;
 
         // The GPS row's place comes from GPS; only its radius can be changed by hand.
         if (!row.IsCurrentLocation)
@@ -79,9 +80,15 @@ public class LocationService(ApplicationDbContext db, IOptions<LocationOptions> 
             row.PlaceName = CleanPlace(req.PlaceName);
             row.Latitude = lat;
             row.Longitude = lon;
-            row.CountryCode = CleanCountry(req.CountryCode) ?? CityCatalog.Describe(lat, lon).CountryCode;
+            country = CleanCountry(req.CountryCode) ?? CityCatalog.Describe(lat, lon).CountryCode;
             SetAddress(row, req);
         }
+        // Not sent: the same number in the (possibly new) country's unit.
+        var keep = Math.Clamp(RegionRules.RadiusValue(row.RadiusKm, row.CountryCode), RegionRules.MinRadiusValue, RegionRules.MaxRadiusValue);
+        row.RadiusKm = req.RadiusValue is null && req.RadiusKm is > 0
+            ? RadiusKm(null, req.RadiusKm, country)
+            : RadiusKm(req.RadiusValue ?? keep, null, country);
+        row.CountryCode = country;
 
         row.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
@@ -95,6 +102,16 @@ public class LocationService(ApplicationDbContext db, IOptions<LocationOptions> 
             throw AppException.Conflict("Your primary location can't be deleted. Make another location primary first.", "PRIMARY_CANNOT_BE_DELETED");
 
         db.UserLocations.Remove(row);
+        await db.SaveChangesAsync(ct);
+        return await GetAsync(userId, ct);
+    }
+
+    /// <summary>Only the radius (in the location's unit, 5–1,000) – Home's location line, or the GPS row.</summary>
+    public async Task<MyLocationsResponse> SetRadiusAsync(string userId, Guid id, int? radiusValue, CancellationToken ct)
+    {
+        var row = await FindAsync(userId, id, ct);
+        row.RadiusKm = RadiusKm(radiusValue ?? throw InvalidRadius(row.CountryCode), null, row.CountryCode);
+        row.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
         return await GetAsync(userId, ct);
     }
@@ -132,23 +149,22 @@ public class LocationService(ApplicationDbContext db, IOptions<LocationOptions> 
         var now = DateTime.UtcNow;
         if (current is null)
         {
-            // Keep the radius the user was already using for their primary location.
-            var previousRadius = all.FirstOrDefault(l => l.IsPrimary)?.RadiusKm;
+            // Without a choice: the default radius (200 km / 200 mi) for where the phone is.
             current = new UserLocation
             {
                 UserId = userId,
                 Label = CityCatalog.CurrentLocationName,
                 PlaceName = place.Name,
-                RadiusKm = _opt.ClampRadius(req.RadiusKm ?? previousRadius),
+                RadiusKm = RadiusKm(req.RadiusValue, req.RadiusKm, place.CountryCode),
                 IsCurrentLocation = true,
                 CreatedAt = now,
             };
             db.UserLocations.Add(current);
             all.Add(current);
         }
-        else if (req.RadiusKm is not null)
+        else if (req.RadiusValue is not null || req.RadiusKm is not null)
         {
-            current.RadiusKm = _opt.ClampRadius(req.RadiusKm);
+            current.RadiusKm = RadiusKm(req.RadiusValue, req.RadiusKm, place.CountryCode);
         }
 
         current.PlaceName = place.Name;
@@ -173,6 +189,29 @@ public class LocationService(ApplicationDbContext db, IOptions<LocationOptions> 
     }
 
     // ── helpers ────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The radius to store (km, rounded): <paramref name="value"/> in the location's unit must be 5–1,000 (else 400
+    /// INVALID_RADIUS); an older app's km value is pulled into that range; nothing → the default.
+    /// </summary>
+    private static int RadiusKm(int? value, double? legacyKm, string? country)
+    {
+        if (value is { } v)
+        {
+            if (!RegionRules.IsValidRadius(v)) throw InvalidRadius(country);
+            return (int)Math.Round(RegionRules.Radius(v, country).Km, MidpointRounding.AwayFromZero);
+        }
+        if (legacyKm is > 0)
+        {
+            var clamped = Math.Clamp(RegionRules.RadiusValue(legacyKm.Value, country), RegionRules.MinRadiusValue, RegionRules.MaxRadiusValue);
+            return (int)Math.Round(RegionRules.Radius(clamped, country).Km, MidpointRounding.AwayFromZero);
+        }
+        return (int)Math.Round(RegionRules.DefaultSearchRadius(country).Km, MidpointRounding.AwayFromZero);
+    }
+
+    private static AppException InvalidRadius(string? country) => AppException.BadRequest(
+        $"Choose a radius between {RegionRules.MinRadiusValue} and {RegionRules.MaxRadiusValue:N0} {(RegionRules.DistanceUnit(country) == "mi" ? "miles" : "km")}.",
+        "INVALID_RADIUS");
 
     /// <summary>Manual primary choice: the GPS row is no longer needed and auto-update turns off.</summary>
     private async Task MakePrimaryAsync(string userId, UserLocation row, List<UserLocation> all, CancellationToken ct)
@@ -243,7 +282,11 @@ public class LocationService(ApplicationDbContext db, IOptions<LocationOptions> 
     private static string? CleanCountry(string? code) =>
         CityCatalog.TryGetCountry(code, out var country) && !string.IsNullOrWhiteSpace(code) ? country.Code : null;
 
-    public static UserLocationDto ToDto(UserLocation l) =>
-        new(l.Id, l.Label, l.PlaceName, l.Latitude, l.Longitude, l.RadiusKm, l.CountryCode, l.IsPrimary, l.IsCurrentLocation,
-            l.AddressLine, l.Area, l.Landmark, l.PostalCode);
+    /// <summary>The radius as the user chose it (200 mi) and its exact km (321.87); stored as whole km.</summary>
+    public static UserLocationDto ToDto(UserLocation l)
+    {
+        var radius = RegionRules.Radius(RegionRules.RadiusValue(l.RadiusKm, l.CountryCode), l.CountryCode);
+        return new(l.Id, l.Label, l.PlaceName, l.Latitude, l.Longitude, radius.Km, l.CountryCode, l.IsPrimary, l.IsCurrentLocation,
+            l.AddressLine, l.Area, l.Landmark, l.PostalCode, radius.Value, radius.Unit);
+    }
 }

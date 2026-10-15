@@ -260,8 +260,9 @@ public class UsShippingApiTests(AppFixture fixture) : IAsyncLifetime
         var us = await Json<List<ShippingRateDto>>(s => s.Get.Url("/api/shipping/rates?country=US"), "carol", "buyer");
         var freight = us.Single(r => r.SizeClass == "Freight");
         var vehicle = us.Single(r => r.SizeClass == "Vehicle");
-        Assert.Equal((250m, 0.35m, 250m, 1500m, 3500), (freight.BaseFee, freight.RatePerUnit, freight.MinFee, freight.MaxFee, freight.MaxDistance));
-        Assert.Equal((350m, 0.70m, 400m, 2800m, 3500), (vehicle.BaseFee, vehicle.RatePerUnit, vehicle.MinFee, vehicle.MaxFee, vehicle.MaxDistance));
+        // Up to 4,000 road miles: corner to corner (Miami → Seattle ≈ 3,550 mi).
+        Assert.Equal((250m, 0.35m, 250m, 1500m, 4000), (freight.BaseFee, freight.RatePerUnit, freight.MinFee, freight.MaxFee, freight.MaxDistance));
+        Assert.Equal((350m, 0.70m, 400m, 2800m, 4000), (vehicle.BaseFee, vehicle.RatePerUnit, vehicle.MinFee, vehicle.MaxFee, vehicle.MaxDistance));
         Assert.All([freight, vehicle], r => Assert.True(r.IsEstimate && !r.IsPlaceholder));
         Assert.Contains("Warp", freight.Source);
         Assert.Contains("Kelley Blue Book", vehicle.Source);
