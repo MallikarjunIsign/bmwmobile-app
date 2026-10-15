@@ -17,6 +17,13 @@ const fixMessage = (m: ChatMessage): ChatMessage => ({ ...m, photos: (m.photos ?
 const fixConversation = (c: Conversation): Conversation => ({ ...c, listing: fixListing(c.listing), messages: c.messages.map(fixMessage) });
 
 /** Buyer–seller chat (ChatService behind the Gateway at /chat). */
+/** Where the phone is, for location-based notifications (buyers' part requests near a seller). */
+export interface PushLocation {
+  latitude?: number;
+  longitude?: number;
+  countryCode?: string | null;
+}
+
 export const ChatApi = {
   inbox: (role: 'all' | 'buying' | 'selling' = 'all') =>
     call<ConversationSummary[]>(() => http.get('/chat/conversations', { params: { role } }), "Couldn't load your messages").then(list =>
@@ -47,8 +54,9 @@ export const ChatApi = {
 
   unblock: (username: string) => call<unknown>(() => http.delete(`/chat/blocks/${encodeURIComponent(username)}`), "Couldn't unblock the user"),
 
-  registerDevice: (token: string, platform: 'android' | 'ios') =>
-    call<unknown>(() => http.post('/chat/devices', { token, platform }), "Couldn't register for notifications"),
+  /** where = the app's current location: sellers are told about buyers' part requests near them only. */
+  registerDevice: (token: string, platform: 'android' | 'ios', where?: PushLocation) =>
+    call<unknown>(() => http.post('/chat/devices', { token, platform, ...where }), "Couldn't register for notifications"),
 
   removeDevice: (token: string) => call<unknown>(() => http.delete(`/chat/devices/${encodeURIComponent(token)}`), "Couldn't unregister"),
 

@@ -260,26 +260,37 @@ public class ListingRulesTests
         Assert.Equal(expected, ListingRules.ContainsContactDetails(text));
 
     [Fact]
-    public void Shipping_NeedsAFeeOrFreeShipping_AndASizeClass()
+    public void Shipping_GetsTheDefaultSizeClass_NoManualFee()
     {
-        var missing = ListingRules.ValidateForPublish(Draft(ListingKind.VehicleSpecificPart, Bumper, d =>
+        // No fee to enter: the charge is calculated. The size class defaults from the part type (bumper → Large).
+        var shipped = Draft(ListingKind.VehicleSpecificPart, Bumper, d =>
         {
             HiluxBumper(d);
             d.DeliveryOptions = ["Shipping"];
-        }));
-        Assert.Contains("sizeClass", missing.Keys);
-        Assert.Contains("shippingFee", missing.Keys);
+            d.ShippingFee = 500;
+        });
+        Assert.Empty(ListingRules.ValidateForPublish(shipped));
+        Assert.Equal(SizeClass.Large, shipped.Item.SizeClass);
+        Assert.Null(shipped.Item.ShippingFee);
 
-        // Free shipping is a fee of 0.
-        var free = Draft(ListingKind.VehicleSpecificPart, Bumper, d =>
+        // The seller can change it.
+        var freight = Draft(ListingKind.VehicleSpecificPart, Bumper, d =>
         {
             HiluxBumper(d);
             d.DeliveryOptions = ["Pickup", "Shipping"];
-            d.ShippingFee = 0;
+            d.SizeClass = "Freight";
+        });
+        Assert.Equal(SizeClass.Freight, freight.Item.SizeClass);
+        Assert.Equal(DeliveryOptions.Pickup | DeliveryOptions.Shipping, freight.Item.DeliveryOptions);
+
+        // Pickup only: no size class.
+        var pickup = Draft(ListingKind.VehicleSpecificPart, Bumper, d =>
+        {
+            HiluxBumper(d);
+            d.DeliveryOptions = ["Pickup"];
             d.SizeClass = "Large";
         });
-        Assert.Empty(ListingRules.ValidateForPublish(free));
-        Assert.Equal(DeliveryOptions.Pickup | DeliveryOptions.Shipping, free.Item.DeliveryOptions);
+        Assert.Null(pickup.Item.SizeClass);
     }
 
     [Fact]

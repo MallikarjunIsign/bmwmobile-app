@@ -14,7 +14,7 @@ services:
       timeout: 5s
       retries: 5
   meilisearch:
-    image: getmeili/meilisearch:latest
+    image: getmeili/meilisearch:v1.54.2  # pinned - "latest" can change the search engine on a pull
     environment:
       MEILI_MASTER_KEY: masterkey
     ports:
@@ -102,6 +102,13 @@ services:
       - Email__Username=${EMAIL_USERNAME:-}
       - Email__Password=${EMAIL_PASSWORD:-}
       - Email__FromAddress=${EMAIL_FROM:-}
+      # Local test accounts (admin + one seller): set them in .env too; empty = not created.
+      - Seed__AdminEmail=${SEED_ADMIN_EMAIL:-}
+      - Seed__AdminPassword=${SEED_ADMIN_PASSWORD:-}
+      - Seed__SellerEmail=${SEED_SELLER_EMAIL:-}
+      - Seed__SellerPassword=${SEED_SELLER_PASSWORD:-}
+      # Existing users with listings become sellers (asked once from auction-svc).
+      - RoleBackfill__AuctionServiceUrl=http://auction-svc
     ports:
       - "5001:80"
     volumes:

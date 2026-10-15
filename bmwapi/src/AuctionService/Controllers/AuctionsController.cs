@@ -3,6 +3,7 @@ using System.Globalization;
 using AuctionService.Data;
 using AuctionService.DTOs;
 using AuctionService.Entities;
+using AuctionService.Errors;
 using AuctionService.RequestHelpers;
 using AuctionService.Services;
 using AuctionService.Validation;
@@ -65,6 +66,7 @@ public class AuctionsController(AuctionDbContext context, IDbContextOutbox<Aucti
     }
 
     [Authorize]
+    [SellerOnly]
     [HttpPost]
     public async Task<ActionResult<AuctionDto>> CreateAuction(CreateAuctionDto createAuctionDto)
     {
@@ -87,6 +89,7 @@ public class AuctionsController(AuctionDbContext context, IDbContextOutbox<Aucti
     }
 
     [Authorize]
+    [SellerOnly]
     [HttpPut("{id}")]
     public async Task<IActionResult> UpdateAuction(string id, UpdateAuctionDto updateAuctionDto)
     {
@@ -130,6 +133,7 @@ public class AuctionsController(AuctionDbContext context, IDbContextOutbox<Aucti
     }
 
     [Authorize]
+    [SellerOnly]
     [HttpDelete("{id}")]
     public async Task<IActionResult> DeleteAuction(string id, [FromServices] ListingImageService images)
     {
@@ -166,6 +170,7 @@ public class AuctionsController(AuctionDbContext context, IDbContextOutbox<Aucti
     /// copied) and container, and new prices and end time.
     /// </summary>
     [Authorize]
+    [SellerOnly]
     [HttpPost("{id}/relist")]
     public async Task<ActionResult<AuctionDto>> RelistAuction(string id, RelistAuctionDto dto,
         [FromServices] ListingImageService images)

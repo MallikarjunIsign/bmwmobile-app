@@ -28,6 +28,24 @@ public class CreatePartRequestDto
     public string? TargetContainerCode { get; set; }
 }
 
+/// <summary>An open buyer request as sellers see it ("Buyer requests"): no buyer name, only the city.</summary>
+public class OpenPartRequestDto
+{
+    public required string Id { get; set; }
+    public required string Title { get; set; }
+    public string? PartName { get; set; }
+    public string? PartNumber { get; set; }
+    public string? Make { get; set; }
+    public string? Model { get; set; }
+    public int? Year { get; set; }
+    public string? Specs { get; set; }
+    /// <summary>The buyer's budget in the local currency, if they gave one.</summary>
+    public decimal? MaxBudget { get; set; }
+    public string? LocationName { get; set; }
+    public string? CountryCode { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
 public class PartRequestDto
 {
     public required string Id { get; set; }

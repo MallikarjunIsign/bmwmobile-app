@@ -14,6 +14,9 @@ public class DbInitializer
         var seededIds = SeedData(context, app);
         // Master data (part catalogue, makes/models) – also in tests.
         CatalogSeed.Seed(context);
+        // Shipping rates (PLACEHOLDER values until an admin sets real ones) and size classes for older listings.
+        Services.ShippingRateSeed.Seed(context);
+        Services.ShippingRateSeed.BackfillSizeClasses(context);
         var locatedIds = seededIds.Count == 0 ? BackfillSeedLocations(context, app) : [];
         if (seededIds.Count == 0) seededIds = AddIrelandParts(context, app);
 

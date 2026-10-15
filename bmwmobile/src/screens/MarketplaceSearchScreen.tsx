@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, FlatList } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CompositeScreenProps } from '@react-navigation/native';
@@ -6,82 +6,78 @@ import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MainTabParamList, RootStackParamList } from '../types/navigation';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
-import { ApiService } from '../services/api';
-import { FilterOptions } from '../types/models';
-import type { QueryChip } from '../types/listing';
+import type { FacetValue, QueryChip } from '../types/listing';
 import { AuctionCard } from '../components/AuctionCard';
 import { LocationBanner } from '../components/LocationBanner';
 import { NoPartsFound } from '../components/NoPartsFound';
-import { SearchBox, rememberSearch, type SearchState } from '../components/SearchBox';
-import { FilterSheet, SORTS, type SheetFilters } from '../components/FilterSheet';
+import { FilterSheet, SORTS } from '../components/FilterSheet';
+import { BrowseFilters } from '../components/BrowseFilters';
 import { useLocations } from '../location/LocationContext';
-import { garageLabel, useGarage } from '../location/GarageContext';
+import { useGarage } from '../location/GarageContext';
 import { useListingSearch } from '../hooks/useListingSearch';
+import { useBrowse } from '../search/BrowseContext';
+import { BrowseSearchBox } from '../search/BrowseSearchBox';
 import { formatRadius, distanceUnit, REGIONS } from '../utils/geo';
+import { categoryLabel } from '../utils/categories';
+
+export { categoryLabel };
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<MainTabParamList, 'Marketplace'>,
   NativeStackScreenProps<RootStackParamList>
 >;
 
-/** "WheelsAndTyres" → "Wheels & Tyres". */
-export const categoryLabel = (value: string) =>
-  value.replace(/And/g, ' & ').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/\s+/g, ' ').trim();
+const Pill = ({ label, count, active, onPress, small }: { label: string; count?: number; active: boolean; onPress: () => void; small?: boolean }) => (
+  <TouchableOpacity
+    style={[small ? styles.modelPill : styles.pill, active && (small ? styles.modelPillActive : styles.pillActive)]}
+    onPress={onPress}
+    accessibilityState={{ selected: active }}
+  >
+    <Text style={[small ? styles.modelText : styles.pillText, active && (small ? styles.modelTextActive : styles.pillTextActive)]}>
+      {label}{count !== undefined ? ` (${count})` : ''}
+    </Text>
+  </TouchableOpacity>
+);
 
-type ModelPill = { make: string; model: string };
-const modelKey = (m: ModelPill) => `${m.make}|${m.model}`;
+/** A selected value stays visible even when the current search has none of it. */
+const withSelected = (values: FacetValue[], selected?: string) =>
+  selected && !values.some(v => v.value === selected) ? [{ value: selected, count: 0 }, ...values] : values;
 
 /**
- * Marketplace: one search box with suggestions and chips, the predefined pills (categories and make/model from the
- * live listings near the user), a filter sheet, sort, and results like an online shop.
+ * Market: the search box (suggestions → chips), Home's filters (Parts / Vehicles, All / Auction / Direct sale),
+ * pills with counts from the same search (parts: categories → part types; vehicles: makes → models), the filter
+ * sheet (with My Garage) and the results. Every request carries every active filter; "Clear all" resets them.
  */
 export const MarketplaceSearchScreen: React.FC<Props> = ({ navigation, route }) => {
   const { near, country, location, locationOff } = useLocations();
-  const { vehicles: garageVehicles, selected: garage, select: selectGarage } = useGarage();
-  const [search, setSearch] = useState<SearchState>({ text: route.params?.searchTerm ?? '', chips: [] });
-  const [submitted, setSubmitted] = useState<SearchState>(search);
-  const [filters, setFilters] = useState<SheetFilters>({ category: route.params?.category });
-  const [options, setOptions] = useState<FilterOptions>({ categories: [], makes: [], models: [], totalCount: 0 });
+  const { vehicles: garageVehicles, selected: selectedGarage, select: selectGarage } = useGarage();
+  const browse = useBrowse();
+  const { itemType, search: submitted, setSearch: setSubmitted, filters, setFilters, clearAll, hasAnything } = browse;
   const [sheet, setSheet] = useState(false);
   const [grid, setGrid] = useState(false);
 
-  // Opened from another screen with a search / category.
+  // Opened from another screen with a search text / category (older links).
   useEffect(() => {
-    if (route.params?.searchTerm !== undefined) {
-      const next = { text: route.params.searchTerm, chips: [] };
-      setSearch(next);
-      setSubmitted(next);
-    }
-    if (route.params?.category !== undefined) setFilters(f => ({ ...f, category: route.params?.category || undefined }));
-  }, [route.params?.searchTerm, route.params?.category]);
+    const term = route.params?.searchTerm;
+    const category = route.params?.category;
+    if (term !== undefined) setSubmitted({ text: term, chips: [] });
+    if (category !== undefined) setFilters(f => ({ ...f, category: category || undefined }));
+  }, [route.params?.searchTerm, route.params?.category, setSubmitted, setFilters]);
 
-  // Pills: the categories and make/model combinations that have live listings near the user.
-  useEffect(() => {
-    ApiService.getFilterOptions(near, country).then(setOptions);
-  }, [near, country]);
+  // The same search as Home (one shared state): what Home shows, Market shows.
+  const { results, facets, total, loading, error, query, garage } = useListingSearch(browse.input);
 
-  const input = useMemo(() => ({ text: submitted.text, chips: submitted.chips, filters }), [submitted, filters]);
-  const { results, facets, total, loading, error, query } = useListingSearch(input);
-
-  const submit = useCallback((next: SearchState) => {
-    setSubmitted(next);
-    rememberSearch(next);
-  }, []);
-
-  const selectedModel = useMemo<ModelPill | null>(
-    () => (filters.make && filters.model ? { make: filters.make, model: filters.model } : null),
-    [filters.make, filters.model],
-  );
-
-  // A selected pill stays visible even when it has no listings any more.
-  const categoryPills = useMemo(() => {
-    const values = options.categories.map(c => c.value);
-    return filters.category && !values.includes(filters.category) ? [filters.category, ...values] : values;
-  }, [options.categories, filters.category]);
-  const modelPills = useMemo(() => {
-    const list: ModelPill[] = options.models.map(m => ({ make: m.make, model: m.model }));
-    return selectedModel && !list.some(m => modelKey(m) === modelKey(selectedModel)) ? [selectedModel, ...list] : list;
-  }, [options.models, selectedModel]);
+  const parts = itemType === 'Part';
+  const categories = withSelected(facets.category ?? [], filters.category);
+  const partTypes = withSelected(facets.partType ?? [], filters.partType);
+  const makes = withSelected(facets.make ?? [], filters.make);
+  const models = useMemo(() => {
+    const list = (facets.model ?? []).map(v => {
+      const [make, model] = v.value.split('|');
+      return { make, model, count: v.count };
+    });
+    return parts ? list : list.filter(m => m.make === filters.make);
+  }, [facets.model, parts, filters.make]);
 
   const createCustomOrder = () => {
     const chip = (t: QueryChip['type']) => submitted.chips.find(c => c.type === t);
@@ -96,14 +92,18 @@ export const MarketplaceSearchScreen: React.FC<Props> = ({ navigation, route }) 
   };
 
   const where = near && location ? ` within ${formatRadius(location.radiusKm, country)}` : '';
+  const noun = parts ? (total === 1 ? 'part' : 'parts') : total === 1 ? 'vehicle' : 'vehicles';
   const sortLabel = SORTS.find(s => s.value === (filters.sort ?? 'best'))?.label ?? 'Best match';
-  const activeFilters = [filters.kind, filters.condition, filters.brandType, filters.partType, filters.year, filters.minPrice, filters.maxPrice, filters.maxDistanceKm, filters.delivery, filters.minSellerRating]
-    .filter(v => v !== undefined).length;
+  const activeFilters = [filters.kind, filters.condition, filters.brandType, filters.year, filters.minPrice, filters.maxPrice, filters.maxDistanceKm, filters.delivery, filters.minSellerRating, garage?.id]
+    .filter(v => v !== undefined && v !== null).length;
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.searchHeader}>
-        <SearchBox value={search} onChange={setSearch} onSubmit={submit} country={country} />
+        <BrowseSearchBox />
+        <View style={styles.browse}>
+          <BrowseFilters />
+        </View>
       </View>
 
       {locationOff ? (
@@ -112,60 +112,69 @@ export const MarketplaceSearchScreen: React.FC<Props> = ({ navigation, route }) 
         </View>
       ) : null}
 
-      {/* Category Pills */}
+      {/* Parts: categories → part types. Vehicles: makes → models. Counts from this search. */}
       <View style={styles.pillsWrap}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          {[null, ...categoryPills].map(cat => {
-            const active = (filters.category ?? null) === cat;
-            return (
-              <TouchableOpacity
-                key={cat ?? 'all'}
-                style={[styles.pill, active && styles.pillActive]}
-                onPress={() => setFilters(f => ({ ...f, category: cat ?? undefined }))}
-                accessibilityState={{ selected: active }}
-              >
-                <Text style={[styles.pillText, active && styles.pillTextActive]}>{cat ? categoryLabel(cat) : 'All'}</Text>
-              </TouchableOpacity>
-            );
-          })}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          {parts ? (
+            <>
+              <Pill label="All categories" active={!filters.category} onPress={() => setFilters(f => ({ ...f, category: undefined, partType: undefined }))} />
+              {categories.map(c => (
+                <Pill key={c.value} label={categoryLabel(c.value)} count={c.count} active={filters.category === c.value}
+                  onPress={() => setFilters(f => ({ ...f, category: f.category === c.value ? undefined : c.value, partType: undefined }))} />
+              ))}
+            </>
+          ) : (
+            <>
+              <Pill label="All makes" active={!filters.make} onPress={() => setFilters(f => ({ ...f, make: undefined, model: undefined }))} />
+              {makes.map(m => (
+                <Pill key={m.value} label={m.value} count={m.count} active={filters.make === m.value}
+                  onPress={() => setFilters(f => ({ ...f, make: f.make === m.value ? undefined : m.value, model: undefined }))} />
+              ))}
+            </>
+          )}
         </ScrollView>
       </View>
 
-      {/* Make / Model Pills + My Garage */}
-      <View style={styles.modelsWrap}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          {garageVehicles.map(v => {
-            const active = garage?.id === v.id;
-            return (
-              <TouchableOpacity key={`g${v.id}`} style={[styles.modelPill, styles.garagePill, active && styles.modelPillActive]}
-                onPress={() => selectGarage(active ? null : v.id!)}>
-                <Text style={[styles.modelText, active && styles.modelTextActive]}>🚗 {garageLabel(v)}</Text>
-              </TouchableOpacity>
-            );
-          })}
-          {[null, ...modelPills].map(mod => {
-            const active = mod === null ? selectedModel === null : !!selectedModel && modelKey(selectedModel) === modelKey(mod);
-            return (
-              <TouchableOpacity
-                key={mod ? modelKey(mod) : 'all'}
-                style={[styles.modelPill, active && styles.modelPillActive]}
-                onPress={() => setFilters(f => ({ ...f, make: mod?.make, model: mod?.model }))}
-                accessibilityState={{ selected: active }}
-              >
-                <Text style={[styles.modelText, active && styles.modelTextActive]}>{mod ? `${mod.make} ${mod.model}` : 'All Models'}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-      </View>
+      {(parts && filters.category ? partTypes.length > 0 : models.length > 0) ? (
+        <View style={styles.modelsWrap}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            {parts && filters.category ? (
+              <>
+                <Pill small label="All types" active={!filters.partType} onPress={() => setFilters(f => ({ ...f, partType: undefined }))} />
+                {partTypes.map(t => (
+                  <Pill small key={t.value} label={t.value} count={t.count} active={filters.partType === t.value}
+                    onPress={() => setFilters(f => ({ ...f, partType: f.partType === t.value ? undefined : t.value }))} />
+                ))}
+              </>
+            ) : (
+              <>
+                <Pill small label="All Models" active={!filters.model}
+                  onPress={() => setFilters(f => ({ ...f, make: parts ? undefined : f.make, model: undefined }))} />
+                {models.map(m => (
+                  <Pill small key={`${m.make}|${m.model}`} label={parts ? `${m.make} ${m.model}` : m.model} count={m.count}
+                    active={filters.make === m.make && filters.model === m.model}
+                    onPress={() => setFilters(f => (f.make === m.make && f.model === m.model
+                      ? { ...f, model: undefined, make: parts ? undefined : f.make }
+                      : { ...f, make: m.make, model: m.model }))} />
+                ))}
+              </>
+            )}
+          </ScrollView>
+        </View>
+      ) : null}
 
       {/* Results Header */}
       <View style={styles.resultsHeader}>
         <Text style={styles.resultsCount}>
-          {loading ? 'Searching…' : `${total} ${total === 1 ? 'part' : 'parts'} found${where}`}
+          {loading ? 'Searching…' : `${total} ${noun} found${where}`}
           {garage ? ` · for your ${garage.year} ${garage.model}` : ''}
         </Text>
         <View style={styles.headerActions}>
+          {hasAnything ? (
+            <TouchableOpacity onPress={clearAll} accessibilityLabel="Clear all">
+              <Text style={styles.clearAll}>Clear all</Text>
+            </TouchableOpacity>
+          ) : null}
           <TouchableOpacity onPress={() => setGrid(g => !g)} accessibilityLabel="Toggle grid">
             <Text style={styles.sortLabel}>{grid ? '☰' : '▦'}</Text>
           </TouchableOpacity>
@@ -205,6 +214,7 @@ export const MarketplaceSearchScreen: React.FC<Props> = ({ navigation, route }) 
         unit={distanceUnit(country)}
         currencySymbol={REGIONS[country].currencySymbol}
         hasLocation={!!near}
+        garage={parts ? { vehicles: garageVehicles, selectedId: selectedGarage?.id ?? null, onSelect: selectGarage, onManage: () => navigation.navigate('Garage') } : undefined}
       />
     </SafeAreaView>
   );
@@ -215,6 +225,7 @@ const styles = StyleSheet.create({
   searchHeader: {
     padding: SPACING.md, backgroundColor: COLORS.surface, borderBottomWidth: 1, borderBottomColor: COLORS.border, zIndex: 10,
   },
+  browse: { marginTop: SPACING.sm },
   bannerWrap: { paddingHorizontal: SPACING.md, paddingTop: SPACING.sm, backgroundColor: COLORS.surface },
   pillsWrap: { backgroundColor: COLORS.surface, paddingVertical: SPACING.xs + 2, paddingHorizontal: SPACING.md },
   pill: {
@@ -229,13 +240,13 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: COLORS.border,
   },
   modelPill: { backgroundColor: COLORS.cardSecondary, paddingHorizontal: SPACING.sm + 4, paddingVertical: 4, borderRadius: RADIUS.sm, marginRight: SPACING.xs },
-  garagePill: { borderWidth: 1, borderColor: COLORS.borderHighlight },
   modelPillActive: { backgroundColor: COLORS.badgeBg, borderWidth: 1, borderColor: COLORS.primary },
   modelText: { color: COLORS.textMuted, fontSize: 11, fontWeight: '600' },
   modelTextActive: { color: COLORS.primaryGlow, fontWeight: '700' },
   resultsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm },
   resultsCount: { color: COLORS.textSecondary, fontSize: 12, fontWeight: '700', flexShrink: 1 },
   headerActions: { flexDirection: 'row', gap: SPACING.md, alignItems: 'center' },
+  clearAll: { color: COLORS.danger, fontSize: 12, fontWeight: '700' },
   sortLabel: { color: COLORS.primaryGlow, fontSize: 12, fontWeight: '700' },
   error: { color: COLORS.danger, paddingHorizontal: SPACING.md, fontSize: 13 },
   listContent: { padding: SPACING.md, paddingBottom: SPACING.xxl },

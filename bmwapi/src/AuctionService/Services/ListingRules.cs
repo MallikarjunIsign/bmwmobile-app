@@ -150,18 +150,21 @@ public static partial class ListingRules
                 if (OrderTracking.ParseMethod(o) is { } parsed) options |= parsed;
             item.DeliveryOptions = options;
         }
-        if (dto.SizeClass is not null)
-            item.SizeClass = Enum.TryParse<SizeClass>(dto.SizeClass, true, out var size) ? size : null;
-        if (dto.FreeShipping == true) item.ShippingFee = 0;
-        else if (dto.FreeShipping == false && item.ShippingFee == 0) item.ShippingFee = null;
-        if (dto.ShippingFee is not null && dto.FreeShipping != true) item.ShippingFee = dto.ShippingFee;
+        if (dto.SizeClass is not null && Enum.TryParse<SizeClass>(dto.SizeClass, true, out var size) && Enum.IsDefined(size))
+            item.SizeClass = size;
+        // The shipping charge is calculated (size class + distance + the country's rates): there is no manual fee any
+        // more, so a fee sent by an older app is ignored.
+        item.ShippingFee = null;
         if (dto.PickupAddress is not null) item.PickupAddress = Clean(dto.PickupAddress, 300);
-        // Shipping details only exist while Shipping is offered (the pickup address only with Pickup).
-        if (!item.DeliveryOptions.HasFlag(DeliveryOptions.Shipping))
-        {
-            item.ShippingFee = null;
-            item.SizeClass = null;
-        }
+        // Shipping needs a size class: the part type's default unless the seller chose one; vehicles are Vehicle.
+        // The package (US prices use it). Values from the form; null keeps the part type's default.
+        if (dto.WeightLb is not null) item.WeightLb = dto.WeightLb > 0 ? Math.Round(dto.WeightLb.Value, 2) : null;
+        if (dto.LengthIn is not null) item.LengthIn = dto.LengthIn > 0 ? Math.Round(dto.LengthIn.Value, 1) : null;
+        if (dto.WidthIn is not null) item.WidthIn = dto.WidthIn > 0 ? Math.Round(dto.WidthIn.Value, 1) : null;
+        if (dto.HeightIn is not null) item.HeightIn = dto.HeightIn > 0 ? Math.Round(dto.HeightIn.Value, 1) : null;
+        if (!item.DeliveryOptions.HasFlag(DeliveryOptions.Shipping)) item.SizeClass = null;
+        else if (item.Kind == ListingKind.Vehicle) item.SizeClass = SizeClass.Vehicle;
+        else item.SizeClass ??= ShippingRules.DefaultSizeClass(item.Kind, (partType ?? item.PartType)?.Name);
         if (!item.DeliveryOptions.HasFlag(DeliveryOptions.Pickup)) item.PickupAddress = null;
 
         if (dto.PartPrice is not null)
@@ -456,8 +459,6 @@ public static partial class ListingRules
         if (item.DeliveryOptions == DeliveryOptions.None) Add("deliveryOptions", "Choose Pickup, Shipping or both");
         if (item.DeliveryOptions.HasFlag(DeliveryOptions.Shipping))
         {
-            if (item.ShippingFee is null) Add("shippingFee", "Enter the shipping fee or choose Free shipping");
-            else if (item.ShippingFee < 0) Add("shippingFee", "The shipping fee can't be negative");
             if (item.SizeClass is null) Add("sizeClass", "Choose the size class for shipping");
         }
         if (ContainsContactDetails(item.PickupAddress))

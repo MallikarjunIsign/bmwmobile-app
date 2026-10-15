@@ -285,6 +285,9 @@ namespace AuctionService.Data.Migrations
                     b.Property<int?>("FitmentMode")
                         .HasColumnType("integer");
 
+                    b.Property<decimal?>("HeightIn")
+                        .HasColumnType("numeric(6,1)");
+
                     b.Property<int>("ItemType")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
@@ -295,6 +298,9 @@ namespace AuctionService.Data.Migrations
 
                     b.Property<double?>("Latitude")
                         .HasColumnType("double precision");
+
+                    b.Property<decimal?>("LengthIn")
+                        .HasColumnType("numeric(6,1)");
 
                     b.Property<string>("LocationName")
                         .HasMaxLength(120)
@@ -350,6 +356,12 @@ namespace AuctionService.Data.Migrations
                     b.Property<string>("TitleExtra")
                         .HasMaxLength(80)
                         .HasColumnType("character varying(80)");
+
+                    b.Property<decimal?>("WeightLb")
+                        .HasColumnType("numeric(7,2)");
+
+                    b.Property<decimal?>("WidthIn")
+                        .HasColumnType("numeric(6,1)");
 
                     b.Property<int>("Year")
                         .HasColumnType("integer");
@@ -587,7 +599,27 @@ namespace AuctionService.Data.Migrations
                         .HasMaxLength(30)
                         .HasColumnType("character varying(30)");
 
+                    b.Property<int?>("ShippingDistance")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ShippingDistanceUnit")
+                        .HasMaxLength(2)
+                        .HasColumnType("character varying(2)");
+
                     b.Property<int?>("ShippingFee")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("ShippingRateEstimated")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("ShippingService")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<int?>("ShippingSizeClass")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("ShippingZone")
                         .HasColumnType("integer");
 
                     b.Property<int>("Status")
@@ -1287,6 +1319,72 @@ namespace AuctionService.Data.Migrations
                     b.ToTable("ShippingAddresses");
                 });
 
+            modelBuilder.Entity("AuctionService.Entities.ShippingRate", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("BaseFee")
+                        .HasColumnType("numeric(12,2)");
+
+                    b.Property<string>("CountryCode")
+                        .IsRequired()
+                        .HasMaxLength(2)
+                        .HasColumnType("character varying(2)");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
+
+                    b.Property<bool>("IsEstimate")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsPlaceholder")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("MaxDistance")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("MaxFee")
+                        .HasColumnType("numeric(12,2)");
+
+                    b.Property<decimal>("MinFee")
+                        .HasColumnType("numeric(12,2)");
+
+                    b.Property<decimal>("RatePerUnit")
+                        .HasColumnType("numeric(12,4)");
+
+                    b.Property<int>("SizeClass")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Source")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("Unit")
+                        .IsRequired()
+                        .HasMaxLength(2)
+                        .HasColumnType("character varying(2)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CountryCode", "SizeClass")
+                        .IsUnique();
+
+                    b.ToTable("ShippingRates");
+                });
+
             modelBuilder.Entity("AuctionService.Entities.UserBlock", b =>
                 {
                     b.Property<string>("Blocker")
@@ -1628,6 +1726,9 @@ namespace AuctionService.Data.Migrations
                                 .HasMaxLength(2)
                                 .HasColumnType("character varying(2)");
 
+                            b1.Property<double?>("Latitude")
+                                .HasColumnType("double precision");
+
                             b1.Property<string>("Line1")
                                 .IsRequired()
                                 .HasMaxLength(150)
@@ -1636,6 +1737,9 @@ namespace AuctionService.Data.Migrations
                             b1.Property<string>("Line2")
                                 .HasMaxLength(150)
                                 .HasColumnType("character varying(150)");
+
+                            b1.Property<double?>("Longitude")
+                                .HasColumnType("double precision");
 
                             b1.Property<string>("Name")
                                 .IsRequired()
@@ -1771,6 +1875,9 @@ namespace AuctionService.Data.Migrations
                                 .HasMaxLength(2)
                                 .HasColumnType("character varying(2)");
 
+                            b1.Property<double?>("Latitude")
+                                .HasColumnType("double precision");
+
                             b1.Property<string>("Line1")
                                 .IsRequired()
                                 .HasMaxLength(150)
@@ -1779,6 +1886,9 @@ namespace AuctionService.Data.Migrations
                             b1.Property<string>("Line2")
                                 .HasMaxLength(150)
                                 .HasColumnType("character varying(150)");
+
+                            b1.Property<double?>("Longitude")
+                                .HasColumnType("double precision");
 
                             b1.Property<string>("Name")
                                 .IsRequired()

@@ -347,7 +347,8 @@ public class ListingApiTests(AppFixture fixture) : IAsyncLifetime
         Assert.Equal(14100, buyerView.FinalTotal);
         // Part price 14,000 + winning bid 100; no shipping.
         Assert.Equal((14000, 100, 14100), (buyerView.PartPrice, buyerView.WinningBid, buyerView.Total));
-        Assert.Null(buyerView.ShippingFee);
+        // Pickup is free.
+        Assert.Equal(0, buyerView.ShippingCharge);
         Assert.Equal("bob@example.com", buyerView.ContactEmail);
 
         // The buyer opened Orders, so the seller can now see the buyer's contact too.
@@ -392,7 +393,6 @@ public class ListingApiTests(AppFixture fixture) : IAsyncLifetime
         if (delivery.Contains("Shipping"))
         {
             listing.SizeClass = "Large";
-            listing.ShippingFee = 500;
         }
         listing.PickupAddress = "Plot 12, Road 4, KPHB Colony";
         await Save(draft.Id, listing);
@@ -412,7 +412,9 @@ public class ListingApiTests(AppFixture fixture) : IAsyncLifetime
     private static AddressDto Hyderabad() => new()
     {
         Name = "Alice Reddy", Phone = "+91 98480 12345", Line1 = "Flat 4, Road 2", Line2 = "Kukatpally", City = "Hyderabad",
-        Postcode = "500072", CountryCode = "IN"
+        Postcode = "500072", CountryCode = "IN",
+        // The delivery location (a saved location or GPS): Secunderabad side of Hyderabad.
+        Latitude = 17.4399, Longitude = 78.4983,
     };
 
     [Fact]
@@ -422,8 +424,8 @@ public class ListingApiTests(AppFixture fixture) : IAsyncLifetime
         Assert.Null(order.DeliveryMethod);
         Assert.Equal(["Pickup", "Shipping"], order.DeliveryChoices);
         Assert.Equal("Sold", order.StatusLabel);
-        Assert.Equal(500, order.ShippingFee);
-        Assert.Equal(14100, order.Total); // shipping only counts once chosen
+        Assert.Null(order.ShippingCharge); // calculated once the buyer chooses Shipping with a location
+        Assert.Equal(14100, order.Total);
 
         // The seller has to wait for the buyer's choice.
         var seller = (await Send<List<OrderDto>>(s => s.Get.Url("/api/orders"))).Single(o => o.Id == order.Id);
@@ -448,7 +450,9 @@ public class ListingApiTests(AppFixture fixture) : IAsyncLifetime
         Assert.Equal("Shipping", chosen.DeliveryMethod);
         Assert.Equal("Alice Reddy", chosen.ShipTo!.Name);
         Assert.Null(chosen.PickupAddress);
-        Assert.Equal(14600, chosen.Total); // + shipping ₹500
+        // + the calculated charge (placeholder India Large: ₹300 + ₹5 / km, at least ₹300).
+        Assert.True(chosen.ShippingCharge >= 300);
+        Assert.Equal(14100 + chosen.ShippingCharge, chosen.Total);
         Assert.Equal(["Sold", "Shipped", "Delivered", "Completed"], chosen.Tracking.Select(t => t.Label));
         Assert.Equal([("Delivered", "Delivered")], chosen.Actions.Select(a => (a.Status, a.Label)));
 
@@ -486,7 +490,7 @@ public class ListingApiTests(AppFixture fixture) : IAsyncLifetime
         Assert.True(order.NeedsShippingAddress);
         Assert.Equal(["Shipping"], order.DeliveryChoices);
         Assert.Empty(order.Actions);
-        Assert.Equal(14600, order.Total);
+        Assert.Equal(14100, order.Total); // no charge until there's a delivery location
 
         await SendText(s => s.Post.Json(new OrderStatusDto { Status = "Shipped" }).ToUrl($"/api/orders/{order.Id}/status"), HttpStatusCode.BadRequest);
         await SendText(s => s.Post.Json(new ChooseDeliveryDto { Method = "Pickup" }).ToUrl($"/api/orders/{order.Id}/delivery-method"), HttpStatusCode.BadRequest, "alice");
@@ -494,12 +498,14 @@ public class ListingApiTests(AppFixture fixture) : IAsyncLifetime
         // From the address book.
         var saved = await Send<ShippingAddressDto>(s => s.Post.Json(new ShippingAddressDto
         {
-            Name = "Alice Reddy", Phone = "9848012345", Line1 = "Flat 4, Road 2", City = "Hyderabad", Postcode = "500072", CountryCode = "IN"
+            Name = "Alice Reddy", Phone = "9848012345", Line1 = "Flat 4, Road 2", City = "Hyderabad", Postcode = "500072", CountryCode = "IN",
+            Latitude = 17.4399, Longitude = 78.4983,
         }).ToUrl("/api/shipping-addresses"), "alice", HttpStatusCode.Created);
         var withAddress = await Send<OrderDto>(s => s.Post.Json(new ChooseDeliveryDto { Method = "Shipping", AddressId = saved.Id })
             .ToUrl($"/api/orders/{order.Id}/delivery-method"), "alice");
         Assert.False(withAddress.NeedsShippingAddress);
         Assert.Empty(withAddress.DeliveryChoices);
+        Assert.Equal(14100 + withAddress.ShippingCharge, withAddress.Total);
 
         var seller = (await Send<List<OrderDto>>(s => s.Get.Url("/api/orders"))).Single(o => o.Id == order.Id);
         Assert.Equal([("Shipped", "Shipped")], seller.Actions.Select(a => (a.Status, a.Label)));

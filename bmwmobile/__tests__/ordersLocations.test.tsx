@@ -14,7 +14,10 @@ const home = {
   id: 'h1', label: 'Home', placeName: 'Hyderabad', latitude: 17.4849, longitude: 78.4138, radiusKm: 60, countryCode: 'IN',
   isPrimary: true, isCurrentLocation: false, addressLine: 'Flat 402, Road No. 2', area: 'Kukatpally', landmark: 'JNTU metro', postalCode: '500072',
 };
-const work = { ...home, id: 'w1', label: 'Work', isPrimary: false, addressLine: 'Plot 9, HITEC City', area: 'Madhapur', landmark: null, postalCode: null };
+const work = {
+  ...home, id: 'w1', label: 'Work', isPrimary: false, addressLine: 'Plot 9, HITEC City', area: 'Madhapur', landmark: null, postalCode: null,
+  latitude: 17.4483, longitude: 78.3915,
+};
 
 const mockLocations = {
   status: 'ready',
@@ -31,13 +34,18 @@ const mockLocations = {
 };
 jest.mock('../src/location/LocationContext', () => ({ useLocations: () => mockLocations }));
 jest.mock('../src/services/marketApi', () => ({
-  MarketApi: { orderStep: jest.fn(), chooseDelivery: jest.fn(), shippingAddresses: jest.fn(), addShippingAddress: jest.fn() },
+  MarketApi: { orderStep: jest.fn(), chooseDelivery: jest.fn(), shippingAddresses: jest.fn(), addShippingAddress: jest.fn(), shippingEstimate: jest.fn() },
 }));
 jest.mock('../src/services/locationApi', () => ({ LocationApi: { searchCities: jest.fn().mockResolvedValue([]) } }));
 
 const orderStep = MarketApi.orderStep as jest.Mock;
 const chooseDelivery = MarketApi.chooseDelivery as jest.Mock;
 const shippingAddresses = MarketApi.shippingAddresses as jest.Mock;
+const shippingEstimate = MarketApi.shippingEstimate as jest.Mock;
+const quote = (patch: object = {}) => ({
+  listingId: 'a1', pickupOffered: true, shippingOffered: true,
+  shipping: { available: true, charge: 350, distance: 22, unit: 'km', currency: 'INR', sizeClass: 'Large', reason: null, placeholderRates: true, ...patch },
+});
 
 const textOf = (node: ReactTestRenderer.ReactTestInstance | string): string =>
   typeof node === 'string' ? node : node.children.map(textOf).join('');
@@ -80,6 +88,7 @@ beforeEach(() => {
   orderStep.mockReset();
   chooseDelivery.mockReset();
   shippingAddresses.mockReset().mockResolvedValue([]);
+  shippingEstimate.mockReset().mockResolvedValue(quote());
   Object.values(mockLocations).forEach(v => typeof v === 'function' && (v as jest.Mock).mockReset?.());
 });
 
@@ -127,9 +136,13 @@ test('both offered: the buyer chooses Shipping and enters a new address (saved f
   const tree = await renderCard(undecided, onChange);
 
   expect(texts(tree)).toContain('How do you want to receive it?');
-  expect(texts(tree)).toContain('📍 I will pick it up');
-  await press(tree, x => x === '🚚 Ship it to me · ₹500');
+  expect(texts(tree)).toContain('📍 I will pick it up · free');
+  await press(tree, x => x === '🚚 Ship it to me');
   await press(tree, x => x === 'Next: shipping address');
+
+  // The delivery location starts at the buyer's chosen saved location (Home); the backend gives the exact charge.
+  expect(shippingEstimate).toHaveBeenCalledWith('a1', 17.4849, 78.4138, 'IN');
+  expect(texts(tree)).toContain('Shipping charge: ₹350 · about 22 km');
 
   // No saved addresses yet: the form opens; the country is fixed to the seller's.
   const sheet = tree.root.findAll(n => (n.type as unknown) === 'Modal').find(m => m.props.visible)!;
@@ -138,9 +151,11 @@ test('both offered: the buyer chooses Shipping and enters a new address (saved f
   const inputs = sheet.findAll(n => (n.type as unknown) === 'TextInput');
   const values = [aliceAddress.name, aliceAddress.phone, aliceAddress.line1, aliceAddress.line2, aliceAddress.city, aliceAddress.postcode];
   for (const [i, v] of values.entries()) await ReactTestRenderer.act(async () => inputs[i].props.onChangeText(v));
-  await press(tree, x => x === 'Ship to this address');
+  await press(tree, x => x === 'Ship here · ₹350');
 
-  expect(chooseDelivery).toHaveBeenCalledWith('o1', 'Shipping', { address: aliceAddress });
+  // The address and its coordinates – never a price.
+  const where = { latitude: 17.4849, longitude: 78.4138 };
+  expect(chooseDelivery).toHaveBeenCalledWith('o1', 'Shipping', { address: { ...aliceAddress, ...where }, ...where });
   expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ deliveryMethod: 'Shipping', total: 14600 }));
 });
 
@@ -149,7 +164,7 @@ test('both offered: the buyer chooses Pickup and then sees the exact pickup addr
   const onChange = jest.fn();
   const tree = await renderCard(undecided, onChange);
 
-  await press(tree, x => x === '📍 I will pick it up');
+  await press(tree, x => x === '📍 I will pick it up · free');
   await press(tree, x => x === 'Confirm pickup');
   expect(chooseDelivery).toHaveBeenCalledWith('o1', 'Pickup');
 
@@ -165,13 +180,23 @@ test('shipping only: the buyer picks a saved address from the address book', asy
   chooseDelivery.mockResolvedValue({ ...undecided, deliveryMethod: 'Shipping', needsShippingAddress: false, deliveryChoices: [] });
   const tree = await renderCard({ ...undecided, deliveryOptions: ['Shipping'], deliveryMethod: 'Shipping', needsShippingAddress: true, deliveryChoices: ['Shipping'], actions: [] });
 
-  expect(texts(tree)).toContain('🚚 This item is shipped · ₹500');
+  expect(texts(tree)).toContain('🚚 This item is shipped');
   await press(tree, x => x === 'Add shipping address');
   expect(texts(tree)).toContain('Alice Reddy  · Default');
   expect(texts(tree)).not.toContain('Alice at work');
-  await press(tree, x => x === 'Ship to this address');
 
-  expect(chooseDelivery).toHaveBeenCalledWith('o1', 'Shipping', { addressId: 's1' });
+  // Another saved location → a new charge; when shipping isn't possible there, the reason shows and it can't be sent.
+  shippingEstimate.mockResolvedValueOnce(quote({ available: false, charge: null, reason: 'Too far to ship: about 1,630 km (up to 1,500 km for freight items)' }));
+  await press(tree, x => x === '📍 Work · Madhapur');
+  expect(shippingEstimate).toHaveBeenLastCalledWith('a1', 17.4483, 78.3915, 'IN');
+  expect(texts(tree)).toContain('Too far to ship');
+  await press(tree, x => x === 'Ship to this address');
+  expect(chooseDelivery).not.toHaveBeenCalled();
+
+  // Back to Home: available again.
+  await press(tree, x => x === '📍 Home · Kukatpally');
+  await press(tree, x => x === 'Ship here · ₹350');
+  expect(chooseDelivery).toHaveBeenCalledWith('o1', 'Shipping', { addressId: 's1', latitude: 17.4849, longitude: 78.4138 });
 });
 
 test('buyer confirms the delivery; the seller then just waits', async () => {

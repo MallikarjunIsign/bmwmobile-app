@@ -106,6 +106,9 @@ switch (geocodingProvider)
 builder.Services.AddSingleton<AuctionMapper>();
 builder.Services.AddScoped<CustomOrderMatcher>();
 builder.Services.AddScoped<ReviewService>();
+builder.Services.AddScoped<ShippingService>();
+// US shipping: USPS Ground Advantage retail prices (Data/Seed/usps-ground-advantage-retail.csv).
+builder.Services.AddSingleton(_ => UspsGroundAdvantage.FromFile());
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddProblemDetails();
 
@@ -146,6 +149,12 @@ builder.Host.UseWolverine(opts =>
         .DeclareExchange("user-unblocked", ex => ex.ExchangeType = ExchangeType.Fanout)
         .DeclareExchange("seller-rating-changed", ex => ex.ExchangeType = ExchangeType.Fanout)
         .DeclareExchange("review-requested", ex => ex.ExchangeType = ExchangeType.Fanout)
+        // A buyer's part request → every seller (live: NotificationService; push: ChatService).
+        .DeclareExchange("part-request-created", ex => ex.ExchangeType = ExchangeType.Fanout)
+        .BindExchange("part-request-created").ToQueue("notification-part-request-created")
+        .BindExchange("part-request-created").ToQueue("chat-part-request-created")
+        // A matching part was listed → the buyer's phones (push).
+        .BindExchange("custom-order-matched").ToQueue("chat-custom-order-matched")
         // The consumers' queues are declared here too, so no rating change / reminder is lost while one is down.
         .BindExchange("seller-rating-changed").ToQueue("search-seller-rating-changed")
         .BindExchange("seller-rating-changed").ToQueue("chat-seller-rating-changed")
@@ -177,6 +186,7 @@ builder.Host.UseWolverine(opts =>
     opts.PublishMessage<OrderCreated>().ToRabbitExchange("order-created");
     opts.PublishMessage<SellerRatingChanged>().ToRabbitExchange("seller-rating-changed");
     opts.PublishMessage<ReviewRequested>().ToRabbitExchange("review-requested");
+    opts.PublishMessage<PartRequestCreated>().ToRabbitExchange("part-request-created");
     // "How was your purchase?" 2 days after completion: scheduled, stored in Postgres until then.
     opts.PublishMessage<AuctionService.Handlers.ReviewReminder>().ToLocalQueue("review-reminders");
     opts.LocalQueue("review-reminders").UseDurableInbox();

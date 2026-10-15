@@ -7,6 +7,7 @@ using Duende.IdentityServer.Models;
 using Duende.IdentityServer.Services;
 using IdentityService.Models;
 using Microsoft.AspNetCore.Identity;
+using Contracts;
 
 namespace IdentityService.Services;
 
@@ -52,17 +53,24 @@ public class CustomProfileService(
             context.IssuedClaims.Add(new Claim("location_name", primary.PlaceName));
             context.IssuedClaims.Add(new Claim("location_lat", primary.Latitude.ToString(CultureInfo.InvariantCulture)));
             context.IssuedClaims.Add(new Claim("location_lon", primary.Longitude.ToString(CultureInfo.InvariantCulture)));
+            if (!string.IsNullOrWhiteSpace(primary.CountryCode))
+                context.IssuedClaims.Add(new Claim(PartRequestAudience.CountryClaim, primary.CountryCode));
+        }
+        else if (!string.IsNullOrWhiteSpace(user.CountryCode))
+        {
+            // A seller created by an admin, before they saved a location: their country.
+            context.IssuedClaims.Add(new Claim(PartRequestAudience.CountryClaim, user.CountryCode));
         }
 
-        // Customer / Service Pro, only while Features:RolesEnabled is on.
-        if (accounts.RolesEnabled)
-        {
-            context.IssuedClaims.Add(new Claim(JwtClaimTypes.Role, await accounts.GetRoleAsync(user)));
-        }
+        // Marketplace role: buyer, seller or admin. Always issued; every service checks it (Contracts.AppRoles).
+        // Refresh tokens re-read it (UpdateAccessTokenClaimsOnRefresh), so an upgrade to seller shows up on the next refresh.
+        context.IssuedClaims.Add(new Claim(AppRoles.ClaimType, await accounts.GetRoleAsync(user)));
     }
 
-    public Task IsActiveAsync(IsActiveContext context)
+    /// <summary>A disabled account gets no new tokens, including from its refresh token.</summary>
+    public async Task IsActiveAsync(IsActiveContext context)
     {
-        return Task.CompletedTask;
+        var user = await userManager.GetUserAsync(context.Subject);
+        context.IsActive = user is { IsDisabled: false };
     }
 }

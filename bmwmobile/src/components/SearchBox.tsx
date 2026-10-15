@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Keyboa
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
 import { MarketApi } from '../services/marketApi';
-import type { QueryChip, Suggestion } from '../types/listing';
+import type { ItemTypeFilter, QueryChip, Suggestion } from '../types/listing';
 
 const RECENT_KEY = '@bidmyparts/recent-searches';
 const MAX_RECENT = 8;
@@ -30,22 +30,39 @@ export async function rememberSearch(search: SearchState) {
   await AsyncStorage.setItem(RECENT_KEY, JSON.stringify(list)).catch(() => undefined);
 }
 
-const GROUP_TITLES: Record<string, string> = { recent: 'Recent searches', parts: 'Parts', vehicles: 'Vehicles', partNumbers: 'Part numbers' };
+const GROUP_TITLES: Record<string, string> = {
+  recent: 'Recent searches', categories: 'Categories', parts: 'Parts', fits: 'Parts for a vehicle', vehicles: 'Vehicles', partNumbers: 'Part numbers',
+};
+const GROUP_ORDER = ['categories', 'parts', 'fits', 'vehicles', 'partNumbers'];
 
 interface SearchBoxProps {
-  value: SearchState;
-  onChange: (value: SearchState) => void;
-  /** Search now (keyboard "search" or a suggestion). */
-  onSubmit: (value: SearchState) => void;
+  /** What is typed right now. */
+  text: string;
+  /** The active filter chips ([Bumper] [Toyota] [Lighting] …). */
+  chips: QueryChip[];
+  onChangeText: (text: string) => void;
+  /** A suggestion or a recent search was tapped: apply its chips (the results update at once). */
+  onPick: (chips: QueryChip[], text?: string) => void;
+  onRemoveChip: (chip: QueryChip) => void;
+  /** Keyboard "search": search the text with the active chips. */
+  onSubmit: () => void;
+  /** ✕: clear the text and the chips. */
+  onClear: () => void;
   country?: string;
+  /** Suggestions only for Parts or only for Vehicles (Home's first filter). */
+  itemType?: ItemTypeFilter;
   placeholder?: string;
 }
 
 /**
- * One search box like an online shop: suggestions while typing (parts, vehicles, part numbers, recent searches);
- * picking one turns it into filter chips ([Front bumper] [Toyota] [Hilux] [2016]); free text still works.
+ * One search box like an online shop: suggestions while typing (categories, parts, vehicles, part numbers, recent
+ * searches); picking one turns it into filter chips ([Front bumper] [Toyota] [Hilux] [2016]); free text still works.
+ * Every ScrollView around it needs keyboardShouldPersistTaps="handled" – otherwise the first tap on a suggestion
+ * only closes the keyboard and is lost (that was the Home search bug).
  */
-export const SearchBox: React.FC<SearchBoxProps> = ({ value, onChange, onSubmit, country, placeholder }) => {
+export const SearchBox: React.FC<SearchBoxProps> = ({
+  text, chips, onChangeText, onPick, onRemoveChip, onSubmit, onClear, country, itemType, placeholder,
+}) => {
   const [focused, setFocused] = useState(false);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [recent, setRecent] = useState<SearchState[]>([]);
@@ -56,72 +73,61 @@ export const SearchBox: React.FC<SearchBoxProps> = ({ value, onChange, onSubmit,
 
   // Suggestions, debounced; late answers are ignored.
   useEffect(() => {
-    const q = value.text.trim();
+    const q = text.trim();
     if (!focused || q.length < 2) {
       setSuggestions([]);
       return;
     }
     let alive = true;
     const timer = setTimeout(() => {
-      MarketApi.suggest(q, country).then(list => alive && setSuggestions(list));
+      MarketApi.suggest(q, country, itemType).then(list => alive && setSuggestions(list));
     }, SUGGEST_DEBOUNCE_MS);
     return () => {
       alive = false;
       clearTimeout(timer);
     };
-  }, [value.text, focused, country]);
+  }, [text, focused, country, itemType]);
 
-  const pick = (chips: QueryChip[], text = '') => {
-    const merged = [...value.chips.filter(c => !chips.some(n => n.type === c.type)), ...chips];
-    const next = { text, chips: merged };
-    onChange(next);
-    onSubmit(next);
+  const pick = (picked: QueryChip[], pickedText = '') => {
     setFocused(false);
+    setSuggestions([]);
     Keyboard.dismiss();
+    onPick(picked, pickedText);
   };
 
-  const removeChip = (chip: QueryChip) => {
-    const next = { ...value, chips: value.chips.filter(c => c !== chip) };
-    onChange(next);
-    onSubmit(next);
-  };
-
-  const showRecent = focused && value.text.trim().length < 2 && recent.length > 0;
-  const groups = ['parts', 'vehicles', 'partNumbers'].map(g => ({ g, items: suggestions.filter(s => s.group === g) })).filter(x => x.items.length > 0);
+  const showRecent = focused && text.trim().length < 2 && recent.length > 0;
+  const groups = GROUP_ORDER.map(g => ({ g, items: suggestions.filter(s => s.group === g) })).filter(x => x.items.length > 0);
 
   return (
     <View>
       <View style={[styles.bar, focused && styles.barFocused]}>
         <Text style={styles.icon}>🔍</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.barContent}>
-          {value.chips.map(chip => (
-            <TouchableOpacity key={chip.type + chip.value} style={styles.chip} onPress={() => removeChip(chip)} accessibilityLabel={`Remove ${chip.label}`}>
+          {chips.map(chip => (
+            <TouchableOpacity key={chip.type + chip.value} style={styles.chip} onPress={() => onRemoveChip(chip)}
+              accessibilityLabel={`Remove ${chip.label}`} testID={`chip-${chip.type}`}>
               <Text style={styles.chipText} numberOfLines={1}>{chip.label} ✕</Text>
             </TouchableOpacity>
           ))}
           <TextInput
             style={styles.input}
-            placeholder={value.chips.length ? 'Add words…' : placeholder ?? 'Search parts, part numbers, vehicles…'}
+            placeholder={chips.length ? 'Add words…' : placeholder ?? (itemType === 'Vehicle' ? 'Search vehicles: make, model, year…' : 'Search parts, part numbers, vehicles…')}
             placeholderTextColor={COLORS.textMuted}
-            value={value.text}
-            onChangeText={text => onChange({ ...value, text })}
+            value={text}
+            onChangeText={onChangeText}
             onFocus={() => setFocused(true)}
             onBlur={() => setTimeout(() => setFocused(false), 150)}
             returnKeyType="search"
             onSubmitEditing={() => {
               setFocused(false);
-              onSubmit(value);
+              onSubmit();
             }}
             accessibilityLabel="Search"
           />
         </ScrollView>
-        {value.text || value.chips.length ? (
+        {text || chips.length ? (
           <TouchableOpacity
-            onPress={() => {
-              const empty = { text: '', chips: [] };
-              onChange(empty);
-              onSubmit(empty);
-            }}
+            onPress={onClear}
             hitSlop={8}
             accessibilityLabel="Clear search"
           >
@@ -137,7 +143,7 @@ export const SearchBox: React.FC<SearchBoxProps> = ({ value, onChange, onSubmit,
               <View>
                 <Text style={styles.group}>{GROUP_TITLES.recent.toUpperCase()}</Text>
                 {recent.map((r, i) => (
-                  <TouchableOpacity key={i} style={styles.row} onPress={() => pick(r.chips, r.text)}>
+                  <TouchableOpacity key={i} style={styles.row} onPress={() => pick(r.chips, r.text)} testID={`recent-${i}`}>
                     <Text style={styles.rowText}>🕘 {[...r.chips.map(c => c.label), r.text].filter(Boolean).join(' · ')}</Text>
                   </TouchableOpacity>
                 ))}
@@ -147,7 +153,8 @@ export const SearchBox: React.FC<SearchBoxProps> = ({ value, onChange, onSubmit,
               <View key={g}>
                 <Text style={styles.group}>{GROUP_TITLES[g].toUpperCase()}</Text>
                 {items.map(s => (
-                  <TouchableOpacity key={s.group + s.label} style={styles.row} onPress={() => pick(s.chips)}>
+                  <TouchableOpacity key={s.group + s.label} style={styles.row} onPress={() => pick(s.chips)}
+                    testID={`suggestion-${s.group}-${s.label}`}>
                     <Text style={styles.rowText}>{s.label}</Text>
                     {s.subtitle ? <Text style={styles.rowSub}>{s.subtitle}</Text> : null}
                   </TouchableOpacity>

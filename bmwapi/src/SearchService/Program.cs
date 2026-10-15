@@ -111,14 +111,9 @@ app.MapGet("/api/search/listings", ListingSearchEndpoints.Search);
 app.MapGet("/api/search/suggest", ListingSearchEndpoints.Suggest);
 app.MapGet("/api/search/{id}", SearchEndpoints.GetAuctionById);
 
-try
-{
-    await DbInitializer.ConfigureIndex(app);
-}
-catch (Exception e)
-{
-    Console.WriteLine($"Failed to seed search:  {e.Message}");
-}
+// Index settings (filterable attributes) are applied and checked on every start. Without them every filtered
+// search fails, so the service doesn't start half-working: it stops with the reason instead.
+await DbInitializer.ConfigureIndex(app);
 
 if (!app.Environment.IsEnvironment("Test"))
 {

@@ -74,10 +74,13 @@ const review: Review = {
   status: 'Published', createdAt: '2026-10-11T10:00:00Z', updatedAt: '2026-10-11T10:00:00Z', canEdit: false, canReply: true, isMine: false,
 };
 
-test('rating text: "⭐ 4.7 (32)", or "New seller" with fewer than 3 ratings', () => {
-  expect(ratingText(4.66, 32)).toBe('⭐ 4.7 (32)');
-  expect(ratingText(5, 2)).toBe('New seller');
-  expect(ratingText(null, 0)).toBe('New seller');
+test('rating text: out of 5 with how many rated; "New seller" added below 3 ratings', () => {
+  expect(ratingText(4.66, 32)).toBe('⭐ 4.7/5 (32 ratings)');
+  expect(ratingText(4, 1)).toBe('⭐ 4.0/5 (1 rating) · New seller');
+  expect(ratingText(null, 0)).toBe('New seller · no ratings yet');
+  // Two-column cards.
+  expect(ratingText(4.66, 32, true)).toBe('⭐ 4.7/5 (32)');
+  expect(ratingText(null, 0, true)).toBe('No ratings yet');
 });
 
 test('write a review: both star ratings are required; quick ratings, tags and comment are sent', async () => {

@@ -9,11 +9,18 @@ import { useLiveEvent } from '../services/notifications';
 import { useMoney } from '../location/useMoney';
 import { useChat } from '../chat/ChatContext';
 import type { ChatMessageEvent } from '../types/chat';
+import { useAuth } from '../auth/AuthContext';
+import { isCurrentUser } from '../auth/session';
+import { isSeller } from '../utils/roles';
 
 /** A personal notification from NotificationService ("Notify"). */
 export interface UserNotification {
-  type: 'outbid' | 'newBid' | 'endingSoon' | 'won' | 'lost' | 'sold' | 'endedNoBids' | 'customOrderMatched' | 'orderUpdate' | 'chatMessage' | 'reviewRequest';
+  type: 'outbid' | 'newBid' | 'endingSoon' | 'won' | 'lost' | 'sold' | 'endedNoBids' | 'customOrderMatched' | 'orderUpdate' | 'chatMessage' | 'reviewRequest'
+    | 'partRequest';
+  /** The listing – or for partRequest the request id. */
   auctionId: string;
+  /** partRequest: the buyer who asked (their own request isn't shown to them). */
+  from?: string | null;
   title?: string | null;
   amount?: number | null;
   /** orderUpdate: the new tracking step ("Shipped", "Ready for pickup", …). */
@@ -38,6 +45,7 @@ export function notificationText(n: UserNotification, money: (amount: number) =>
     case 'reviewRequest': return { title: 'How was your purchase?', body: `Rate ${what} and the seller. Tap to open Orders.` };
     case 'chatMessage': return { title: `New message from ${n.sender ?? 'someone'}`, body: `About ${what}: ${n.detail ?? ''}` };
     case 'orderUpdate': return { title: `Order update: ${n.detail ?? 'updated'}`, body: `${what}. Tap to track it in Orders.` };
+    case 'partRequest': return { title: '🔎 A buyer is looking for a part', body: `${n.title ?? 'A part'}${n.detail ? ` (${n.detail})` : ''}. Have one? Tap to see buyer requests.` };
     default: return { title: 'A part matching your request is now available', body: what };
   }
 }
@@ -71,6 +79,7 @@ export function NotificationToasts() {
   }, []);
 
   const { activeConversation } = useChat();
+  const seller = isSeller(useAuth().user);
   // A chat message for a conversation that isn't on screen.
   useLiveEvent('ChatMessage', (m: ChatMessageEvent) => {
     if (!m?.conversationId || activeConversation.current === m.conversationId) return;
@@ -82,6 +91,8 @@ export function NotificationToasts() {
 
   useLiveEvent('Notify', (n: UserNotification) => {
     if (!n?.type || n.type === 'customOrderMatched') return;
+    // Buyers' part requests: for sellers only, and never their own.
+    if (n.type === 'partRequest' && (!seller || isCurrentUser(n.from))) return;
     queue.current.push(n);
     if (!current) showNext();
   });
@@ -95,6 +106,7 @@ export function NotificationToasts() {
     else if (current.type === 'sold' || current.type === 'orderUpdate' || current.type === 'reviewRequest') navigation.navigate('MainTabs', { screen: 'MyPurchases' });
     else if (current.type === 'won' || current.type === 'lost') navigation.navigate('PartDetails', { auctionId: current.auctionId, showOutcome: true });
     else if (current.type === 'endedNoBids') navigation.navigate('MyListings');
+    else if (current.type === 'partRequest') navigation.navigate('BuyerRequests');
     else navigation.navigate('PartDetails', { auctionId: current.auctionId });
     showNext();
   };

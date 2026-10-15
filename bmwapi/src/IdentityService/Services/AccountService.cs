@@ -4,6 +4,7 @@ using IdentityService.Contracts;
 using IdentityService.Infrastructure;
 using IdentityService.Models;
 using IdentityService.Options;
+using Contracts;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
 
@@ -55,6 +56,8 @@ public class AccountService(
         }, req.Password, ct);
 
         if (role is not null) await AddRoleAsync(user, role);
+        // Everyone who signs up in the app is a buyer. Seller accounts are made by an admin (AdminSellersController).
+        await AddRoleAsync(user, AppRoles.Buyer);
         logger.LogInformation("Registered {Username} from the mobile app", user.UserName);
         return await ToDtoAsync(user);
     }
@@ -99,7 +102,11 @@ public class AccountService(
         var user = await users.FindByEmailAsync(NormalizeEmail(req.Email))
                    ?? throw AppException.BadRequest("This code has expired. Tap Resend to get a new one.", "OTP_EXPIRED");
 
-        await otp.VerifyAsync(user, OtpPurpose.ResetPassword, req.Otp, ct);
+        // The same screen sets a new seller's first password with the code from their invite email.
+        var purpose = await otp.NewestActiveAsync(user, [OtpPurpose.ResetPassword, OtpPurpose.SellerInvite], ct)
+                      ?? OtpPurpose.ResetPassword;
+        await otp.VerifyAsync(user, purpose, req.Otp, ct);
+        EnsureActive(user);
 
         var token = await users.GeneratePasswordResetTokenAsync(user);
         var result = await users.ResetPasswordAsync(user, token, req.NewPassword);
@@ -118,7 +125,7 @@ public class AccountService(
     public async Task<ApplicationUser> FindOrCreateExternalUserAsync(SocialIdentity identity, string? fullName, string? role, CancellationToken ct)
     {
         var user = await users.FindByLoginAsync(identity.Provider, identity.SubjectId);
-        if (user is not null) return user;
+        if (user is not null) return EnsureActive(user);
 
         var loginInfo = new UserLoginInfo(identity.Provider, identity.SubjectId, identity.Provider == "google" ? "Google" : "Apple");
 
@@ -128,6 +135,7 @@ public class AccountService(
             user = await users.FindByEmailAsync(identity.Email);
             if (user is not null)
             {
+                EnsureActive(user);
                 Check(await users.AddLoginAsync(user, loginInfo));
                 if (!user.EmailConfirmed)
                 {
@@ -153,6 +161,7 @@ public class AccountService(
         user = await CreateUserAsync(name, identity.Email, u => u.EmailConfirmed = identity.EmailVerified, password: null, ct);
         Check(await users.AddLoginAsync(user, loginInfo));
         if (newRole is not null) await AddRoleAsync(user, newRole);
+        await AddRoleAsync(user, AppRoles.Buyer);
         logger.LogInformation("Created {Provider} account {Username}", identity.Provider, user.UserName);
         return user;
     }
@@ -190,19 +199,27 @@ public class AccountService(
             await locations.HasAnyAsync(user.Id, CancellationToken.None));
     }
 
-    /// <summary>"customer" / "pro" when roles are on, otherwise everyone is "user".</summary>
+    /// <summary>
+    /// The marketplace role in the token and /me: "admin", "seller" or "buyer" (highest wins; none = buyer).
+    /// The old Customer / Pro roles (Features:RolesEnabled) are separate and not used for this.
+    /// </summary>
     public async Task<string> GetRoleAsync(ApplicationUser user)
     {
-        if (!RolesEnabled) return "user";
         var roles = await users.GetRolesAsync(user);
-        return roles.FirstOrDefault(r => r is RoleCustomer or RolePro) ?? "user";
+        return AppRoles.All.FirstOrDefault(r => roles.Contains(r, StringComparer.OrdinalIgnoreCase)) ?? AppRoles.Buyer;
     }
+
+    public const string DisabledMessage = "This account has been disabled. Please contact support.";
+
+    /// <summary>Throws when an admin has disabled the account.</summary>
+    public static ApplicationUser EnsureActive(ApplicationUser user) =>
+        user.IsDisabled ? throw new AppException(StatusCodes.Status403Forbidden, DisabledMessage, "ACCOUNT_DISABLED") : user;
 
     public static string NormalizeEmail(string email) => email.Trim().ToLowerInvariant();
 
     // ── helpers ────────────────────────────────────────────────────────────
 
-    private async Task<ApplicationUser> CreateUserAsync(
+    internal async Task<ApplicationUser> CreateUserAsync(
         string fullName, string email, Action<ApplicationUser> configure, string? password, CancellationToken ct)
     {
         // Two people with the same first name signing up at once can pick the same username; retry with the next one.
@@ -231,14 +248,14 @@ public class AccountService(
         }
     }
 
-    private async Task AddRoleAsync(ApplicationUser user, string role) => Check(await users.AddToRoleAsync(user, role));
+    internal async Task AddRoleAsync(ApplicationUser user, string role) => Check(await users.AddToRoleAsync(user, role));
 
     private static void Check(IdentityResult result)
     {
         if (!result.Succeeded) throw AppException.BadRequest(result.Errors.First().Description, "VALIDATION_FAILED");
     }
 
-    private string? DevCode(string? code) =>
+    internal string? DevCode(string? code) =>
         env.IsDevelopment() && otpOptions.Value.ReturnOtpInResponse ? code : null;
 
     private static string? ParseRole(string? role) => role?.Trim().ToLowerInvariant() switch

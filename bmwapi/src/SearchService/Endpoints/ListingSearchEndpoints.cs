@@ -30,6 +30,8 @@ public class ListingSearchRequest
     public double? MaxDistanceKm { get; set; }
     /// <summary>Country-wide results when the location is unknown (IN, US, NG, IE).</summary>
     public string? Country { get; set; }
+    /// <summary>Part or Vehicle (Home's Parts / Vehicles switch); empty = both.</summary>
+    public string? ItemType { get; set; }
     /// <summary>Only this seller's listings (username) – "more from this seller".</summary>
     public string? Seller { get; set; }
     /// <summary>Auction or FixedPrice.</summary>
@@ -81,13 +83,115 @@ public static class ListingSearchEndpoints
         var parsed = QueryParser.Parse(request.Q, dictionary);
         ApplyStructuredFilters(parsed, request, dictionary);
 
-        var filters = new List<string> { $"status = \"Live\" AND auctionEnd > \"{DateTime.UtcNow:o}\"" };
+        // Every active filter is part of the Meilisearch query, so the total and the facet counts are exactly what the
+        // results are (text, Parts / Vehicles, Auction / Direct sale, category, part type, vehicle, radius, sheet values).
+        var hits = (PaginatedSearchResult<Item>)await client.Auctions().SearchAsync<Item>(parsed.Keywords, new SearchQuery
+        {
+            Filter = string.Join(" AND ", Filters(request, parsed)),
+            HitsPerPage = MaxCandidates,
+            Page = 1,
+            Facets = FacetFields.Values.ToList(),
+        });
+
+        // Exact distance, ranking tier and badge.
+        var results = new List<SearchResultItem>();
+        var order = 0;
+        var meiliOrder = new Dictionary<string, int>();
+        foreach (var item in hits.Hits)
+        {
+            meiliOrder[item.Id] = order++;
+            var hit = Mapster.TypeAdapter.Adapt<SearchResultItem>(item);
+            if (near && item.Latitude is not null && item.Longitude is not null)
+                hit.DistanceKm = Math.Round(GeoMath.HaversineKm(request.Lat!.Value, request.Lon!.Value, item.Latitude.Value, item.Longitude.Value), 1);
+            hit.MatchTier = Tier(item, parsed);
+            hit.Badge = Badge(item, parsed);
+            results.Add(hit);
+        }
+
+        results = Sort(results, request.Sort, near, meiliOrder);
+
+        var facets = ToFacets(hits.FacetDistribution);
+        // A chosen category / part type / vehicle keeps its siblings with their counts (e.g. the other categories),
+        // counted with every other filter still applied.
+        foreach (var (names, exclude) in DisjunctiveFacets(request, parsed))
+        {
+            var other = await client.Auctions().SearchAsync<Item>(parsed.Keywords, new SearchQuery
+            {
+                Filter = string.Join(" AND ", Filters(request, parsed, exclude)),
+                Limit = 0,
+                Facets = names.Select(n => FacetFields[n]).ToList(),
+            });
+            foreach (var (name, values) in ToFacets(other.FacetDistribution).Where(f => names.Contains(f.Key)))
+                facets[name] = values;
+        }
+
+        var size = Math.Clamp(request.PageSize ?? 20, 1, 50);
+        var page = Math.Max(request.Page ?? 1, 1);
+        return Results.Ok(new ListingSearchResponse
+        {
+            Results = results.Skip((page - 1) * size).Take(size).ToList(),
+            TotalCount = hits.TotalHits,
+            PageCount = (int)Math.Ceiling(hits.TotalHits / (double)size),
+            Chips = parsed.Chips(),
+            Keywords = parsed.Keywords,
+            Facets = facets,
+            PriceMin = results.Count > 0 ? results.Min(r => r.CurrentPrice) : null,
+            PriceMax = results.Count > 0 ? results.Max(r => r.CurrentPrice) : null,
+        });
+    }
+
+    /// <summary>Response facet name → Meilisearch attribute.</summary>
+    public static readonly IReadOnlyDictionary<string, string> FacetFields = new Dictionary<string, string>
+    {
+        ["category"] = "category",
+        ["partType"] = "partType",
+        ["make"] = "makes",
+        ["model"] = "models",
+        ["year"] = "years",
+        ["condition"] = "condition",
+        ["brandType"] = "brandType",
+        ["kind"] = "kind",
+        ["delivery"] = "deliveryOptions",
+        ["saleType"] = "saleType",
+        ["itemType"] = "listingType",
+    };
+
+    [Flags]
+    public enum Exclude
+    {
+        None = 0,
+        Category = 1,
+        PartType = 2,
+        Vehicle = 4,
+    }
+
+    private static double Radius(ListingSearchRequest request)
+    {
         var radius = Math.Clamp(request.RadiusKm ?? SearchEndpoints.DefaultRadiusKm, 1, SearchEndpoints.MaxRadiusKm);
-        if (request.MaxDistanceKm is > 0) radius = Math.Min(radius, request.MaxDistanceKm.Value);
-        if (near) filters.Add(SearchEndpoints.BoundingBoxFilter(GeoMath.BoundingBox(request.Lat!.Value, request.Lon!.Value, radius)));
+        return request.MaxDistanceKm is > 0 ? Math.Min(radius, request.MaxDistanceKm.Value) : radius;
+    }
+
+    /// <summary>"Part" / "Vehicle" (also accepts "Parts" / "Vehicles"); null = both.</summary>
+    public static string? ListingType(string? itemType) => itemType?.Trim().ToLowerInvariant() switch
+    {
+        "part" or "parts" => "Part",
+        "vehicle" or "vehicles" => "Vehicle",
+        _ => null,
+    };
+
+    /// <summary>The Meilisearch filter for a search. <paramref name="exclude"/> leaves filters out (for sibling facet counts).</summary>
+    public static List<string> Filters(ListingSearchRequest request, ParsedQuery parsed, Exclude exclude = Exclude.None)
+    {
+        var filters = new List<string> { $"status = \"Live\" AND auctionEnd > \"{DateTime.UtcNow:o}\"" };
+        if (request.Lat is not null && request.Lon is not null)
+        {
+            var meters = Math.Round(Radius(request) * 1000);
+            filters.Add(string.Create(CultureInfo.InvariantCulture, $"_geoRadius({request.Lat.Value}, {request.Lon.Value}, {meters})"));
+        }
         else if (SearchEndpoints.CountryFilter(request.Country) is { } countryFilter) filters.Add(countryFilter);
 
-        if (!string.IsNullOrEmpty(request.Category)) filters.Add($"category = {Quote(request.Category)}");
+        if (ListingType(request.ItemType) is { } listingType) filters.Add($"listingType = {Quote(listingType)}");
+        if (!string.IsNullOrEmpty(request.Category) && !exclude.HasFlag(Exclude.Category)) filters.Add($"category = {Quote(request.Category)}");
         if (!string.IsNullOrEmpty(request.Kind)) filters.Add($"kind = {Quote(request.Kind)}");
         if (!string.IsNullOrEmpty(request.Condition)) filters.Add($"condition = {Quote(request.Condition)}");
         if (!string.IsNullOrEmpty(request.BrandType)) filters.Add($"brandType = {Quote(request.BrandType)}");
@@ -100,51 +204,56 @@ public static class ListingSearchEndpoints
         else if (request.SaleType == "Auction") filters.Add("(saleType = \"Auction\" OR NOT saleType EXISTS)");
         if (request.MinPrice is not null) filters.Add($"currentPrice >= {request.MinPrice.Value.ToString(CultureInfo.InvariantCulture)}");
         if (request.MaxPrice is not null) filters.Add($"currentPrice <= {request.MaxPrice.Value.ToString(CultureInfo.InvariantCulture)}");
-        if (UnderstoodFilter(parsed) is { } understood) filters.Add(understood);
 
-        var hits = (SearchResult<Item>)await client.Auctions().SearchAsync<Item>(parsed.Keywords, new SearchQuery
-        {
-            Filter = string.Join(" AND ", filters),
-            Limit = MaxCandidates,
-        });
+        // Front / rear and left / right from the text: items without a position / side still match.
+        if (parsed.Position is not null)
+            filters.Add($"(NOT position EXISTS OR position IS NULL OR position = {Quote(parsed.Position)})");
+        if (parsed.Side is not null)
+            filters.Add($"(NOT side EXISTS OR side IS NULL OR side = \"Centre\" OR side = {Quote(parsed.Side)})");
 
-        // Exact distance, position / side, ranking tier and badge.
-        var results = new List<SearchResultItem>();
-        var order = 0;
-        var meiliOrder = new Dictionary<string, int>();
-        foreach (var item in hits.Hits)
+        var understood = parsed;
+        if (exclude.HasFlag(Exclude.PartType) || exclude.HasFlag(Exclude.Vehicle))
         {
-            meiliOrder[item.Id] = order++;
-            var hit = Mapster.TypeAdapter.Adapt<SearchResultItem>(item);
-            if (near)
+            understood = parsed.Copy();
+            if (exclude.HasFlag(Exclude.PartType)) understood.PartType = null;
+            if (exclude.HasFlag(Exclude.Vehicle))
             {
-                if (item.Latitude is null || item.Longitude is null) continue;
-                hit.DistanceKm = Math.Round(GeoMath.HaversineKm(request.Lat!.Value, request.Lon!.Value, item.Latitude.Value, item.Longitude.Value), 1);
-                if (hit.DistanceKm > radius) continue;
+                understood.Make = understood.Model = null;
+                understood.YearFrom = understood.YearTo = null;
             }
-            if (parsed.Position is not null && item.Position is not null && item.Position != parsed.Position) continue;
-            if (parsed.Side is not null && item.Side is not null && item.Side != "Centre" && item.Side != parsed.Side) continue;
-
-            hit.MatchTier = Tier(item, parsed);
-            hit.Badge = Badge(item, parsed);
-            results.Add(hit);
         }
+        if (UnderstoodFilter(understood) is { } filter) filters.Add(filter);
+        return filters;
+    }
 
-        results = Sort(results, request.Sort, near, meiliOrder);
+    /// <summary>
+    /// Which facets need their own count query because the user picked a value for them (category pill, part type chip,
+    /// make / model chip). What the typed text means always counts: "bumper" keeps only categories that have bumpers.
+    /// </summary>
+    private static IEnumerable<(string[] Names, Exclude Exclude)> DisjunctiveFacets(ListingSearchRequest request, ParsedQuery parsed)
+    {
+        var pickedPartType = !string.IsNullOrWhiteSpace(request.PartType);
+        if (!string.IsNullOrEmpty(request.Category) || pickedPartType)
+            yield return (["category"], Exclude.Category | (pickedPartType ? Exclude.PartType : Exclude.None));
+        if (pickedPartType)
+            yield return (["partType"], Exclude.PartType);
+        if (!string.IsNullOrWhiteSpace(request.Make) || !string.IsNullOrWhiteSpace(request.Model))
+            yield return (["make", "model"], Exclude.Vehicle);
+    }
 
-        var size = Math.Clamp(request.PageSize ?? 20, 1, 50);
-        var page = Math.Max(request.Page ?? 1, 1);
-        return Results.Ok(new ListingSearchResponse
+    private static Dictionary<string, List<FacetValue>> ToFacets(IReadOnlyDictionary<string, IReadOnlyDictionary<string, int>>? distribution)
+    {
+        var result = new Dictionary<string, List<FacetValue>>();
+        foreach (var (name, field) in FacetFields)
         {
-            Results = results.Skip((page - 1) * size).Take(size).ToList(),
-            TotalCount = results.Count,
-            PageCount = (int)Math.Ceiling(results.Count / (double)size),
-            Chips = parsed.Chips(),
-            Keywords = parsed.Keywords,
-            Facets = Facets(results),
-            PriceMin = results.Count > 0 ? results.Min(r => r.CurrentPrice) : null,
-            PriceMax = results.Count > 0 ? results.Max(r => r.CurrentPrice) : null,
-        });
+            var values = distribution?.GetValueOrDefault(field);
+            var list = (values ?? new Dictionary<string, int>())
+                .Where(v => v.Value > 0 && !string.IsNullOrWhiteSpace(v.Key))
+                .Select(v => new FacetValue(v.Key, v.Value))
+                .OrderByDescending(f => f.Count).ThenBy(f => f.Value).ToList();
+            result[name] = name == "year" ? list.OrderByDescending(f => f.Value).ToList() : list;
+        }
+        return result;
     }
 
     /// <summary>Chips / filter-sheet values override what was read from the text.</summary>
@@ -226,43 +335,18 @@ public static class ListingSearchEndpoints
                 .ToList()
         };
 
-    /// <summary>Filter sheet facets from the results: category, part type, make, model, year, condition, brand type, kind.</summary>
-    public static Dictionary<string, List<FacetValue>> Facets(List<SearchResultItem> results)
-    {
-        static List<FacetValue> Count(IEnumerable<string?> values) =>
-            values.Where(v => !string.IsNullOrWhiteSpace(v)).GroupBy(v => v!)
-                .Select(g => new FacetValue(g.Key, g.Count()))
-                .OrderByDescending(f => f.Count).ThenBy(f => f.Value).Take(30).ToList();
-
-        IEnumerable<string> Makes(Item r) => r.Fitments.Count > 0 ? r.Fitments.Select(f => f.Make).Distinct() : r.Make.Length > 0 ? [r.Make] : [];
-        IEnumerable<string> Models(Item r) => r.Fitments.Count > 0
-            ? r.Fitments.Select(f => $"{f.Make}|{f.Model}").Distinct()
-            : r.Model.Length > 0 ? [$"{r.Make}|{r.Model}"] : [];
-        IEnumerable<string> Years(Item r) => r.FitKeys.Select(k => k.Split('|')).Where(p => p.Length == 3).Select(p => p[2]).Distinct();
-
-        return new Dictionary<string, List<FacetValue>>
-        {
-            ["category"] = Count(results.Select(r => r.Category)),
-            ["partType"] = Count(results.Select(r => r.PartType)),
-            ["make"] = Count(results.SelectMany(Makes)),
-            ["model"] = Count(results.SelectMany(Models)),
-            ["year"] = Count(results.SelectMany(Years)).OrderByDescending(f => f.Value).ToList(),
-            ["condition"] = Count(results.Select(r => r.Condition)),
-            ["brandType"] = Count(results.Select(r => r.BrandType)),
-            ["kind"] = Count(results.Select(r => r.Kind)),
-            ["delivery"] = Count(results.SelectMany(r => r.DeliveryOptions)),
-        };
-    }
-
     // ── suggestions ───────────────────────────────────────────────────
 
     /// <summary>
-    /// Suggestions while typing, grouped like an online shop: parts ("Front bumper", "Front bumper – Toyota Hilux 2016"),
+    /// Suggestions while typing, grouped like an online shop: categories ("Brakes"), parts ("Front bumper", "Front bumper – Toyota Hilux 2016"),
     /// vehicles ("Toyota Hilux 2016–2020"), part numbers ("52119-0K935"). Recent searches are added by the app.
+    /// itemType limits them to the Parts / Vehicles choice: Vehicles → only vehicles; Parts → parts, part numbers and
+    /// "Parts for Toyota Hilux 2016–2020" (group "fits").
     /// </summary>
     public static async Task<IResult> Suggest(MeilisearchClient client, SearchDictionaryProvider dictionaries,
-        string? q, string? country, int limit = 5)
+        string? q, string? country, string? itemType = null, int limit = 5)
     {
+        var listingType = ListingType(itemType);
         var text = q?.Trim() ?? "";
         if (text.Length < 2) return Results.Ok(new { suggestions = Array.Empty<Suggestion>() });
 
@@ -274,15 +358,25 @@ public static class ListingSearchEndpoints
         var suggestions = new List<Suggestion>();
         var vehicleChips = VehicleChips(parsed);
 
+        // Categories whose name starts with the last word ("brake" → Brakes): picked like a category tile.
+        var wantParts = listingType != "Vehicle";
+        if (wantParts && lastWord.Length >= 2)
+        {
+            foreach (var category in dictionary.Data.PartTypes.Select(p => p.Category)
+                         .Where(c => !string.IsNullOrWhiteSpace(c) && Matches(c, lastWord))
+                         .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(c => c.Length).Take(take))
+                suggestions.Add(new Suggestion("categories", category, [new QueryChip("category", category, category)], $"All parts in {category}"));
+        }
+
         // Parts: the understood part type (with position / vehicle), then part types starting with the last word.
-        if (parsed.PartType is not null)
+        if (wantParts && parsed.PartType is not null)
         {
             var chips = new List<QueryChip> { new("partType", parsed.PartType.Name, parsed.PartLabel()!) };
             suggestions.Add(new Suggestion("parts", Capitalise(parsed.PartLabel()!), chips, parsed.PartType.Category));
             if (parsed.VehicleLabel() is { } vehicle)
                 suggestions.Add(new Suggestion("parts", $"{Capitalise(parsed.PartLabel()!)} – {vehicle}", [.. chips, .. vehicleChips], "Fits your vehicle"));
         }
-        if (lastWord.Length >= 2)
+        if (wantParts && lastWord.Length >= 2)
         {
             foreach (var type in dictionary.Data.PartTypes
                          .Select(p => (Type: p, Match: Matches(p.Name, lastWord) ? p.Name : p.Synonyms.FirstOrDefault(s => Matches(s, lastWord))))
@@ -301,8 +395,11 @@ public static class ListingSearchEndpoints
         }
 
         // Vehicles: the understood vehicle (with the years listings cover), then models / makes starting with the last word.
+        // While Parts is chosen they read "Parts for Toyota Hilux 2016–2020" (group "fits").
+        var vehicleGroup = listingType == "Part" ? "fits" : "vehicles";
+        string VehicleLabel(string label) => listingType == "Part" ? $"Parts for {label}" : label;
         if (parsed.Make is not null && parsed.Model is not null)
-            suggestions.Add(new Suggestion("vehicles", await VehicleWithYearsAsync(client, parsed), vehicleChips));
+            suggestions.Add(new Suggestion(vehicleGroup, VehicleLabel(await VehicleWithYearsAsync(client, parsed, listingType)), vehicleChips));
         if (lastWord.Length >= 2)
         {
             var c = country?.ToUpperInvariant();
@@ -318,14 +415,18 @@ public static class ListingSearchEndpoints
                 var label = string.Join(" ", new object?[] { parsed.YearFrom, make.Name, model.Name }.Where(x => x is not null));
                 var chips = new List<QueryChip> { new("make", make.Name, make.Name), new("model", model.Name, model.Name) };
                 if (parsed.YearFrom is not null) chips.Add(new QueryChip("year", $"{parsed.YearFrom}", $"{parsed.YearFrom}"));
-                if (parsed.PartType is not null) chips.Insert(0, new QueryChip("partType", parsed.PartType.Name, parsed.PartLabel()!));
-                suggestions.Add(new Suggestion("vehicles", parsed.PartType is null ? label : $"{Capitalise(parsed.PartLabel()!)} – {label}", chips));
+                if (wantParts && parsed.PartType is not null)
+                {
+                    chips.Insert(0, new QueryChip("partType", parsed.PartType.Name, parsed.PartLabel()!));
+                    suggestions.Add(new Suggestion(vehicleGroup, $"{Capitalise(parsed.PartLabel()!)} – {label}", chips));
+                }
+                else suggestions.Add(new Suggestion(vehicleGroup, VehicleLabel(label), chips));
             }
         }
 
-        // Part numbers from live listings.
+        // Part numbers from live listings (not while Vehicles is chosen).
         var numberQuery = Contracts.PartNumbers.Normalize(text);
-        if (numberQuery is { Length: >= 3 } && numberQuery.Any(char.IsDigit))
+        if (wantParts && numberQuery is { Length: >= 3 } && numberQuery.Any(char.IsDigit))
         {
             var hits = await client.Auctions().SearchAsync<Item>(text, new SearchQuery
             {
@@ -353,13 +454,13 @@ public static class ListingSearchEndpoints
         parsed.Chips().Where(c => c.Type is "make" or "model" or "year").ToList();
 
     /// <summary>"Toyota Hilux 2016–2020": the years live listings cover (or the year typed).</summary>
-    private static async Task<string> VehicleWithYearsAsync(MeilisearchClient client, ParsedQuery parsed)
+    private static async Task<string> VehicleWithYearsAsync(MeilisearchClient client, ParsedQuery parsed, string? listingType)
     {
         if (parsed.YearFrom is not null) return parsed.VehicleLabel()!;
         var key = $"{Item.Key(parsed.Make)}|{Item.Key(parsed.Model)}";
         var hits = await client.Auctions().SearchAsync<FitKeysOnly>("", new SearchQuery
         {
-            Filter = $"fitKeys = {Quote(key)} AND status = \"Live\"",
+            Filter = $"fitKeys = {Quote(key)} AND status = \"Live\"" + (listingType is null ? "" : $" AND listingType = {Quote(listingType)}"),
             Limit = 50,
             AttributesToRetrieve = ["fitKeys"],
         });

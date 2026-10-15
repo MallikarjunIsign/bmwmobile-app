@@ -76,6 +76,13 @@ public class DevicesController(ChatDbContext db, TimeProvider clock) : Controlle
         if (device is null) db.PushDevices.Add(device = new PushDevice { Token = token, User = Me });
         device.User = Me;
         device.Platform = platform;
+        // The app registers again when the role changes (e.g. a buyer made a seller).
+        device.IsSeller = Contracts.AppRoles.IsSeller(User);
+        var (country, lat, lon) = Contracts.PartRequestAudience.FromClaims(User);
+        var sent = dto.Latitude is { } la && dto.Longitude is { } lo && Contracts.GeoMath.IsValidCoordinate(la, lo);
+        device.Latitude = sent ? dto.Latitude : lat;
+        device.Longitude = sent ? dto.Longitude : lon;
+        device.CountryCode = dto.CountryCode?.Trim() is { Length: 2 } code ? code.ToUpperInvariant() : country;
         device.UpdatedAt = clock.GetUtcNow().UtcDateTime;
         await db.SaveChangesAsync();
         return NoContent();

@@ -1,10 +1,15 @@
-/** Fewer ratings than this: "New seller". */
+/** Fewer ratings than this: also marked "New seller". */
 export const NEW_SELLER_BELOW = 3;
 
-/** "⭐ 4.7 (32)", or "New seller" with fewer than 3 ratings. */
-export function ratingText(average?: number | null, count = 0): string {
-  if (!average || count < NEW_SELLER_BELOW) return 'New seller';
-  return `⭐ ${average.toFixed(1)} (${count})`;
+/**
+ * The seller's rating out of 5 and how many people rated: "⭐ 4.7/5 (32 ratings)", "⭐ 4.0/5 (1 rating) · New seller",
+ * or "New seller · no ratings yet". `short` (two-column cards): "⭐ 4.7/5 (32)".
+ */
+export function ratingText(average?: number | null, count = 0, short = false): string {
+  if (!average || count <= 0) return short ? 'No ratings yet' : 'New seller · no ratings yet';
+  const score = `⭐ ${average.toFixed(1)}/5`;
+  if (short) return `${score} (${count})`;
+  return `${score} (${count} ${count === 1 ? 'rating' : 'ratings'})${count < NEW_SELLER_BELOW ? ' · New seller' : ''}`;
 }
 
 /** "Member since Oct 2026". */

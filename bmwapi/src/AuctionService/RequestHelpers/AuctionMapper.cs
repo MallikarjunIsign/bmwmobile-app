@@ -75,7 +75,12 @@ public class AuctionMapper(ImageUrlBuilder urls)
             Currency = item.Currency,
             DeliveryOptions = DeliveryList(item.DeliveryOptions),
             SizeClass = item.SizeClass?.ToString(),
-            ShippingFee = item.DeliveryOptions.HasFlag(Entities.DeliveryOptions.Shipping) ? item.ShippingFee : null,
+            WeightLb = Package(item)?.WeightLb,
+            LengthIn = Package(item)?.LengthIn,
+            WidthIn = Package(item)?.WidthIn,
+            HeightIn = Package(item)?.HeightIn,
+            // No manual fee any more: the charge is calculated per buyer (api/shipping/estimate, fixed on the order).
+            ShippingFee = null,
             ShipsWithin = item.DeliveryOptions.HasFlag(Entities.DeliveryOptions.Shipping) ? item.CountryCode : null,
             PickupCity = item.DeliveryOptions.HasFlag(Entities.DeliveryOptions.Pickup) ? ListingRules.PublicCity(item.LocationName) : null,
             // The exact pickup address never leaves AuctionService except to the seller (and later the buyer's order).
@@ -367,4 +372,10 @@ public class AuctionMapper(ImageUrlBuilder urls)
     }
 
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    /// <summary>The package used for shipping prices (parts that ship; seller's values or defaults).</summary>
+    private static Services.Parcel? Package(Item item) =>
+        item.Kind == ListingKind.Vehicle || !item.DeliveryOptions.HasFlag(Entities.DeliveryOptions.Shipping)
+            ? null
+            : Services.ParcelDefaults.Of(item, Services.ShippingService.SizeOf(item));
 }

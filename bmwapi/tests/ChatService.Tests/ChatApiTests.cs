@@ -346,5 +346,57 @@ public class ChatApiTests(AppFixture fixture) : IAsyncLifetime
         Assert.Equal(("How was your purchase?", "review", "o1"), (push.Message.Title, push.Message.Data["type"], push.Message.Data["orderId"]));
     }
 
+    /// <summary>A phone and where it is (Secunderabad, India unless given).</summary>
+    private async Task RegisterPhone(string user, string token, string role, string country = "IN", double lat = 17.4399, double lon = 78.4983)
+    {
+        await fixture.Host.Scenario(s =>
+        {
+            s.WithClaim(new System.Security.Claims.Claim("username", user));
+            s.WithClaim(new System.Security.Claims.Claim("role", role));
+            s.Post.Json(new DeviceDto { Token = token, CountryCode = country, Latitude = lat, Longitude = lon }).ToUrl("/api/chat/devices");
+            s.StatusCodeShouldBe(HttpStatusCode.NoContent);
+        });
+    }
+
+    [Fact]
+    public async Task PartRequest_IsPushedToSellersNearTheBuyer_NotToBuyers_NorToTheRequester_NorAnotherCountry()
+    {
+        await RegisterPhone("ravi", "ravi-seller-phone", "seller");                         // Secunderabad: ~10 km
+        await RegisterPhone("priya", "priya-seller-phone", "seller", lat: 17.45, lon: 78.38); // ~5 km
+        await RegisterPhone("dev", "dev-delhi-phone", "seller", lat: 28.6139, lon: 77.2090);  // Delhi: too far
+        await RegisterPhone("ada", "ada-lagos-phone", "seller", "NG", 6.5244, 3.3792);        // another country
+        await RegisterPhone("carol", "carol-buyer-phone", "buyer");
+        await RegisterPhone("sam", "sam-seller-phone", "seller"); // the one asking (sellers can buy too)
+
+        await fixture.Host.InvokeMessageAndWaitAsync(new PartRequestCreated
+        {
+            RequestId = "r1", Buyer = "sam", Title = "Front bumper – 2016 Toyota Hilux", LocationName = "Hyderabad", CountryCode = "IN",
+            Latitude = 17.4849, Longitude = 78.4138, RadiusKm = 60,
+        });
+
+        var push = fixture.Push.Sent.Last(p => p.Message.Data.GetValueOrDefault("requestId") == "r1");
+        Assert.Equal(["priya-seller-phone", "ravi-seller-phone"], push.Tokens.Order());
+
+        // No buyer location: every seller in India (Delhi too) – still not Lagos.
+        await fixture.Host.InvokeMessageAndWaitAsync(new PartRequestCreated { RequestId = "r2", Buyer = "sam", Title = "Battery", CountryCode = "IN" });
+        var countryWide = fixture.Push.Sent.Last(p => p.Message.Data.GetValueOrDefault("requestId") == "r2");
+        Assert.Equal(["dev-delhi-phone", "priya-seller-phone", "ravi-seller-phone"], countryWide.Tokens.Order());
+        Assert.Equal("🔎 A buyer is looking for a part", push.Message.Title);
+        Assert.Equal("Front bumper – 2016 Toyota Hilux in Hyderabad. Have one? List it.", push.Message.Body);
+        Assert.Equal("partRequest", push.Message.Data["type"]);
+    }
+
+    [Fact]
+    public async Task MatchingPart_IsPushedToTheBuyersPhones()
+    {
+        await RegisterPhone("dina", "dina-phone", "buyer");
+
+        await fixture.Host.InvokeMessageAndWaitAsync(new CustomOrderMatched { OrderId = "o9", User = "dina", AuctionId = "a9", Title = "Hilux Front Bumper" });
+
+        var push = fixture.Push.Sent.Last(p => p.Tokens.Contains("dina-phone"));
+        Assert.Equal(("✅ The part you asked for is available", "Hilux Front Bumper"), (push.Message.Title, push.Message.Body));
+        Assert.Equal(("customOrderMatched", "a9"), (push.Message.Data["type"], push.Message.Data["auctionId"]));
+    }
+
     private record UnreadDto(int Count);
 }

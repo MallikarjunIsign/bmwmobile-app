@@ -32,7 +32,9 @@ public static class OrderTracking
             Quantity = quantity,
             FinalTotal = total,
             PartPrice = auction.StartingPrice * quantity,
-            ShippingFee = options.HasFlag(DeliveryOptions.Shipping) ? item.ShippingFee ?? 0 : null,
+            // Calculated when the buyer chooses Shipping (with their delivery location), then fixed on the order.
+            ShippingFee = null,
+            ShippingSizeClass = options.HasFlag(DeliveryOptions.Shipping) ? ShippingService.SizeOf(item) : null,
             CountryCode = item.CountryCode,
             PickupAddress = options.HasFlag(DeliveryOptions.Pickup) ? item.PickupAddress : null,
             Currency = item.Currency,
@@ -120,7 +122,7 @@ public static class OrderTracking
         order.Buyer == user && order.Status == OrderStatus.SoldAwaitingHandover &&
         (Choices(order).Count > 1 || NeedsShippingAddress(order));
 
-    /// <summary>What the buyer pays: the item, plus the shipping fee when it is shipped.</summary>
+    /// <summary>What the buyer pays: the item, plus the (calculated, fixed) shipping charge when it is shipped; pickup is free.</summary>
     public static int Total(Order order) =>
         order.FinalTotal + (order.DeliveryMethod == DeliveryOptions.Shipping ? order.ShippingFee ?? 0 : 0);
 

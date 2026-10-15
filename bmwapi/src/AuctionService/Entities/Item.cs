@@ -71,6 +71,18 @@ public class Item
     [MaxLength(300)]
     public string? PickupAddress { get; set; }
     public SizeClass? SizeClass { get; set; }
+    /// <summary>
+    /// The package for shipping (US: USPS prices need weight and box size): pounds and inches. Null = the part type's
+    /// default (ParcelDefaults), which the Sell form shows pre-filled.
+    /// </summary>
+    [Column(TypeName = "numeric(7,2)")]
+    public decimal? WeightLb { get; set; }
+    [Column(TypeName = "numeric(6,1)")]
+    public decimal? LengthIn { get; set; }
+    [Column(TypeName = "numeric(6,1)")]
+    public decimal? WidthIn { get; set; }
+    [Column(TypeName = "numeric(6,1)")]
+    public decimal? HeightIn { get; set; }
     /// <summary>1, 3, 5, 7 or 10 days (the end is set when the listing is published).</summary>
     public int? DurationDays { get; set; }
 

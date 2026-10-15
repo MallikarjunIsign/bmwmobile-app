@@ -76,6 +76,10 @@ builder.Host.UseWolverine(opts =>
         .DeclareExchange("order-created", ex => ex.ExchangeType = ExchangeType.Fanout)
         .DeclareExchange("seller-rating-changed", ex => ex.ExchangeType = ExchangeType.Fanout)
         .DeclareExchange("review-requested", ex => ex.ExchangeType = ExchangeType.Fanout)
+        .DeclareExchange("part-request-created", ex => ex.ExchangeType = ExchangeType.Fanout)
+        .DeclareExchange("custom-order-matched", ex => ex.ExchangeType = ExchangeType.Fanout)
+        .BindExchange("part-request-created").ToQueue("chat-part-request-created")
+        .BindExchange("custom-order-matched").ToQueue("chat-custom-order-matched")
         .BindExchange("seller-rating-changed").ToQueue("chat-seller-rating-changed")
         .BindExchange("review-requested").ToQueue("chat-review-requested")
         .BindExchange("auction-created").ToQueue("chat-auction-created")
@@ -112,6 +116,8 @@ builder.Host.UseWolverine(opts =>
     opts.ListenToRabbitQueue("chat-order-created");
     opts.ListenToRabbitQueue("chat-seller-rating-changed");
     opts.ListenToRabbitQueue("chat-review-requested");
+    opts.ListenToRabbitQueue("chat-part-request-created");
+    opts.ListenToRabbitQueue("chat-custom-order-matched");
 });
 
 var app = builder.Build();

@@ -21,11 +21,8 @@ export const config = {
   OAUTH_CLIENT_ID: 'mobileApp',
   OAUTH_SCOPE: 'openid profile auctionApp IdentityServerApi offline_access',
 
-  /**
-   * Customer / Service Pro accounts. false = everyone is one plain user.
-   * Turn on together with the Identity setting Features:RolesEnabled.
-   */
-  ENABLE_ROLES: false,
+  /** The app's name in texts such as "Want to sell on ShopCarParts?". */
+  APP_NAME: 'ShopCarParts',
 
   /** Request timeout for sign-in calls, in milliseconds. */
   AUTH_TIMEOUT_MS: 20000,

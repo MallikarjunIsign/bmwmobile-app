@@ -10,7 +10,7 @@ import {
   requestPermission,
   setBackgroundMessageHandler,
 } from '@react-native-firebase/messaging';
-import { ChatApi } from './chatApi';
+import { ChatApi, type PushLocation } from './chatApi';
 
 /**
  * Push notifications for new chat messages (Firebase Cloud Messaging). Everything here is a no-op until the Firebase
@@ -27,8 +27,11 @@ export const pushAvailable = (): boolean => {
 
 let registeredToken: string | null = null;
 
-/** After sign-in: ask for permission and register this phone with ChatService. Returns the cleanup. */
-export async function registerForPush(): Promise<() => void> {
+/**
+ * After sign-in: ask for permission and register this phone with ChatService (with where it is, so sellers only get
+ * buyers' part requests near them). Returns the cleanup.
+ */
+export async function registerForPush(where?: PushLocation): Promise<() => void> {
   if (!pushAvailable()) return () => undefined;
   try {
     const messaging = getMessaging();
@@ -42,7 +45,7 @@ export async function registerForPush(): Promise<() => void> {
 
     const send = async (token: string) => {
       registeredToken = token;
-      await ChatApi.registerDevice(token, Platform.OS === 'ios' ? 'ios' : 'android').catch(() => undefined);
+      await ChatApi.registerDevice(token, Platform.OS === 'ios' ? 'ios' : 'android', where).catch(() => undefined);
     };
     await send(await getToken(messaging));
     return onTokenRefresh(messaging, send);
@@ -64,14 +67,23 @@ export async function unregisterPush(): Promise<void> {
  * Tapping a chat notification (app in the background, or started by the tap): calls `open` with the conversation id.
  * Returns the cleanup.
  */
-export function onChatNotificationOpened(open: (conversationId: string) => void, openOrders?: () => void): () => void {
+export function onChatNotificationOpened(
+  open: (conversationId: string) => void,
+  openOrders?: () => void,
+  others?: { buyerRequests?: () => void; listing?: (auctionId: string) => void },
+): () => void {
   if (!pushAvailable()) return () => undefined;
   const messaging = getMessaging();
   const handle = (message: { data?: Record<string, unknown> } | null) => {
-    const id = message?.data?.conversationId;
-    if (message?.data?.type === 'chat' && typeof id === 'string') open(id);
+    const data = message?.data;
+    const id = data?.conversationId;
+    if (data?.type === 'chat' && typeof id === 'string') open(id);
     // "How was your purchase?" reminder: the order (and its Rate button) is in Orders.
-    else if (message?.data?.type === 'review') openOrders?.();
+    else if (data?.type === 'review') openOrders?.();
+    // Sellers: a buyer is looking for a part.
+    else if (data?.type === 'partRequest') others?.buyerRequests?.();
+    // Buyers: the part they asked for was listed.
+    else if (data?.type === 'customOrderMatched' && typeof data.auctionId === 'string') others?.listing?.(data.auctionId);
   };
   getInitialNotification(messaging).then(handle).catch(() => undefined);
   return onNotificationOpenedApp(messaging, handle);

@@ -1,7 +1,9 @@
 using AuctionService.Data;
 using AuctionService.DTOs;
 using AuctionService.Entities;
+using AuctionService.Errors;
 using Contracts;
+using Wolverine.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -10,12 +12,14 @@ namespace AuctionService.Controllers;
 
 /// <summary>
 /// Custom orders: "There are no parts available for this search – create a custom order and get notified when the
-/// part is available". Each user sees only their own orders.
+/// part is available". Each buyer sees only their own orders. A new request is announced to every seller
+/// (PartRequestCreated → live + push); sellers can list the open requests ("Buyer requests"). When a seller publishes
+/// a matching part, the buyer is told (CustomOrderMatcher → CustomOrderMatched).
 /// </summary>
 [ApiController]
 [Authorize]
 [Route("api/[controller]")]
-public class PartRequestsController(AuctionDbContext context) : ControllerBase
+public class PartRequestsController(AuctionDbContext context, IDbContextOutbox<AuctionDbContext> outbox) : ControllerBase
 {
     private string Username => User.Identity?.Name ?? throw new UnauthorizedAccessException();
 
@@ -83,11 +87,70 @@ public class PartRequestsController(AuctionDbContext context) : ControllerBase
             Status = CustomOrderStatus.Open,
         };
 
-        context.PartRequests.Add(req);
-        await context.SaveChangesAsync();
+        outbox.DbContext.PartRequests.Add(req);
+        // Every seller hears about it (live in the app and as a push notification).
+        await outbox.PublishAsync(new PartRequestCreated
+        {
+            RequestId = req.Id,
+            Buyer = req.User,
+            Title = RequestTitle(req),
+            LocationName = CityOf(req.LocationName),
+            CountryCode = req.CountryCode,
+            Latitude = req.Latitude,
+            Longitude = req.Longitude,
+            RadiusKm = req.RadiusKm,
+            CreatedAt = req.CreatedAt,
+        });
+        await outbox.SaveChangesAndFlushMessagesAsync();
 
         return CreatedAtAction(nameof(GetPartRequest), new { id = req.Id }, MapToDto(req));
     }
+
+    /// <summary>
+    /// Sellers: open requests from buyers near them (newest first; not their own) – within the buyer's radius, or in
+    /// the buyer's country when the buyer gave no location; never another country (PartRequestAudience, using the
+    /// seller's location from the token). Shows what is wanted and the buyer's city – never the buyer's name or location.
+    /// </summary>
+    [SellerOnly]
+    [HttpGet("open")]
+    public async Task<ActionResult<List<OpenPartRequestDto>>> Open([FromQuery] string? country, [FromQuery] int limit = 50)
+    {
+        var query = context.PartRequests.AsNoTracking().Where(x => x.Status == CustomOrderStatus.Open && x.User != Username);
+        if (!string.IsNullOrWhiteSpace(country)) query = query.Where(x => x.CountryCode == country.ToUpper());
+        var (sellerCountry, sellerLat, sellerLon) = PartRequestAudience.FromClaims(User);
+        var requests = (await query.OrderByDescending(x => x.CreatedAt).ToListAsync())
+            .Where(r => PartRequestAudience.Reaches(r.CountryCode, r.Latitude, r.Longitude, r.RadiusKm, sellerCountry, sellerLat, sellerLon))
+            .Take(Math.Clamp(limit, 1, 200));
+        return requests.Select(r => new OpenPartRequestDto
+        {
+            Id = r.Id,
+            Title = RequestTitle(r),
+            PartName = NullIfEmpty(r.PartName),
+            PartNumber = r.PartNumber,
+            Make = NullIfEmpty(r.Make),
+            Model = NullIfEmpty(r.Model),
+            Year = r.Year == 0 ? null : r.Year,
+            Specs = r.Specs,
+            MaxBudget = r.MaxBudget > 0 ? r.MaxBudget : null,
+            LocationName = CityOf(r.LocationName),
+            CountryCode = r.CountryCode,
+            CreatedAt = r.CreatedAt,
+        }).ToList();
+    }
+
+    /// <summary>"Front bumper – 2016 Toyota Hilux", "Part no. 52119-0K935", or the words the buyer searched for.</summary>
+    public static string RequestTitle(PartRequest r)
+    {
+        var part = !string.IsNullOrWhiteSpace(r.PartName) ? r.PartName.Trim()
+            : !string.IsNullOrWhiteSpace(r.PartNumber) ? $"Part no. {r.PartNumber}"
+            : r.SearchText ?? "A part";
+        var vehicle = string.Join(" ", new[] { r.Year > 0 ? r.Year.ToString() : null, r.Make, r.Model }.Where(x => !string.IsNullOrWhiteSpace(x)));
+        return vehicle.Length > 0 ? $"{char.ToUpperInvariant(part[0])}{part[1..]} – {vehicle}" : $"{char.ToUpperInvariant(part[0])}{part[1..]}";
+    }
+
+    /// <summary>"Kukatpally, Hyderabad" → "Hyderabad": only the city is shared with sellers.</summary>
+    private static string? CityOf(string? locationName) =>
+        string.IsNullOrWhiteSpace(locationName) ? null : locationName.Split(',').Last().Trim();
 
     /// <summary>The buyer no longer needs the part: no more notifications for this order.</summary>
     [HttpPost("{id}/close")]
@@ -126,7 +189,7 @@ public class PartRequestsController(AuctionDbContext context) : ControllerBase
         return v.Length > maxLength ? v[..maxLength] : v;
     }
 
-    private static string? NullIfEmpty(string value) => value.Length == 0 ? null : value;
+    private static string? NullIfEmpty(string? value) => string.IsNullOrEmpty(value) ? null : value;
 
     private static PartRequestDto MapToDto(PartRequest r) => new()
     {

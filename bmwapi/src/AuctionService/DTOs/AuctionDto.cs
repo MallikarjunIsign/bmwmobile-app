@@ -66,6 +66,11 @@ public class AuctionDto
     /// <summary>Pickup and / or Shipping.</summary>
     public List<string> DeliveryOptions { get; set; } = [];
     public string? SizeClass { get; set; }
+    /// <summary>The package (lb / inches) the shipping price uses: the seller's values or the part type's defaults.</summary>
+    public decimal? WeightLb { get; set; }
+    public decimal? LengthIn { get; set; }
+    public decimal? WidthIn { get; set; }
+    public decimal? HeightIn { get; set; }
     /// <summary>Shipping: the fee (0 = free shipping); null without shipping.</summary>
     public int? ShippingFee { get; set; }
     /// <summary>Shipping: the country it ships within (the listing country).</summary>

@@ -25,7 +25,8 @@ public static class Config
         {
             ClientId = "bruno",
             ClientName = "Bruno Client",
-            AllowedScopes = { "openid", "profile", "auctionApp" },
+            // Dev / API testing (IdentityService.http). IdentityServerApi lets an admin call /api/admin/*.
+            AllowedScopes = { "openid", "profile", "auctionApp", IdentityServerConstants.LocalApi.ScopeName },
             AllowedGrantTypes = GrantTypes.ResourceOwnerPassword,
             ClientSecrets = {new Secret("NotASecret".Sha256())},
         },

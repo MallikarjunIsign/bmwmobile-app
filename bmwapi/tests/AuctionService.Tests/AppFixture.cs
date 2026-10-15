@@ -36,7 +36,8 @@ public class AppFixture : IAsyncLifetime
                 services.RunWolverineInSoloMode();
                 services.DisableAllExternalWolverineTransports();
             });
-        }, new JwtSecurityStub());
+        }, // Every test user is a seller unless a test removes the "role" claim (buyer tests).
+        new JwtSecurityStub().With(new System.Security.Claims.Claim("role", "seller")));
     }
 
     public async Task DisposeAsync()

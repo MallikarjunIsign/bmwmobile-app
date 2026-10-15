@@ -39,6 +39,7 @@ const draft = {
 };
 
 const bumper = {
+  defaultSizeClass: 'Large',
   id: 7, name: 'Bumper', categoryId: 1, category: 'Body – Exterior', fitmentMode: 'VehicleSpecific', hasPosition: true, hasSide: false,
   isBodyPart: true, synonyms: [], importantFitmentFields: [], specFields: [],
 };
@@ -142,37 +143,63 @@ test('auction step shows the bid steps read-only (not a seller setting) and the 
   expect(t).toContain('No reserve price');
 });
 
-test('delivery: tick Pickup and / or Shipping; Shipping asks for the fee (or free), the size class and shows the country', async () => {
+test('delivery: tick Pickup and / or Shipping; Shipping has no fee to enter – only the size class (part type default) and the country', async () => {
   const tree = await render('location');
   let t = texts(tree);
   expect(t).toContain('HOW CAN THE BUYER GET IT? (AT LEAST ONE)');
   expect(t).not.toContain('Buyer arranges');
   expect(t).toContain('EXACT PICKUP ADDRESS');
-  expect(t).not.toContain('SHIPPING FEE');
 
   await press(tree, x => x === 'Shipping');
   t = texts(tree);
-  expect(t).toContain('SHIPPING FEE (INR)');
-  expect(t).toContain('Free shipping');
+  expect(t).not.toContain('SHIPPING FEE');
+  expect(t).not.toContain('Free shipping');
+  expect(t).toContain("No fee to enter: each buyer's shipping charge is worked out from the size class and the distance to them.");
   expect(t).toContain('SIZE CLASS');
   expect(t).toContain('SHIPS WITHIN');
   expect(t).toContain('India');
+  // The bumper's default size class is preselected.
+  expect(t).toContain('Large – bumper, door, bonnet');
+  const selected = tree.root.findAll(n => n.props.accessibilityState?.selected === true && n.props.onPress).map(n => textOf(n));
+  expect(selected).toContain('Large');
 
-  const fee = tree.root.findAll(n => (n.type as unknown) === 'TextInput').find(n => n.props.placeholder === 'e.g. 500')!;
-  await ReactTestRenderer.act(async () => fee.props.onChangeText('500'));
+  // The seller can change it.
+  await press(tree, x => x === 'Freight');
   await ReactTestRenderer.act(async () => new Promise(r => setTimeout(r, 1300)));
-  expect(api.saveListing).toHaveBeenLastCalledWith('d1', expect.objectContaining({ deliveryOptions: ['Pickup', 'Shipping'], shippingFee: 500 }));
-
-  // Free shipping hides the fee and saves 0.
-  const free = tree.root.findAll(n => n.props.accessibilityLabel === 'Free shipping' && n.props.onValueChange)[0];
-  await ReactTestRenderer.act(async () => free.props.onValueChange(true));
-  expect(texts(tree)).not.toContain('SHIPPING FEE (INR)');
-  await ReactTestRenderer.act(async () => new Promise(r => setTimeout(r, 1300)));
-  expect(api.saveListing).toHaveBeenLastCalledWith('d1', expect.objectContaining({ freeShipping: true, shippingFee: 0 }));
+  expect(api.saveListing).toHaveBeenLastCalledWith('d1', expect.objectContaining({ deliveryOptions: ['Pickup', 'Shipping'], sizeClass: 'Freight' }));
+  expect(api.saveListing.mock.calls.at(-1)![1]).not.toHaveProperty('shippingFee', expect.any(Number));
 
   // Unticking Pickup leaves Shipping only (no pickup address).
   await press(tree, x => x === 'Pickup');
   expect(texts(tree)).not.toContain('EXACT PICKUP ADDRESS');
+});
+
+test('US listing: Shipping asks for the package (pre-filled for the part type, editable) for the USPS price', async () => {
+  api.getListing.mockResolvedValue({
+    ...draft, countryCode: 'US', currency: 'USD', locationName: 'Manhattan, New York', latitude: 40.7128, longitude: -74.006,
+    deliveryOptions: ['Pickup', 'Shipping'],
+  });
+  api.partType.mockResolvedValue({ ...bumper, defaultWeightLb: 25, defaultLengthIn: 72, defaultWidthIn: 20, defaultHeightIn: 14 });
+  const tree = await render('location');
+
+  const t = texts(tree);
+  expect(t).toContain('PACKAGE (FOR THE USPS PRICE)');
+  expect(t).toContain('USPS Ground Advantage retail');
+  const input = (label: string) => tree.root.findAll(n => n.props.accessibilityLabel === label && n.props.onChangeText)[0];
+  expect(input('Package weight in pounds').props.value).toBe('25');
+  expect(input('Box length in inches').props.value).toBe('72');
+
+  // The seller packs it smaller and lighter.
+  await ReactTestRenderer.act(async () => input('Package weight in pounds').props.onChangeText('18.5'));
+  await ReactTestRenderer.act(async () => input('Box length in inches').props.onChangeText('60'));
+  await ReactTestRenderer.act(async () => new Promise(r => setTimeout(r, 1300)));
+  expect(api.saveListing).toHaveBeenLastCalledWith('d1', expect.objectContaining({ weightLb: 18.5, lengthIn: 60 }));
+});
+
+test('non-US listing: no package fields (other countries keep the distance-based charge)', async () => {
+  api.getListing.mockResolvedValue({ ...draft, deliveryOptions: ['Pickup', 'Shipping'] });
+  const tree = await render('location');
+  expect(texts(tree)).not.toContain('PACKAGE (FOR THE USPS PRICE)');
 });
 
 test('the seller picks the date and time the auction ends (sent as UTC, replacing the older duration in days)', async () => {

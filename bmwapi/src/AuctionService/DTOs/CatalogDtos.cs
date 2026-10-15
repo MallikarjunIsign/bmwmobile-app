@@ -19,6 +19,13 @@ public class PartTypeDto
     public List<string> Synonyms { get; set; } = [];
     public List<string> ImportantFitmentFields { get; set; } = [];
     public List<SpecFieldDefinition> SpecFields { get; set; } = [];
+    /// <summary>Shipping size class the Sell form starts with (Small, Medium, Large, Freight); the seller can change it.</summary>
+    public string DefaultSizeClass { get; set; } = "Medium";
+    /// <summary>US shipping: the package the Sell form starts with (weight in lb, box in inches); the seller can change it.</summary>
+    public decimal DefaultWeightLb { get; set; }
+    public decimal DefaultLengthIn { get; set; }
+    public decimal DefaultWidthIn { get; set; }
+    public decimal DefaultHeightIn { get; set; }
     /// <summary>The synonym that matched the search text, e.g. "bonnet" for Hood.</summary>
     public string? MatchedSynonym { get; set; }
 }

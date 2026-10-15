@@ -76,6 +76,10 @@ public class DeviceDto
     public string Token { get; set; } = "";
     /// <summary>android or ios.</summary>
     public string Platform { get; set; } = "android";
+    /// <summary>The app's current location (GPS or chosen address); without it the token's primary location is used.</summary>
+    public string? CountryCode { get; set; }
+    public double? Latitude { get; set; }
+    public double? Longitude { get; set; }
 }
 
 /// <summary>Sent through the local durable queue after a message is saved: push to the recipient's phones.</summary>

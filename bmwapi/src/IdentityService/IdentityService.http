@@ -74,3 +74,94 @@ grant_type=bmw_external&client_id=mobileApp&scope={{scope}}&provider=google&id_t
 ### The token works everywhere: gateway -> auction service echoes the username
 POST http://localhost:6001/auctions/test
 Authorization: Bearer PASTE_ACCESS_TOKEN
+
+### ════════════════════════════════════════════════════════════════════════
+### ADMIN – seller accounts (role admin only; Swagger: {{id}}/swagger)
+### The admin is seeded from user-secrets (Seed:AdminEmail / Seed:AdminPassword, see RUN_LOCAL.md 5A).
+### 1) Sign in as the admin with steps 2 + 3 above (email + password, then the code) → copy access_token here.
+### ════════════════════════════════════════════════════════════════════════
+@adminToken = PASTE_ADMIN_ACCESS_TOKEN
+
+### ── Seller applications ("Want to sell?" form in the app) ──
+### The app sends this (signed out, or signed in with the buyer's token → linked to the account). Admins get an email.
+POST {{id}}/api/seller-applications
+Content-Type: application/json
+
+{
+  "fullName": "Ravi Kumar",
+  "email": "ravi.seller@example.com",
+  "phoneNumber": "+919812345678",
+  "countryCode": "IN",
+  "city": "Hyderabad",
+  "businessType": "Shop",
+  "sells": "Parts",
+  "businessName": "Ravi Auto Parts",
+  "businessAddress": "12 MG Road, Ameerpet",
+  "taxId": "36ABCDE1234F1Z5",
+  "message": "Used bumpers and headlamps"
+}
+
+### New requests (status: New, InReview, Approved, Rejected; search: name, email, business name or city)
+GET {{id}}/api/admin/seller-applications?status=New
+Authorization: Bearer {{adminToken}}
+
+### One request
+GET {{id}}/api/admin/seller-applications/PASTE_APPLICATION_ID
+Authorization: Bearer {{adminToken}}
+
+### Review it: InReview, or Rejected with a note (the applicant sees a rejection note in Profile).
+### To approve, create the seller below (POST /api/admin/sellers with the same email) or make-seller for a signed-in
+### buyer (userId in the request): that marks the request Approved automatically.
+PATCH {{id}}/api/admin/seller-applications/PASTE_APPLICATION_ID
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "status": "Rejected", "adminNote": "Please add your GST number and apply again." }
+
+### Create a seller → 201 { seller, message, devInviteCode (Development only) }. The seller gets an email with a
+### one-time code (72 h) and sets the password in the app: Login → "Got a seller invite? Set your password".
+POST {{id}}/api/admin/sellers
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "fullName": "Ravi Kumar",
+  "email": "ravi.seller@example.com",
+  "phoneNumber": "+919812345678",
+  "countryCode": "IN",
+  "businessName": "Ravi Auto Parts",
+  "city": "Hyderabad"
+}
+
+### List / search sellers (name, email, username or business name)
+GET {{id}}/api/admin/sellers?search=ravi&page=1&pageSize=20
+Authorization: Bearer {{adminToken}}
+
+### All accounts with their role – find a buyer's id for make-seller
+GET {{id}}/api/admin/users?search=ravi
+Authorization: Bearer {{adminToken}}
+
+### Send the invite code again (before the seller has set a password; 30 s cooldown)
+POST {{id}}/api/admin/sellers/PASTE_SELLER_ID/invite
+Authorization: Bearer {{adminToken}}
+
+### Update or disable a seller (disabled: true signs them out everywhere; false enables again)
+PATCH {{id}}/api/admin/sellers/PASTE_SELLER_ID
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "disabled": true, "city": "Secunderabad" }
+
+### Upgrade an existing buyer to seller (the app picks it up at the next token refresh / when reopened)
+POST {{id}}/api/admin/users/PASTE_USER_ID/make-seller
+Authorization: Bearer {{adminToken}}
+
+### New seller sets their password with the invite code (same endpoint as reset password)
+POST {{id}}/api/account/reset-password
+Content-Type: application/json
+
+{ "email": "ravi.seller@example.com", "otp": "PASTE_INVITE_CODE", "newPassword": "Sell3r!Passw0rd" }
+
+### A buyer's (or seller's) token on an admin endpoint → 403 { "message": "Only admins can do this.", "code": "ADMIN_ONLY" }
+GET {{id}}/api/admin/sellers
+Authorization: Bearer PASTE_BUYER_ACCESS_TOKEN

@@ -6,6 +6,9 @@ import type {
   DeliveryOption,
   Fitment,
   GarageVehicle,
+  ItemTypeFilter,
+  OpenPartRequest,
+  ShippingEstimate,
   Listing,
   ListingImage,
   ListingKind,
@@ -159,9 +162,10 @@ export const MarketApi = {
     };
   },
 
-  suggest: async (q: string, country?: string): Promise<Suggestion[]> => {
+  /** Suggestions while typing, limited to the Parts / Vehicles choice. */
+  suggest: async (q: string, country?: string, itemType?: ItemTypeFilter): Promise<Suggestion[]> => {
     try {
-      const res = await http.get('/search/suggest', { params: { q, country } });
+      const res = await http.get('/search/suggest', { params: { q, country, itemType } });
       return (res.data?.suggestions ?? []) as Suggestion[];
     } catch {
       return [];
@@ -194,8 +198,23 @@ export const MarketApi = {
    * The buyer chooses Pickup or Shipping, or adds the shipping address. Shipping goes to an address-book entry
    * (addressId) or a new address, which is saved to the address book.
    */
-  chooseDelivery: (id: string, method: DeliveryOption, to?: { addressId?: string; address?: Address }) =>
+  /**
+   * Pickup or Shipping. Shipping sends the address and the delivery location (latitude / longitude); the backend
+   * calculates the charge and fixes it on the order.
+   */
+  chooseDelivery: (id: string, method: DeliveryOption, to?: { addressId?: string; address?: Address; latitude?: number; longitude?: number }) =>
     call<Order>(() => http.post(`/orders/${id}/delivery-method`, { method, ...to }), "Couldn't save the delivery choice"),
+
+  /** Sellers: open part requests from buyers, newest first (no buyer names, only their city). */
+  openPartRequests: (country?: string) =>
+    call<OpenPartRequest[]>(() => http.get('/partrequests/open', { params: { country } }), "Couldn't load buyer requests"),
+
+  /** The shipping charge for a listing to a location (estimate on the listing; exact before confirming an order). */
+  shippingEstimate: (listingId: string, latitude: number, longitude: number, country?: string | null) =>
+    call<ShippingEstimate>(
+      () => http.get('/shipping/estimate', { params: { listingId, lat: latitude, lon: longitude, country: country ?? undefined } }),
+      "Couldn't work out the shipping charge",
+    ),
 
   // ── shipping address book ──
   shippingAddresses: () => call<ShippingAddress[]>(() => http.get('/shipping-addresses'), "Couldn't load your addresses"),

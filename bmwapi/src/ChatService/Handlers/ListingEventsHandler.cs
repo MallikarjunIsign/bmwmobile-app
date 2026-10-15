@@ -92,6 +92,38 @@ public class RatingEventsHandler
     }
 }
 
+/// <summary>
+/// Custom orders by push (the app also gets them live while open): a buyer's request goes to every seller's phones;
+/// a matching listing goes to the buyer's phones.
+/// </summary>
+public class PartRequestPushHandler
+{
+    /// <summary>
+    /// "🔎 A buyer is looking for a part" → the sellers near the buyer: within the buyer's radius, or in the buyer's
+    /// country when the buyer gave no location; never another country (not the buyer, if they sell too).
+    /// </summary>
+    public async Task Handle(PartRequestCreated message, ChatDbContext db, IPushSender push)
+    {
+        var sellers = await db.PushDevices.Where(d => d.IsSeller && d.User != message.Buyer).ToListAsync();
+        var tokens = sellers.Where(d => PartRequestAudience.Reaches(message, d.CountryCode, d.Latitude, d.Longitude)).Select(d => d.Token).ToList();
+        if (tokens.Count == 0) return;
+        var where = string.IsNullOrWhiteSpace(message.LocationName) ? "" : $" in {message.LocationName}";
+        var invalid = await push.SendAsync(tokens, new PushMessage("🔎 A buyer is looking for a part", $"{message.Title}{where}. Have one? List it.",
+            new Dictionary<string, string> { ["type"] = "partRequest", ["requestId"] = message.RequestId }));
+        if (invalid.Count > 0) await db.PushDevices.Where(d => invalid.Contains(d.Token)).ExecuteDeleteAsync();
+    }
+
+    /// <summary>"A part matching your request is now available" → the buyer's phones.</summary>
+    public async Task Handle(CustomOrderMatched message, ChatDbContext db, IPushSender push)
+    {
+        var tokens = await db.PushDevices.Where(d => d.User == message.User).Select(d => d.Token).ToListAsync();
+        if (tokens.Count == 0) return;
+        var invalid = await push.SendAsync(tokens, new PushMessage("✅ The part you asked for is available", message.Title,
+            new Dictionary<string, string> { ["type"] = "customOrderMatched", ["auctionId"] = message.AuctionId }));
+        if (invalid.Count > 0) await db.PushDevices.Where(d => invalid.Contains(d.Token)).ExecuteDeleteAsync();
+    }
+}
+
 /// <summary>After a message is saved: a push notification to the recipient's phones (if push is set up).</summary>
 public class SendChatPushHandler
 {

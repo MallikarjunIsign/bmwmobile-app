@@ -1,0 +1,48 @@
+### Shipping charges (AuctionService, also through the gateway as /shipping/...).
+### The charge is calculated by the backend: size class + road distance (straight line × 1.3; km, miles in the USA)
+### + the country's rates. Pickup is free. Rates are seeded as PLACEHOLDERS – an admin sets the real ones below.
+### Tokens: sign in as in IdentityService.http (the app's flow); the admin is the seeded Seed:AdminEmail account.
+
+@gateway = http://localhost:6001
+@token = PASTE_ACCESS_TOKEN
+@adminToken = PASTE_ADMIN_ACCESS_TOKEN
+@listingId = PASTE_LISTING_ID
+
+### Estimate for a listing to a location (what the listing page shows: "Shipping to Kukatpally: ~₹350 (estimate)").
+### Secunderabad, Hyderabad:
+GET {{gateway}}/shipping/estimate?listingId={{listingId}}&lat=17.4399&lon=78.4983&country=IN
+Authorization: Bearer {{token}}
+
+### Another country → not available ("Ships within India only")
+GET {{gateway}}/shipping/estimate?listingId={{listingId}}&lat=6.5244&lon=3.3792&country=NG
+Authorization: Bearer {{token}}
+
+### The rate table (one country, or all). isPlaceholder = true until an admin sets the values.
+GET {{gateway}}/shipping/rates?country=IN
+Authorization: Bearer {{token}}
+
+### Admin: set the real rate for India / Medium (₹ per km). Existing orders keep their charge.
+PUT {{gateway}}/shipping/rates/IN/Medium
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "baseFee": 150, "ratePerUnit": 2.5, "minFee": 150, "maxFee": 1800, "maxDistance": 2500 }
+
+### Admin: USA / Large ($ per mile)
+PUT {{gateway}}/shipping/rates/US/Large
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "baseFee": 45, "ratePerUnit": 0.85, "minFee": 45, "maxFee": 450, "maxDistance": 2500 }
+
+### A buyer chooses Shipping on an order: address text + the delivery location → the charge is calculated and fixed.
+POST {{gateway}}/orders/PASTE_ORDER_ID/delivery-method
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "method": "Shipping",
+  "address": { "name": "Ravi Kumar", "phone": "+919876543210", "line1": "Flat 4, Road 2", "city": "Secunderabad", "postcode": "500003", "countryCode": "IN" },
+  "latitude": 17.4399,
+  "longitude": 78.4983
+}

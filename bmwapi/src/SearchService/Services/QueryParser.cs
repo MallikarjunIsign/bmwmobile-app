@@ -27,6 +27,14 @@ public class ParsedQuery
     /// <summary>The words that weren't recognised: normal (typo-tolerant) text search.</summary>
     public string Keywords { get; set; } = "";
 
+    /// <summary>A copy (for counting facets with one filter left out).</summary>
+    public ParsedQuery Copy()
+    {
+        var copy = (ParsedQuery)MemberwiseClone();
+        copy.Specs = new Dictionary<string, string>(Specs);
+        return copy;
+    }
+
     public bool HasVehicle => Make is not null;
     public bool HasYear => YearFrom is not null;
 

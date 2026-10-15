@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, KeyboardAvoidingView, Platfor
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
-import { COLORS, SPACING, RADIUS } from '../theme/colors';
+import { COLORS, SPACING } from '../theme/colors';
 import { Header } from '../components/Header';
 import { FormInput } from '../components/FormInput';
 import { PhoneInput } from '../components/PhoneInput';
@@ -15,7 +15,6 @@ import { SocialButtons } from '../components/SocialButtons';
 import { useAuth } from '../auth/AuthContext';
 import { config } from '../config';
 import { ApiError, errorMessage } from '../services/authApi';
-import { UserRole } from '../types/auth';
 import { DEFAULT_COUNTRY, PhoneCountry, toE164, validatePhone } from '../utils/phone';
 import { validateEmail, validateFullName, validatePassword } from '../utils/validation';
 
@@ -28,7 +27,6 @@ export const SignUpScreen: React.FC<Props> = ({ navigation }) => {
   const emailRef = useRef<TextInputInstance>(null);
   const passwordRef = useRef<TextInputInstance>(null);
 
-  const [role, setRole] = useState<UserRole>('customer');
   const [fullName, setFullName] = useState('');
   const [country, setCountry] = useState<PhoneCountry>(DEFAULT_COUNTRY);
   const [phone, setPhone] = useState('');
@@ -62,7 +60,6 @@ export const SignUpScreen: React.FC<Props> = ({ navigation }) => {
         phoneNumber: toE164(country, phone),
         password,
         acceptTerms: true,
-        ...(config.ENABLE_ROLES ? { role } : {}),
       });
     } catch (err) {
       if (err instanceof ApiError && err.code === 'EMAIL_TAKEN') setErrors(e => ({ ...e, email: err.message }));
@@ -100,23 +97,6 @@ export const SignUpScreen: React.FC<Props> = ({ navigation }) => {
 
       <KeyboardAvoidingView style={styles.keyboardView} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-          {config.ENABLE_ROLES ? (
-            <View style={styles.segment}>
-              {(['customer', 'pro'] as UserRole[]).map(r => (
-                <TouchableOpacity
-                  key={r}
-                  onPress={() => setRole(r)}
-                  style={[styles.segmentItem, role === r && styles.segmentActive]}
-                  activeOpacity={0.8}
-                >
-                  <Text style={[styles.segmentText, role === r && styles.segmentTextActive]}>
-                    {r === 'customer' ? 'Customer' : 'Service Pro'}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          ) : null}
-
           <FormInput
             label="Full Name"
             value={fullName}
@@ -217,6 +197,18 @@ export const SignUpScreen: React.FC<Props> = ({ navigation }) => {
               Already have an account? <Text style={styles.link}>Log in</Text>
             </Text>
           </TouchableOpacity>
+
+          {/* Every account made here is a buyer. Sellers fill in a form; the team sets up their account. */}
+          <TouchableOpacity
+            style={styles.sellRow}
+            onPress={() => navigation.navigate('SellerApplication', { email: email.trim() || undefined })}
+            hitSlop={8}
+            accessibilityRole="link"
+          >
+            <Text style={styles.loginText}>
+              Want to sell on {config.APP_NAME}? <Text style={styles.link}>Apply to sell</Text>
+            </Text>
+          </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -234,32 +226,6 @@ const styles = StyleSheet.create({
   scroll: {
     padding: SPACING.md,
     paddingBottom: SPACING.xl,
-  },
-  segment: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.surface,
-    borderRadius: RADIUS.md,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    padding: 4,
-    marginTop: SPACING.sm,
-  },
-  segmentItem: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: RADIUS.sm,
-    alignItems: 'center',
-  },
-  segmentActive: {
-    backgroundColor: COLORS.primary,
-  },
-  segmentText: {
-    color: COLORS.textSecondary,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  segmentTextActive: {
-    color: COLORS.text,
   },
   termsRow: {
     marginTop: SPACING.lg,
@@ -285,6 +251,10 @@ const styles = StyleSheet.create({
   loginRow: {
     alignItems: 'center',
     marginTop: SPACING.lg,
+  },
+  sellRow: {
+    alignItems: 'center',
+    marginTop: SPACING.md,
   },
   loginText: {
     color: COLORS.textMuted,

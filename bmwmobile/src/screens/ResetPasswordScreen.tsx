@@ -13,12 +13,14 @@ import { PrimaryButton } from '../components/PrimaryButton';
 import { useAuth } from '../auth/AuthContext';
 import { useCountdown } from '../hooks/useCountdown';
 import { errorMessage } from '../services/authApi';
-import { validatePassword } from '../utils/validation';
+import { validateEmail, validatePassword } from '../utils/validation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ResetPassword'>;
 
 export const ResetPasswordScreen: React.FC<Props> = ({ navigation, route }) => {
-  const { email } = route.params;
+  const invite = !!route.params.invite;
+  const [email, setEmail] = useState(route.params.email);
+  const [emailError, setEmailError] = useState<string | null>(null);
   const { resetPassword, forgotPassword } = useAuth();
   const timer = useCountdown(route.params.resendAfterSeconds);
 
@@ -36,18 +38,21 @@ export const ResetPasswordScreen: React.FC<Props> = ({ navigation, route }) => {
   const handleReset = async () => {
     setFormError(null);
     setInfo(null);
+    const eErr = validateEmail(email);
+    setEmailError(eErr);
     const cErr = code.length === 6 ? null : 'Enter the 6-digit code';
     const pErr = validatePassword(password);
     const mErr = confirm === password ? null : 'Passwords do not match';
     setCodeError(cErr);
     setPasswordError(pErr);
     setConfirmError(mErr);
-    if (cErr || pErr || mErr) return;
+    if (eErr || cErr || pErr || mErr) return;
 
     setSubmitting(true);
     try {
       const message = await resetPassword(email, code, password);
-      navigation.reset({ index: 1, routes: [{ name: 'Splash' }, { name: 'Login', params: { email, notice: message } }] });
+      const notice = invite ? 'Password set. Log in with your email and new password.' : message;
+      navigation.reset({ index: 1, routes: [{ name: 'Splash' }, { name: 'Login', params: { email: email.trim(), notice } }] });
     } catch (e) {
       setFormError(errorMessage(e));
     } finally {
@@ -57,6 +62,9 @@ export const ResetPasswordScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const handleResend = async () => {
     if (timer.seconds > 0) return;
+    const eErr = validateEmail(email);
+    setEmailError(eErr);
+    if (eErr) return;
     setFormError(null);
     try {
       const res = await forgotPassword(email);
@@ -71,11 +79,32 @@ export const ResetPasswordScreen: React.FC<Props> = ({ navigation, route }) => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <Header title="Set New Password" subtitle={`Code sent to ${email}`} onBack={() => navigation.goBack()} />
+      <Header
+        title={invite ? 'Set Your Password' : 'Set New Password'}
+        subtitle={invite ? 'Use the code from your seller invite email' : `Code sent to ${email}`}
+        onBack={() => navigation.goBack()}
+      />
 
       <KeyboardAvoidingView style={styles.keyboardView} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           {__DEV__ && devOtp ? <Notice tone="info" message={`Test mode: your code is ${devOtp}`} /> : null}
+
+          {invite ? (
+            <FormInput
+              label="Email"
+              value={email}
+              onChangeText={t => {
+                setEmail(t);
+                if (emailError) setEmailError(null);
+              }}
+              placeholder="The email your invite was sent to"
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoComplete="email"
+              textContentType="emailAddress"
+              error={emailError}
+            />
+          ) : null}
 
           <Text style={styles.label}>Verification Code</Text>
           <OtpCodeInput
@@ -133,7 +162,7 @@ export const ResetPasswordScreen: React.FC<Props> = ({ navigation, route }) => {
           {formError ? <Notice tone="error" message={formError} /> : null}
           {info ? <Notice tone="success" message={info} /> : null}
 
-          <PrimaryButton label="UPDATE PASSWORD" onPress={handleReset} loading={submitting} style={styles.submitBtn} />
+          <PrimaryButton label={invite ? 'SET PASSWORD' : 'UPDATE PASSWORD'} onPress={handleReset} loading={submitting} style={styles.submitBtn} />
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

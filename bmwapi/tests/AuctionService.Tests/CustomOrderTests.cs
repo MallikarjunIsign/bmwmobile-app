@@ -133,6 +133,93 @@ public class CustomOrderApiTests(AppFixture fixture) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task NewRequest_IsAnnouncedToSellers_WithoutTheBuyersExactLocation()
+    {
+        var tracked = await fixture.Host.ExecuteAndWaitAsync(async () =>
+        {
+            await CreateOrder(new CreatePartRequestDto
+            {
+                PartName = "front bumper", Make = "Toyota", Model = "Hilux", Year = 2016,
+                LocationName = "Kukatpally, Hyderabad", CountryCode = "IN", Latitude = 17.4849, Longitude = 78.4138,
+            });
+        });
+
+        var message = tracked.Sent.SingleMessage<PartRequestCreated>();
+        Assert.Equal("alice", message.Buyer);
+        Assert.Equal("Front bumper – 2016 Toyota Hilux", message.Title);
+        Assert.Equal("Hyderabad", message.LocationName); // the city only (shown to sellers)
+        Assert.Equal("IN", message.CountryCode);
+        // The location and radius only pick which sellers are told.
+        Assert.Equal((17.4849, 78.4138), (message.Latitude, message.Longitude));
+    }
+
+    /// <summary>The seller's primary location from the token (Secunderabad, India unless given).</summary>
+    private async Task<Alba.IScenarioResult> OpenRequests(string user, string role, HttpStatusCode status = HttpStatusCode.OK,
+        string country = "IN", double lat = 17.4399, double lon = 78.4983) =>
+        await fixture.Host.Scenario(s =>
+        {
+            s.RemoveClaim("role");
+            s.WithClaim(new Claim("role", role));
+            s.WithClaim(new Claim("username", user));
+            s.WithClaim(new Claim(PartRequestAudience.CountryClaim, country));
+            s.WithClaim(new Claim(PartRequestAudience.LatitudeClaim, lat.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+            s.WithClaim(new Claim(PartRequestAudience.LongitudeClaim, lon.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+            s.Get.Url("/api/partrequests/open");
+            s.StatusCodeShouldBe(status);
+        });
+
+    [Fact]
+    public async Task Sellers_SeeOpenRequests_NotTheirOwn_NotClosedOnes_BuyersCant()
+    {
+        var wanted = await CreateOrder(new CreatePartRequestDto { PartNumber = "52119-0K935", LocationName = "Kukatpally, Hyderabad", CountryCode = "IN" });
+        var closed = await CreateOrder(new CreatePartRequestDto { PartName = "Bonnet", Make = "Maruti Suzuki", Model = "Swift" });
+        await fixture.Host.Scenario(s =>
+        {
+            s.WithClaim(new Claim("username", "alice"));
+            s.Post.Json(new { }).ToUrl($"/api/partrequests/{closed.Id}/close");
+        });
+        var own = await CreateOrder(new CreatePartRequestDto { PartName = "Mirror" }, "bob");
+
+        var list = await (await OpenRequests("bob", "seller")).ReadAsJsonAsync<List<OpenPartRequestDto>>();
+        var request = Assert.Single(list);
+        Assert.Equal(wanted.Id, request.Id);
+        Assert.Equal("Part no. 52119-0K935", request.Title);
+        Assert.Equal("Hyderabad", request.LocationName);
+        Assert.DoesNotContain(list, r => r.Id == own.Id || r.Id == closed.Id);
+
+        var denied = await (await OpenRequests("carol", "buyer", HttpStatusCode.Forbidden)).ReadAsTextAsync();
+        Assert.Contains("SELLER_ONLY", denied);
+    }
+
+    [Fact]
+    public async Task Sellers_SeeOnlyRequestsNearThem_ByRadiusOrCountry_NeverAnotherCountry()
+    {
+        // Within 60 km of Kukatpally.
+        var near = await CreateOrder(new CreatePartRequestDto
+        {
+            PartName = "Headlamp", CountryCode = "IN", LocationName = "Kukatpally, Hyderabad", Latitude = 17.4849, Longitude = 78.4138, RadiusKm = 60,
+        });
+        // No location: anyone in India.
+        var india = await CreateOrder(new CreatePartRequestDto { PartName = "Battery", CountryCode = "IN" });
+        // Lagos.
+        var lagos = await CreateOrder(new CreatePartRequestDto
+        {
+            PartName = "Alternator", CountryCode = "NG", LocationName = "Lagos", Latitude = 6.5244, Longitude = 3.3792, RadiusKm = 60,
+        });
+
+        async Task<List<string>> Ids(string country, double lat, double lon) =>
+            (await (await OpenRequests("bob", "seller", country: country, lat: lat, lon: lon)).ReadAsJsonAsync<List<OpenPartRequestDto>>())
+            .Select(r => r.Id).ToList();
+
+        // Seller in Secunderabad: the near one and the country-wide one.
+        Assert.Equal(new[] { india.Id, near.Id }.Order(), (await Ids("IN", 17.4399, 78.4983)).Order());
+        // Seller in Delhi: only the country-wide one (Hyderabad is too far).
+        Assert.Equal([india.Id], await Ids("IN", 28.6139, 77.2090));
+        // Seller in Lagos: only Lagos – never India's.
+        Assert.Equal([lagos.Id], await Ids("NG", 6.5244, 3.3792));
+    }
+
+    [Fact]
     public async Task CreateOrder_FromASearch_IsOpen()
     {
         var order = await CreateOrder(new CreatePartRequestDto

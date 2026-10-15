@@ -1,6 +1,7 @@
 using AuctionService.Data;
 using AuctionService.DTOs;
 using AuctionService.Entities;
+using AuctionService.Errors;
 using AuctionService.RequestHelpers;
 using AuctionService.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -19,6 +20,7 @@ namespace AuctionService.Controllers;
 /// </summary>
 [ApiController]
 [Authorize]
+[SellerOnly]
 [Route("api/auctions/{auctionId}/images")]
 public class AuctionImagesController(AuctionDbContext context, IDbContextOutbox<AuctionDbContext> outbox,
     AuctionMapper mapper, ListingImageService images, IOptions<ImageUploadOptions> uploadOptions,

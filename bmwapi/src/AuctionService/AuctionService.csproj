@@ -43,4 +43,8 @@
         <ProtoBuf Include="Protos\auction.proto" GrpcServices="Server" />
     </ItemGroup>
 
+  <ItemGroup>
+    <!-- USPS Ground Advantage retail price list (USPS Notice 123), loaded at start for US shipping prices. -->
+    <None Update="Data\Seed\usps-ground-advantage-retail.csv" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

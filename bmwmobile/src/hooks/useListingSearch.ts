@@ -4,20 +4,27 @@ import { mapRawDtoToAuction } from '../services/api';
 import { useLocations } from '../location/LocationContext';
 import { useGarage } from '../location/GarageContext';
 import type { Auction } from '../types/models';
-import type { FacetValue, GarageVehicle, ListingSearchQuery, QueryChip } from '../types/listing';
+import type { FacetValue, GarageVehicle, ItemTypeFilter, ListingSearchQuery, QueryChip } from '../types/listing';
+import type { SaleType } from '../types/models';
 import type { SheetFilters } from '../components/FilterSheet';
 
 export interface SearchInput {
   text: string;
   chips: QueryChip[];
   filters: SheetFilters;
+  /** Home's filters: Parts / Vehicles and All / Auction / Direct sale (undefined = all). */
+  itemType?: ItemTypeFilter;
+  saleType?: SaleType;
 }
 
 /**
- * Chips + text + filter sheet + the selected garage vehicle → the search API query.
- * Part number / size / position chips go back into the text (the server understands them there).
+ * Every active filter → one search API query: chips + text + filter sheet + Parts / Vehicles + Auction / Direct sale
+ * + the selected garage vehicle (parts only). Part number / size / position chips go back into the text (the server
+ * understands them there). The location (radius or country) is added by MarketApi.search.
  */
-export function buildQuery(input: SearchInput, garage: GarageVehicle | null): ListingSearchQuery {
+export function buildQuery(input: SearchInput, garageVehicle: GarageVehicle | null): ListingSearchQuery {
+  // My Garage narrows parts to the ones that fit; it doesn't apply to whole vehicles.
+  const garage = input.itemType === 'Vehicle' ? null : garageVehicle;
   const chip = (type: QueryChip['type']) => input.chips.find(c => c.type === type);
   const textParts = [
     chip('partNumber')?.label,
@@ -38,6 +45,8 @@ export function buildQuery(input: SearchInput, garage: GarageVehicle | null): Li
 
   return {
     q: textParts.join(' ') || undefined,
+    itemType: input.itemType,
+    saleType: input.saleType,
     partType: input.filters.partType ?? partTypeChip?.value,
     make,
     model: input.filters.model ?? chip('model')?.value ?? (fromGarage ? garage!.model : undefined),
@@ -55,10 +64,14 @@ export function buildQuery(input: SearchInput, garage: GarageVehicle | null): Li
   };
 }
 
-/** Live listings for the search (within 60 km / 60 mi, or country-wide while location is off). */
-export function useListingSearch(input: SearchInput, enabled = true) {
+/**
+ * Live listings for the search (within 60 km / 60 mi, or country-wide while location is off), with the total and
+ * the facet counts from the same query. applyGarage = false: ignore the My Garage choice (Home's overview).
+ */
+export function useListingSearch(input: SearchInput, enabled = true, applyGarage = true) {
   const { near, country } = useLocations();
-  const { selected: garage } = useGarage();
+  const { selected } = useGarage();
+  const garage = applyGarage ? selected : null;
   const query = useMemo(() => buildQuery(input, garage), [input, garage]);
   const [results, setResults] = useState<Auction[]>([]);
   const [facets, setFacets] = useState<Record<string, FacetValue[]>>({});
@@ -86,5 +99,5 @@ export function useListingSearch(input: SearchInput, enabled = true) {
     };
   }, [query, near, country, enabled, reloadKey]);
 
-  return { query, results, facets, total, loading, error, reload: () => setReloadKey(k => k + 1), garage };
+  return { query, results, facets, total, loading, error, reload: () => setReloadKey(k => k + 1), garage: input.itemType === 'Vehicle' ? null : garage };
 }

@@ -159,5 +159,12 @@ public class PushDevice
     /// <summary>android or ios.</summary>
     [MaxLength(10)]
     public string Platform { get; set; } = "android";
+    /// <summary>Signed in with a seller account (role from the token at registration): gets buyers' part requests.</summary>
+    public bool IsSeller { get; set; }
+    /// <summary>Where the phone's user is (the app's current location): which buyers' requests reach this seller.</summary>
+    [MaxLength(2)]
+    public string? CountryCode { get; set; }
+    public double? Latitude { get; set; }
+    public double? Longitude { get; set; }
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }

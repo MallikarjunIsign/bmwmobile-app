@@ -2,7 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Modal, ScrollView, TouchableOpacity, TextInput } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
-import type { FacetValue, ListingSearchQuery } from '../types/listing';
+import type { FacetValue, GarageVehicle, ListingSearchQuery } from '../types/listing';
+import { garageLabel } from '../location/GarageContext';
 import { KM_PER_MILE } from '../utils/geo';
 import { label } from '../utils/time';
 
@@ -31,14 +32,23 @@ interface FilterSheetProps {
   currencySymbol: string;
   /** No distance filter while the location is off. */
   hasLocation: boolean;
+  /**
+   * My Garage (parts only): show parts that fit one of the user's vehicles. The vehicles are managed in
+   * Profile → My Garage (onManage).
+   */
+  garage?: { vehicles: GarageVehicle[]; selectedId: string | null; onSelect: (id: string | null) => void; onManage: () => void };
 }
 
 /** Filter sheet with facets: Delivery, Category, Part type, Make, Model, Year, Condition, Brand type, Price, Distance, Listing kind; and sort. */
-export const FilterSheet: React.FC<FilterSheetProps> = ({ visible, onClose, value, facets, onApply, unit, currencySymbol, hasLocation }) => {
+export const FilterSheet: React.FC<FilterSheetProps> = ({ visible, onClose, value, facets, onApply, unit, currencySymbol, hasLocation, garage }) => {
   const insets = useSafeAreaInsets();
   const [draft, setDraft] = useState<SheetFilters>(value);
+  const [garageId, setGarageId] = useState<string | null>(garage?.selectedId ?? null);
   useEffect(() => {
-    if (visible) setDraft(value);
+    if (visible) {
+      setDraft(value);
+      setGarageId(garage?.selectedId ?? null);
+    }
   }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const set = (patch: Partial<SheetFilters>) => setDraft(d => ({ ...d, ...patch }));
@@ -74,7 +84,7 @@ export const FilterSheet: React.FC<FilterSheetProps> = ({ visible, onClose, valu
         <View style={[styles.sheet, { paddingBottom: insets.bottom + SPACING.md }]}>
           <View style={styles.head}>
             <Text style={styles.title}>Filters</Text>
-            <TouchableOpacity onPress={() => setDraft({ sort: draft.sort })}>
+            <TouchableOpacity onPress={() => { setDraft({ sort: draft.sort }); setGarageId(null); }}>
               <Text style={styles.reset}>Reset</Text>
             </TouchableOpacity>
           </View>
@@ -89,6 +99,29 @@ export const FilterSheet: React.FC<FilterSheetProps> = ({ visible, onClose, valu
                 ))}
               </View>
             </View>
+            {garage ? (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>My Garage</Text>
+                <View style={styles.chips}>
+                  <TouchableOpacity style={[styles.chip, !garageId && styles.chipActive]} onPress={() => setGarageId(null)}
+                    accessibilityState={{ selected: !garageId }}>
+                    <Text style={[styles.chipText, !garageId && styles.chipTextActive]}>Any vehicle</Text>
+                  </TouchableOpacity>
+                  {garage.vehicles.map(v => {
+                    const active = garageId === v.id;
+                    return (
+                      <TouchableOpacity key={v.id} style={[styles.chip, active && styles.chipActive]} onPress={() => setGarageId(active ? null : v.id!)}
+                        accessibilityState={{ selected: active }}>
+                        <Text style={[styles.chipText, active && styles.chipTextActive]}>🚗 {garageLabel(v)}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+                <TouchableOpacity onPress={() => { onClose(); garage.onManage(); }} hitSlop={6}>
+                  <Text style={styles.manage}>{garage.vehicles.length ? 'Manage My Garage (Profile) →' : 'Add your vehicle in Profile → My Garage →'}</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Delivery</Text>
               <View style={styles.chips}>
@@ -171,7 +204,7 @@ export const FilterSheet: React.FC<FilterSheetProps> = ({ visible, onClose, valu
             <TouchableOpacity style={styles.cancel} onPress={onClose}>
               <Text style={styles.cancelText}>Cancel</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.apply} onPress={() => { onApply(draft); onClose(); }}>
+            <TouchableOpacity style={styles.apply} onPress={() => { onApply(draft); garage?.onSelect(garageId); onClose(); }}>
               <Text style={styles.applyText}>Show results</Text>
             </TouchableOpacity>
           </View>
@@ -197,6 +230,7 @@ const styles = StyleSheet.create({
   priceRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm },
   price: { flex: 1, backgroundColor: COLORS.card, borderRadius: RADIUS.md, color: COLORS.text, paddingHorizontal: SPACING.md, height: 44, borderWidth: 1, borderColor: COLORS.border },
   dash: { color: COLORS.textMuted },
+  manage: { color: COLORS.primaryGlow, fontSize: 12, fontWeight: '700', marginTop: SPACING.sm },
   footer: { flexDirection: 'row', gap: SPACING.sm, paddingHorizontal: SPACING.lg, paddingTop: SPACING.md, borderTopWidth: 1, borderTopColor: COLORS.border },
   cancel: { paddingVertical: 14, paddingHorizontal: SPACING.lg, borderRadius: RADIUS.md, backgroundColor: COLORS.cardSecondary },
   cancelText: { color: COLORS.text, fontWeight: '700' },

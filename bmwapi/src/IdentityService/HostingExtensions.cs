@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi.Models;
 using Serilog;
 using Serilog.Filters;
 
@@ -71,7 +72,16 @@ internal static class HostingExtensions
         _ = builder.Services.Configure<SocialAuthOptions>(builder.Configuration.GetSection("SocialAuth"));
         _ = builder.Services.Configure<EmailOptions>(builder.Configuration.GetSection("Email"));
         _ = builder.Services.Configure<LocationOptions>(builder.Configuration.GetSection("Location"));
+        _ = builder.Services.Configure<SeedOptions>(builder.Configuration.GetSection("Seed"));
+        _ = builder.Services.Configure<RoleBackfillOptions>(builder.Configuration.GetSection("RoleBackfill"));
         _ = builder.Services.AddScoped<AccountService>();
+        _ = builder.Services.AddScoped<AdminSellerService>();
+        _ = builder.Services.AddScoped<SellerApplicationService>();
+        _ = builder.Services.Configure<SellerApplicationOptions>(builder.Configuration.GetSection("SellerApplications"));
+        _ = builder.Services.AddSingleton<IMailSender, SmtpMailSender>();
+        // Existing users with listings → seller, once (asks AuctionService who has listings).
+        _ = builder.Services.AddHttpClient(nameof(RoleBackfillService), c => c.Timeout = TimeSpan.FromSeconds(15));
+        _ = builder.Services.AddHostedService<RoleBackfillService>();
         _ = builder.Services.AddScoped<LocationService>();
         _ = builder.Services.AddScoped<IOtpService, OtpService>();
         _ = builder.Services.AddScoped<ITrustedDeviceService, TrustedDeviceService>();
@@ -81,7 +91,29 @@ internal static class HostingExtensions
         _ = builder.Services
             .AddControllers()
             .ConfigureApiBehaviorOptions(o => o.InvalidModelStateResponseFactory = ValidationResponse.Create);
-        _ = builder.Services.AddAccountRateLimits();
+        _ = builder.Services.AddAccountRateLimits(builder.Configuration);
+
+        // Swagger (Development): /swagger. Admin endpoints need "Bearer <access token of an admin>".
+        _ = builder.Services.AddEndpointsApiExplorer();
+        _ = builder.Services.AddSwaggerGen(c =>
+        {
+            c.SwaggerDoc("v1", new OpenApiInfo { Title = "Identity API (account + admin)", Version = "v1" });
+            c.DocInclusionPredicate((_, api) => api.RelativePath?.StartsWith("api/") == true);
+            c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+            {
+                Type = SecuritySchemeType.Http,
+                Scheme = "bearer",
+                BearerFormat = "JWT",
+                Description = "Access token with the IdentityServerApi scope (admin endpoints: role admin).",
+            });
+            c.AddSecurityRequirement(new OpenApiSecurityRequirement
+            {
+                {
+                    new OpenApiSecurityScheme { Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" } },
+                    Array.Empty<string>()
+                }
+            });
+        });
 
         // Refresh tokens and other grants are kept in Postgres so "Remember me" survives a restart.
         _ = builder.Services.AddOperationalDbContext(options =>
@@ -143,6 +175,8 @@ internal static class HostingExtensions
         if (app.Environment.IsDevelopment())
         {
             _ = app.UseDeveloperExceptionPage();
+            _ = app.UseSwagger();
+            _ = app.UseSwaggerUI();
         }
 
         _ = app.UseStaticFiles();

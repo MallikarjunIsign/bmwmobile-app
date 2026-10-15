@@ -20,6 +20,7 @@ public interface IOtpSender
 /// </summary>
 public class EmailOtpSender(
     IOptions<EmailOptions> options,
+    IOptions<OtpOptions> otpOptions,
     IHostEnvironment env,
     ILogger<EmailOtpSender> logger) : IOtpSender
 {
@@ -39,20 +40,26 @@ public class EmailOtpSender(
         var from = string.IsNullOrWhiteSpace(_opt.FromAddress) ? _opt.Username! : _opt.FromAddress;
         message.From.Add(new MailboxAddress(_opt.FromName, from));
         message.To.Add(new MailboxAddress(user.FullName ?? user.UserName ?? email, email));
-        message.Subject = purpose == OtpPurpose.ResetPassword
-            ? $"{code} is your ShopCarParts password reset code"
-            : $"{code} is your ShopCarParts sign-in code";
+        var (subject, intro, expiry) = purpose switch
+        {
+            OtpPurpose.ResetPassword => ($"{code} is your ShopCarParts password reset code", "Your code to reset your password is", "It expires in 10 minutes."),
+            OtpPurpose.SellerInvite => ($"Your ShopCarParts seller account: set your password (code {code})",
+                "A seller account has been created for you. To set your password, open the ShopCarParts app, tap Log in, then " +
+                "\"Got a seller invite? Set your password\", enter this email and the code",
+                $"The code works once and expires in {otpOptions.Value.InviteExpiryHours} hours. Then log in with your email and new password."),
+            _ => ($"{code} is your ShopCarParts sign-in code", "Your code to sign in is", "It expires in 10 minutes."),
+        };
+        message.Subject = subject;
 
-        var action = purpose == OtpPurpose.ResetPassword ? "reset your password" : "sign in";
         var builder = new BodyBuilder
         {
-            TextBody = $"Your code to {action} is {code}.\n\nIt expires in 10 minutes. If you didn't ask for it, you can ignore this email.",
+            TextBody = $"{intro} {code}.\n\n{expiry} If you didn't ask for it, you can ignore this email.",
             HtmlBody = $"""
                 <div style="font-family:Arial,sans-serif;background:#07071C;color:#ffffff;padding:24px;border-radius:12px">
                   <p style="color:#B226FF;font-weight:800;letter-spacing:2px;margin:0">SHOPCARPARTS</p>
-                  <p>Your code to {action} is</p>
+                  <p>{System.Net.WebUtility.HtmlEncode(intro)}</p>
                   <p style="font-size:32px;font-weight:900;letter-spacing:8px;color:#B226FF;margin:8px 0">{code}</p>
-                  <p style="color:#94A3B8">It expires in 10 minutes. If you didn't ask for it, you can ignore this email.</p>
+                  <p style="color:#94A3B8">{expiry} If you didn't ask for it, you can ignore this email.</p>
                 </div>
                 """,
         };

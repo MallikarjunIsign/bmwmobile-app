@@ -1,3 +1,4 @@
+using Contracts;
 using AuctionService.Data;
 using AuctionService.DTOs;
 using AuctionService.Entities;
@@ -25,7 +26,8 @@ public class ReviewsController(AuctionDbContext context, IDbContextOutbox<Auctio
     private string Username => Me ?? throw new UnauthorizedAccessException();
     private DateTime Now => clock.GetUtcNow().UtcDateTime;
 
-    private bool IsAdmin => Me is { } user &&
+    // Admins: token role "admin", or listed by username in the "Admin:Usernames" setting.
+    private bool IsAdmin => AppRoles.IsAdmin(User) || Me is { } user &&
         (configuration.GetSection("Admin:Usernames").Get<string[]>() ?? []).Contains(user, StringComparer.OrdinalIgnoreCase);
 
     [HttpPost]

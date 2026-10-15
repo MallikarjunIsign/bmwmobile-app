@@ -1,4 +1,8 @@
-export type UserRole = 'customer' | 'pro';
+/**
+ * Marketplace role, from IdentityService (also the "role" claim in the access token):
+ * buyer = everyone who signs up in the app; seller = created or upgraded by an admin; admin = backend only.
+ */
+export type UserRole = 'buyer' | 'seller' | 'admin';
 
 /** The signed-in user. `username` is the public name on auctions and bids. */
 export interface AuthUser {
@@ -7,8 +11,8 @@ export interface AuthUser {
   fullName: string;
   email: string;
   phoneNumber: string | null;
-  /** 'user' while roles are switched off (Identity Features:RolesEnabled = false). */
-  role: UserRole | 'user';
+  /** Decides what the app shows (Sell, My Listings, Sales). The backend enforces the same rules. */
+  role: UserRole;
   emailVerified: boolean;
   /** False until the first location is saved ("Set your location" is shown once). */
   hasLocation: boolean;
@@ -47,8 +51,6 @@ export interface RegisterRequest {
   phoneNumber: string;
   password: string;
   acceptTerms: boolean;
-  /** Only sent when config.ENABLE_ROLES is on. */
-  role?: UserRole;
 }
 
 export type SocialProvider = 'google' | 'apple';

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json.Serialization;
 using Contracts;
 
 namespace SearchService.Models;
@@ -88,6 +89,22 @@ public class Item
     public int SellerRatingCount { get; set; }
 
     // ── Computed for filtering / ranking (see Prepare) ──
+    /// <summary>Bumped when computed fields are added: older documents are re-fetched at startup (DbInitializer).</summary>
+    public const int CurrentIndexVersion = 2;
+    public int IndexVersion { get; set; }
+
+    /// <summary>Meilisearch geo point: exact "within X km" filtering (_geoRadius) so facet counts match the radius.</summary>
+    [JsonPropertyName("_geo")]
+    public GeoPoint? Geo { get; set; }
+
+    /// <summary>"Part" or "Vehicle" (Home's Parts / Vehicles switch). From Kind, or ItemType on older listings.</summary>
+    public string ListingType { get; set; } = "Part";
+
+    /// <summary>Every make / "Make|Model" / year the item is for (fitment rows, or the vehicle itself). Facets.</summary>
+    public List<string> Makes { get; set; } = [];
+    public List<string> Models { get; set; } = [];
+    public List<string> Years { get; set; } = [];
+
     /// <summary>"toyota", "toyota|hilux", "toyota|hilux|2016" … one key per year of every fitment row.</summary>
     public List<string> FitKeys { get; set; } = [];
     /// <summary>Part numbers uppercased without spaces / dashes.</summary>
@@ -120,6 +137,21 @@ public class Item
             AddVehicle(Make, Model, Year, YearTo ?? Year);
         FitKeys = keys.ToList();
 
+        Makes = Fitments.Count > 0 ? Fitments.Select(f => f.Make).Where(m => m.Length > 0).Distinct().ToList()
+            : Make.Length > 0 ? [Make] : [];
+        Models = Fitments.Count > 0 ? Fitments.Where(f => f.Make.Length > 0 && f.Model.Length > 0).Select(f => $"{f.Make}|{f.Model}").Distinct().ToList()
+            : Make.Length > 0 && Model.Length > 0 ? [$"{Make}|{Model}"] : [];
+        Years = FitKeys.Select(k => k.Split('|')).Where(p => p.Length == 3).Select(p => p[2]).Distinct().ToList();
+
+        ListingType = Kind switch
+        {
+            "Vehicle" => "Vehicle",
+            "CommonPart" or "VehicleSpecificPart" => "Part",
+            _ => ItemType == "Part" ? "Part" : "Vehicle",
+        };
+        Geo = Latitude is { } lat && Longitude is { } lon ? new GeoPoint(lat, lon) : null;
+        IndexVersion = CurrentIndexVersion;
+
         var numbers = PartNumbers.Count > 0 ? PartNumbers : string.IsNullOrWhiteSpace(PartNumber) ? [] : [PartNumber];
         PartNumbersNormalized = numbers.Select(Contracts.PartNumbers.Normalize).OfType<string>().Distinct().ToList();
 
@@ -140,6 +172,8 @@ public class Item
     public static string TyreSize(string width, string profile, string rim) =>
         string.Create(CultureInfo.InvariantCulture, $"{width.Trim()}/{profile.Trim()}r{rim.Trim().TrimStart('R', 'r')}").ToLowerInvariant();
 }
+
+public record GeoPoint(double Lat, double Lng);
 
 /// <summary>A search hit plus its distance from the searcher (only when lat/lon were given).</summary>
 public class SearchResultItem : Item

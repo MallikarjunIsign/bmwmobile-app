@@ -14,6 +14,8 @@ import { Badge } from '../components/Badge';
 import { useMoney } from '../location/useMoney';
 import { OrderTrackingCard } from '../components/OrderTrackingCard';
 import { useLiveEvent } from '../services/notifications';
+import { useAuth } from '../auth/AuthContext';
+import { isSeller } from '../utils/roles';
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<MainTabParamList, 'MyPurchases'>,
@@ -26,9 +28,16 @@ const ORDER_BADGE: Record<string, { label: string; variant: 'success' | 'primary
   Closed: { label: 'CLOSED', variant: 'dark' },
 };
 
-/** Orders: sales and purchases with their tracking (no online payment in this phase) and the user's custom orders. */
+type Side = 'purchases' | 'sales';
+
+/**
+ * Orders with their tracking (no online payment in this phase) and the user's custom orders.
+ * Buyers see their purchases. Sellers also get Sales (orders to fulfil: ready / handed over / shipped) and My listings.
+ */
 export const MyPurchasesScreen: React.FC<Props> = ({ navigation }) => {
   const money = useMoney();
+  const seller = isSeller(useAuth().user);
+  const [side, setSide] = useState<Side>('purchases');
   const [orders, setOrders] = useState<Order[]>([]);
   const [requests, setRequests] = useState<PartRequest[]>([]);
   const [loading, setLoading] = useState(false);
@@ -69,26 +78,55 @@ export const MyPurchasesScreen: React.FC<Props> = ({ navigation }) => {
       },
     ]);
 
+  const showing: Side = seller ? side : 'purchases';
+  const shown = orders.filter(o => (showing === 'sales' ? o.role === 'seller' : o.role !== 'seller'));
+  const salesToDo = orders.filter(o => o.role === 'seller' && o.status !== 'Completed').length;
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Orders</Text>
-        <TouchableOpacity onPress={() => navigation.navigate('MyListings')}>
-          <Text style={styles.link}>My listings →</Text>
-        </TouchableOpacity>
+        {seller ? (
+          <TouchableOpacity onPress={() => navigation.navigate('MyListings')}>
+            <Text style={styles.link}>My listings →</Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
+
+      {seller ? (
+        <View style={styles.segment}>
+          {(['purchases', 'sales'] as Side[]).map(s => (
+            <TouchableOpacity
+              key={s}
+              style={[styles.segmentItem, showing === s && styles.segmentActive]}
+              onPress={() => setSide(s)}
+              activeOpacity={0.8}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: showing === s }}
+            >
+              <Text style={[styles.segmentText, showing === s && styles.segmentTextActive]}>
+                {s === 'purchases' ? 'Purchases' : `Sales${salesToDo ? ` (${salesToDo})` : ''}`}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      ) : null}
 
       <ScrollView
         contentContainerStyle={styles.scroll}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={COLORS.primaryGlow} />}
       >
-        <Text style={styles.sectionTitle}>SALES & PURCHASES</Text>
-        {orders.length === 0 && !loading ? (
+        <Text style={styles.sectionTitle}>{showing === 'sales' ? 'SALES TO FULFIL' : 'MY PURCHASES'}</Text>
+        {shown.length === 0 && !loading ? (
           <View style={styles.emptyCard}>
-            <Text style={styles.emptyText}>When you win an auction or sell something, it shows up here.</Text>
+            <Text style={styles.emptyText}>
+              {showing === 'sales'
+                ? 'When someone buys your item or wins your auction, the order shows up here.'
+                : 'When you win an auction or buy something, it shows up here.'}
+            </Text>
           </View>
         ) : null}
-        {orders.map(order => (
+        {shown.map(order => (
           <OrderTrackingCard
             key={order.id}
             order={order}
@@ -105,14 +143,14 @@ export const MyPurchasesScreen: React.FC<Props> = ({ navigation }) => {
           />
         ))}
 
-        {/* Custom orders */}
-        <Text style={styles.sectionTitle}>MY CUSTOM ORDERS</Text>
-        {requests.length === 0 && !loading ? (
+        {/* Custom orders (things the user wants to buy) */}
+        {showing === 'purchases' ? <Text style={styles.sectionTitle}>MY CUSTOM ORDERS</Text> : null}
+        {showing === 'purchases' && requests.length === 0 && !loading ? (
           <View style={styles.emptyCard}>
             <Text style={styles.emptyText}>No custom orders yet. When a search finds nothing, create one and we'll tell you when the part is listed.</Text>
           </View>
         ) : null}
-        {requests.map(order => {
+        {(showing === 'purchases' ? requests : []).map(order => {
           const badge = ORDER_BADGE[order.status] ?? { label: order.status.toUpperCase(), variant: 'dark' as const };
           const vehicle = [order.year || null, order.make, order.model].filter(Boolean).join(' ');
           return (
@@ -151,6 +189,11 @@ const styles = StyleSheet.create({
   title: { color: COLORS.text, fontSize: 18, fontWeight: '800' },
   link: { color: COLORS.primaryGlow, fontSize: 13, fontWeight: '700' },
   scroll: { padding: SPACING.md, paddingBottom: SPACING.xxl },
+  segment: { flexDirection: 'row', backgroundColor: COLORS.surface, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.border, padding: 4, marginHorizontal: SPACING.md, marginTop: SPACING.sm },
+  segmentItem: { flex: 1, paddingVertical: 8, borderRadius: RADIUS.sm, alignItems: 'center' },
+  segmentActive: { backgroundColor: COLORS.primary },
+  segmentText: { color: COLORS.textSecondary, fontSize: 13, fontWeight: '700' },
+  segmentTextActive: { color: COLORS.text },
   sectionTitle: { color: COLORS.textMuted, fontSize: 11, fontWeight: '800', letterSpacing: 1, marginTop: SPACING.sm, marginBottom: SPACING.sm },
   emptyCard: { backgroundColor: COLORS.surface, borderRadius: RADIUS.lg, padding: SPACING.md, borderWidth: 1, borderColor: COLORS.border, marginBottom: SPACING.md },
   emptyText: { color: COLORS.textMuted, fontSize: 13, lineHeight: 18 },

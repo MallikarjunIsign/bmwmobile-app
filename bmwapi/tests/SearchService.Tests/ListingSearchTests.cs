@@ -198,11 +198,11 @@ public class ListingSearchTests(AppFixture fixture) : IAsyncLifetime
         Assert.Equal("hilux-bumper-lagos", Assert.Single(nigeria.Results).Id);
     }
 
-    private async Task<List<Suggestion>> Suggest(string text)
+    private async Task<List<Suggestion>> Suggest(string text, string? itemType = null)
     {
         var result = await fixture.Host.Scenario(s =>
         {
-            s.Get.Url($"/api/search/suggest?q={Uri.EscapeDataString(text)}");
+            s.Get.Url($"/api/search/suggest?q={Uri.EscapeDataString(text)}" + (itemType is null ? "" : $"&itemType={itemType}"));
             s.StatusCodeShouldBe(HttpStatusCode.OK);
         });
         using var doc = JsonDocument.Parse(await result.ReadAsTextAsync());
@@ -225,6 +225,121 @@ public class ListingSearchTests(AppFixture fixture) : IAsyncLifetime
         var number = Assert.Single(numbers, s => s.Group == "partNumbers");
         Assert.Equal("52119-0K935", number.Label);
         Assert.Equal("521190K935", Assert.Single(number.Chips).Value);
+    }
+
+    // ── Home filters (Parts / Vehicles, Auction / Direct sale) + search text together ──
+
+    private async Task AddAsync(params Item[] items)
+    {
+        var task = await Client.Auctions().AddDocumentsAsync(items, primaryKey: "id");
+        await Client.WaitForTaskAsync(task.TaskUid);
+    }
+
+    private static Item Vehicle(string id, string make, string model, int year, Action<Item>? configure = null) => Listing(id, x =>
+    {
+        x.Kind = "Vehicle"; x.ItemType = "Vehicle"; x.Make = make; x.Model = model; x.Year = year;
+        x.Title = $"{year} {make} {model}"; x.StartingPrice = 900000;
+        configure?.Invoke(x);
+    });
+
+    private static Item DirectSalePads(string id = "brake-pads-direct") => Listing(id, x =>
+    {
+        x.Kind = "CommonPart"; x.FitmentMode = "Universal"; x.PartType = "Brake pads"; x.Category = "Brakes";
+        x.Title = "Brake pads – Bosch – New"; x.SaleType = "FixedPrice"; x.QuantityAvailable = 4; x.StartingPrice = 2500;
+    });
+
+    [Fact]
+    public async Task PartsOrVehicles_AndSaleType_ApplyToResultsTotalsAndCategoryCounts()
+    {
+        await AddAsync(DirectSalePads(), Vehicle("hilux-2018", "Toyota", "Hilux", 2018), Vehicle("city-2019", "Honda", "City", 2019),
+            Vehicle("city-2020", "Honda", "City", 2020, x => x.SaleType = "FixedPrice"));
+
+        // Parts: category tiles with counts; no vehicles.
+        var parts = await Search($"itemType=Part&{Near}");
+        Assert.DoesNotContain(parts.Results, r => r.Kind == "Vehicle");
+        Assert.Equal(parts.Results.Count, parts.TotalCount);
+        Assert.Contains(parts.Facets["category"], f => f is { Value: "Body – Exterior", Count: 3 });
+        Assert.Contains(parts.Facets["category"], f => f is { Value: "Brakes", Count: 1 });
+
+        // Parts + Direct sale: only the brake pads, and only Brakes is counted (categories with 0 are left out).
+        var direct = await Search($"itemType=Part&saleType=FixedPrice&{Near}");
+        Assert.Equal(["brake-pads-direct"], direct.Results.Select(r => r.Id));
+        Assert.Equal([new FacetValue("Brakes", 1)], direct.Facets["category"]);
+
+        // Vehicles: the total and the make chips with counts.
+        var vehicles = await Search($"itemType=Vehicle&{Near}");
+        Assert.Equal(3, vehicles.TotalCount);
+        Assert.Equal([new FacetValue("Honda", 2), new FacetValue("Toyota", 1)], vehicles.Facets["make"]);
+
+        // Vehicles + Auction: the direct-sale City drops out of the list and the counts.
+        var auctions = await Search($"itemType=Vehicle&saleType=Auction&{Near}");
+        Assert.Equal(2, auctions.TotalCount);
+        Assert.Contains(auctions.Facets["make"], f => f is { Value: "Honda", Count: 1 });
+    }
+
+    [Fact]
+    public async Task SearchText_IsCombinedWithEveryFilter_AndCountsFollowTheSearch()
+    {
+        await AddAsync(DirectSalePads(), Vehicle("hilux-2018", "Toyota", "Hilux", 2018));
+
+        // Text + Parts + category + radius: only bumpers near Hyderabad in that category.
+        var bumpers = await Search($"{Q("bumper")}&itemType=Part&category={Uri.EscapeDataString("Body – Exterior")}&{Near}");
+        // (The Corolla bumper has no category, the Lagos one is too far.)
+        Assert.Equal(["hilux-bumper", "hilux-rear-bumper"], bumpers.Results.Select(r => r.Id).Order());
+        Assert.Equal(2, bumpers.TotalCount);
+        // The category chosen keeps its siblings (counted with the text): Brakes has no bumpers → not shown.
+        Assert.Equal([new FacetValue("Body – Exterior", 2)], bumpers.Facets["category"]);
+
+        // Text + Direct sale: no bumper is a direct sale.
+        var none = await Search($"{Q("bumper")}&itemType=Part&saleType=FixedPrice&{Near}");
+        Assert.Equal(0, none.TotalCount);
+        Assert.All(none.Facets.Values, Assert.Empty);
+
+        // Part type chip + category: part types within the category, with counts.
+        var typed = await Search($"partType=Bumper&category={Uri.EscapeDataString("Body – Exterior")}&{Near}");
+        Assert.Contains(typed.Facets["partType"], f => f is { Value: "Bumper", Count: 2 });
+        Assert.Contains(typed.Facets["partType"], f => f is { Value: "Bonnet", Count: 1 });
+
+        // Vehicles mode ignores parts that mention the text.
+        var hilux = await Search($"{Q("hilux")}&itemType=Vehicle&{Near}");
+        Assert.Equal(["hilux-2018"], hilux.Results.Select(r => r.Id));
+    }
+
+    [Fact]
+    public async Task Radius_IsExact_ForResultsAndCounts()
+    {
+        // ~69 km from the search point: inside the old bounding box's corner, outside the 60 km circle.
+        await AddAsync(Listing("bumper-69km", x =>
+        {
+            x.Kind = "VehicleSpecificPart"; x.FitmentMode = "VehicleSpecific"; x.PartType = "Bumper"; x.Category = "Body – Exterior";
+            x.Latitude = 17.385 + 0.45; x.Longitude = 78.4867 + 0.45;
+            x.Fitments = [new FitmentInfo { YearFrom = 2016, YearTo = 2020, Make = "Toyota", Model = "Hilux" }];
+        }));
+
+        var near = await Search($"partType=Bumper&{Near}");
+        Assert.DoesNotContain(near.Results, r => r.Id == "bumper-69km");
+        Assert.Contains(near.Facets["partType"], f => f is { Value: "Bumper", Count: 3 });
+
+        var wider = await Search("partType=Bumper&lat=17.385&lon=78.4867&radiusKm=80");
+        Assert.Contains(wider.Results, r => r.Id == "bumper-69km");
+    }
+
+    [Fact]
+    public async Task Suggestions_FollowThePartsOrVehiclesChoice()
+    {
+        await AddAsync(Vehicle("hilux-2018", "Toyota", "Hilux", 2018));
+
+        var vehicles = await Suggest("hilux", "Vehicle");
+        Assert.All(vehicles, s => Assert.Equal("vehicles", s.Group));
+        Assert.Contains(vehicles, s => s.Label == "Toyota Hilux 2018");
+
+        var parts = await Suggest("hilux", "Part");
+        Assert.DoesNotContain(parts, s => s.Group == "vehicles");
+        Assert.Contains(parts, s => s.Group == "fits" && s.Label == "Parts for Toyota Hilux 2016–2020");
+
+        // Part numbers and part types are not suggested while Vehicles is chosen.
+        Assert.Empty(await Suggest("52119", "Vehicle"));
+        Assert.DoesNotContain(await Suggest("front bump", "Vehicle"), s => s.Group == "parts");
     }
 
     [Fact]

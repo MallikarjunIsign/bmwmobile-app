@@ -46,6 +46,11 @@ public class PasswordOtpGrantValidator(
         if (!await users.HasPasswordAsync(user))
         {
             var logins = await users.GetLoginsAsync(user);
+            // A seller created by an admin who hasn't used their invite code yet.
+            if (logins.Count == 0)
+                return GrantResults.Error(
+                    "You haven't set a password yet. Tap \"Got a seller invite? Set your password\" and enter the code from your invite email.",
+                    "PASSWORD_NOT_SET");
             var provider = logins.FirstOrDefault()?.ProviderDisplayName ?? "Google";
             return GrantResults.Error($"This account uses {provider} sign-in. Please use the {provider} button.", "USE_SOCIAL_LOGIN");
         }
@@ -55,6 +60,8 @@ public class PasswordOtpGrantValidator(
             return GrantResults.Error("Too many wrong passwords. Please wait a few minutes and try again.", "LOCKED_OUT");
         if (!check.Succeeded)
             return GrantResults.Error("Incorrect email or password.", "INVALID_CREDENTIALS");
+        if (user.IsDisabled)
+            return GrantResults.Error(AccountService.DisabledMessage, "ACCOUNT_DISABLED");
 
         var deviceId = GrantResults.Param(context, "device_id");
         var deviceToken = GrantResults.Param(context, "device_token");

@@ -31,6 +31,7 @@ internal static class GrantResults
     public static async Task<GrantValidationResult> SuccessAsync(
         AccountService accounts, ApplicationUser user, string authMethod, bool emailVerified, string? deviceToken = null)
     {
+        if (user.IsDisabled) return Error(AccountService.DisabledMessage, "ACCOUNT_DISABLED");
         await accounts.MarkSignedInAsync(user, emailVerified);
         var custom = new Dictionary<string, object>
         {

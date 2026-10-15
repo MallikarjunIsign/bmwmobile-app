@@ -12,6 +12,9 @@ public class AddressDto
     public string Postcode { get; set; } = "";
     /// <summary>IN, US, NG or IE.</summary>
     public string CountryCode { get; set; } = "";
+    /// <summary>The delivery location (saved location or GPS); needed for the shipping charge.</summary>
+    public double? Latitude { get; set; }
+    public double? Longitude { get; set; }
 }
 
 /// <summary>An address-book entry.</summary>
@@ -32,4 +35,10 @@ public class ChooseDeliveryDto
     public string? AddressId { get; set; }
     public AddressDto? Address { get; set; }
     public bool SaveAddress { get; set; } = true;
+    /// <summary>
+    /// Shipping: the delivery location (one of the buyer's saved locations or the phone's GPS). Used for the shipping
+    /// charge; overrides the address's own coordinates. The app never sends a price.
+    /// </summary>
+    public double? Latitude { get; set; }
+    public double? Longitude { get; set; }
 }

@@ -102,13 +102,14 @@ export const AuctionCard: React.FC<AuctionCardProps> = ({ auction, onPress, onBi
           disabled={!onSellerPress}
           hitSlop={6}
           accessibilityRole="link"
-          accessibilityLabel={`More from ${sellerLabel(auction)}`}
+          accessibilityLabel={`More from ${sellerLabel(auction)}, rated ${ratingText(auction.sellerRating, auction.sellerRatingCount)}`}
         >
           <Text style={styles.sellerText} numberOfLines={1}>
             {compact ? '' : 'Seller: '}
             <Text style={[styles.sellerName, !!onSellerPress && styles.sellerLink]}>{isMine ? 'You' : sellerLabel(auction)}</Text>
-            <Text style={styles.rating}>  {ratingText(auction.sellerRating, auction.sellerRatingCount)}</Text>
           </Text>
+          {/* The seller's rating out of 5 and how many people rated. */}
+          <Text style={styles.rating} numberOfLines={1}>{ratingText(auction.sellerRating, auction.sellerRatingCount, compact)}</Text>
         </TouchableOpacity>
 
         {auction.distanceKm !== undefined || auction.locationName ? (
@@ -137,7 +138,9 @@ export const AuctionCard: React.FC<AuctionCardProps> = ({ auction, onPress, onBi
             {/* The seller can't bid on (or buy) their own listing. Buying happens on the listing page (quantity). */}
             {!isMine ? (
               <TouchableOpacity style={[styles.bidBtn, isFixed && styles.buyBtn]} onPress={isFixed ? onPress : onBidPress || onPress} activeOpacity={0.8}>
-                <Text style={styles.bidBtnText}>{isFixed ? 'Buy Now' : isWinning ? "You're winning" : 'Place Bid'}</Text>
+                <Text style={styles.bidBtnText} numberOfLines={1}>
+                  {isFixed ? `Buy now – ${money(auction.startingPrice)}` : isWinning ? "You're winning" : 'Place Bid'}
+                </Text>
               </TouchableOpacity>
             ) : null}
           </View>
@@ -274,7 +277,9 @@ const styles = StyleSheet.create({
   },
   rating: {
     color: COLORS.warningGlow,
+    fontSize: 12,
     fontWeight: '700',
+    marginTop: 2,
   },
   sellerLink: {
     color: COLORS.primaryGlow,

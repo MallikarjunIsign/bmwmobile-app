@@ -9,6 +9,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddSignalR();
 builder.Services.AddSingleton<IUserIdProvider, UsernameUserIdProvider>();
 builder.Services.AddSingleton<NotificationService.Models.AuctionTitles>();
+builder.Services.AddSingleton<NotificationService.Hubs.ConnectedSellers>();
 
 // Optional sign-in for the hub: the app passes its access token as ?access_token=... (WebSockets can't send headers),
 // so personal messages (custom order matched) can be sent to that user only.
@@ -51,6 +52,8 @@ builder.Host.UseWolverine(opts =>
         .DeclareExchange("chat-message-sent", ex => ex.ExchangeType = ExchangeType.Fanout)
         .DeclareExchange("chat-receipt", ex => ex.ExchangeType = ExchangeType.Fanout)
         .DeclareExchange("review-requested", ex => ex.ExchangeType = ExchangeType.Fanout)
+        .DeclareExchange("part-request-created", ex => ex.ExchangeType = ExchangeType.Fanout)
+        .BindExchange("part-request-created").ToQueue("notification-part-request-created")
         .BindExchange("auction-created").ToQueue("notification-auction-created")
         .BindExchange("auction-finished").ToQueue("notification-auction-finished")
         .BindExchange("bid-placed").ToQueue("notification-bid-placed")
@@ -70,6 +73,7 @@ builder.Host.UseWolverine(opts =>
     opts.ListenToRabbitQueue("notification-auction-extended");
     opts.ListenToRabbitQueue("notification-container-updated");
     opts.ListenToRabbitQueue("notification-custom-order-matched");
+    opts.ListenToRabbitQueue("notification-part-request-created");
     opts.ListenToRabbitQueue("notification-order-status-changed");
     opts.ListenToRabbitQueue("notification-auction-ending-soon");
     opts.ListenToRabbitQueue("notification-chat-message-sent");

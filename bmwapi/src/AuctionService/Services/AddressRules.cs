@@ -47,13 +47,20 @@ public static partial class AddressRules
         Line2 = Clean(dto.Line2, 150),
         City = Clean(dto.City, 80)!,
         Postcode = Clean(dto.Postcode, 20)?.ToUpperInvariant() ?? "",
-        CountryCode = dto.CountryCode.Trim().ToUpperInvariant()
+        CountryCode = dto.CountryCode.Trim().ToUpperInvariant(),
+        Latitude = HasLocation(dto) ? dto.Latitude : null,
+        Longitude = HasLocation(dto) ? dto.Longitude : null,
     };
 
     public static AddressDto ToDto(AddressInfo a) => new()
     {
-        Name = a.Name, Phone = a.Phone, Line1 = a.Line1, Line2 = a.Line2, City = a.City, Postcode = a.Postcode, CountryCode = a.CountryCode
+        Name = a.Name, Phone = a.Phone, Line1 = a.Line1, Line2 = a.Line2, City = a.City, Postcode = a.Postcode, CountryCode = a.CountryCode,
+        Latitude = a.Latitude, Longitude = a.Longitude,
     };
+
+    /// <summary>The address has valid coordinates (needed for the shipping charge).</summary>
+    public static bool HasLocation(AddressDto dto) =>
+        dto.Latitude is { } lat && dto.Longitude is { } lon && Contracts.GeoMath.IsValidCoordinate(lat, lon);
 
     private static string? Clean(string? value, int max = 200) => ListingRules.Clean(value, max);
 

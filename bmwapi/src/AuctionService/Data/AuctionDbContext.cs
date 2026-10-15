@@ -29,6 +29,7 @@ public class AuctionDbContext(DbContextOptions options) : DbContext(options)
     public DbSet<OrderEvent> OrderEvents { get; set; }
     public DbSet<GarageVehicle> GarageVehicles { get; set; }
     public DbSet<ShippingAddress> ShippingAddresses { get; set; }
+    public DbSet<ShippingRate> ShippingRates { get; set; }
     public DbSet<MediaFile> MediaFiles { get; set; }
     /// <summary>Blocks from ChatService (UserBlocked): a blocked user can't buy the blocker's direct sales.</summary>
     public DbSet<UserBlock> UserBlocks { get; set; }
@@ -106,6 +107,7 @@ public class AuctionDbContext(DbContextOptions options) : DbContext(options)
             .HasMany(x => x.Events).WithOne().HasForeignKey(x => x.OrderId).OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<GarageVehicle>().HasIndex(x => x.User);
         modelBuilder.Entity<ShippingAddress>().HasIndex(x => x.User);
+        modelBuilder.Entity<ShippingRate>().HasIndex(x => new { x.CountryCode, x.SizeClass }).IsUnique();
         modelBuilder.Entity<MediaFile>().HasIndex(x => x.Owner);
         modelBuilder.Entity<UserBlock>().HasKey(x => new { x.Blocker, x.Blocked });
 

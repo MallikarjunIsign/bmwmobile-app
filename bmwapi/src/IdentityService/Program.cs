@@ -32,4 +32,5 @@ finally
     Log.CloseAndFlush();
 }
 
-
+// Lets the integration tests start the app (Alba / WebApplicationFactory).
+public partial class Program;

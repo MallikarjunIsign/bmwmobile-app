@@ -202,6 +202,18 @@ public static class DemoListings
     {
         var demos = All();
         var ids = demos.Select(d => d.Id).ToList();
+
+        // Demo listings added before the rename have no seller name, so buyers saw the old "BidMyParts_…" username.
+        // Give them the brand name once; the new UpdatedAt makes the Search service re-index them when it starts.
+        var unnamed = await context.Auctions
+            .Where(a => ids.Contains(a.Id) && a.SellerName == null && a.Seller.StartsWith("BidMyParts_")).ToListAsync();
+        foreach (var a in unnamed)
+        {
+            a.SellerName = a.Seller.Replace("BidMyParts_", "ShopCarParts ");
+            a.UpdatedAt = DateTime.UtcNow;
+        }
+        if (unnamed.Count > 0) await context.SaveChangesAsync();
+
         var existing = await context.Auctions.Where(a => ids.Contains(a.Id)).Select(a => a.Id).ToListAsync();
         var missing = demos.Where(d => !existing.Contains(d.Id)).ToList();
         if (missing.Count == 0) return [];

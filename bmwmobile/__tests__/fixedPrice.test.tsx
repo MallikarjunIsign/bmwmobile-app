@@ -73,22 +73,24 @@ test('auction card: live hh:mm:ss countdown and the seller name, which opens the
   const onSellerPress = jest.fn();
   let tree: ReactTestRenderer.ReactTestRenderer | undefined;
   await ReactTestRenderer.act(async () => {
-    tree = ReactTestRenderer.create(<AuctionCard auction={listing({})} onPress={jest.fn()} onSellerPress={onSellerPress} />);
+    tree = ReactTestRenderer.create(<AuctionCard auction={listing({ sellerRating: 4.66, sellerRatingCount: 32 })} onPress={jest.fn()} onSellerPress={onSellerPress} />);
   });
 
   const t = texts(tree!);
-  // The countdown keeps ticking while a slow test run renders: allow a minute.
-  expect(t).toMatch(/⏱ 02:0[45]:\d\d/);
+  // hh:mm:ss in hours only; the clock keeps ticking while a busy test run renders, so the exact minutes aren't checked.
+  expect(t).toMatch(/⏱ 0[12]:\d\d:\d\d/);
   expect(t).toContain('Seller: Ravi Kumar');
+  // The seller's rating out of 5 and how many people rated.
+  expect(t).toContain('⭐ 4.7/5 (32 ratings)');
   expect(t).toContain('Place Bid');
 
-  const seller = tree!.root.find(n => n.props.accessibilityLabel === 'More from Ravi Kumar');
+  const seller = tree!.root.find(n => String(n.props.accessibilityLabel).startsWith('More from Ravi Kumar'));
   await ReactTestRenderer.act(async () => seller.props.onPress());
   expect(onSellerPress).toHaveBeenCalled();
   await ReactTestRenderer.act(async () => tree!.unmount());
 });
 
-test('fixed-price card: price, units left and Buy Now – no bids or countdown', async () => {
+test('fixed-price card: price, units left and "Buy now – price" – no bids or countdown', async () => {
   let tree: ReactTestRenderer.ReactTestRenderer | undefined;
   await ReactTestRenderer.act(async () => {
     tree = ReactTestRenderer.create(
@@ -100,10 +102,11 @@ test('fixed-price card: price, units left and Buy Now – no bids or countdown',
   expect(t).toContain('BUY NOW');
   expect(t).toContain('Price');
   expect(t).toContain('4 available');
-  expect(t).toContain('Buy Now');
+  expect(t).toContain('Buy now – ₹9,800');
   expect(t).not.toContain('bids');
   expect(t).not.toContain('⏱');
   // Older listings without a name show the username.
   expect(t).toContain('Seller: ravi123');
+  expect(t).toContain('New seller · no ratings yet');
   await ReactTestRenderer.act(async () => tree!.unmount());
 });

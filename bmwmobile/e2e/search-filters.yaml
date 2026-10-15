@@ -1,0 +1,98 @@
+# Search / filter UI test (Home + Market), run by e2e/run-search-e2e.sh as a buyer and as a seller.
+# Env (from the script): EMAIL, PASSWORD, ROLE (BUYER / SELLER), BUMPERS = number of parts with part type Bumper near Hyderabad,
+# LIGHTING = number of parts in the Lighting category near Hyderabad (both asked from the API first).
+appId: com.bidmywork.app
+---
+- runFlow: subflows/login.yaml
+
+# Home header: the role badge on the location line ([BUYER] / [SELLER]).
+- assertVisible:
+    id: "role-badge"
+- assertVisible: "${ROLE}"
+
+# ── Home: type "bumper", tap the suggestion → a Bumper chip, only bumpers, the count matches the API ──
+- tapOn: "Search parts, part numbers, vehicles…"
+- inputText: "bumper"
+- extendedWaitUntil:
+    visible: "PARTS"
+    timeout: 15000
+# The row's subtitle (its category) – unique on the screen, unlike "Bumper" (also on the keyboard's word strip).
+- tapOn: "Body – Exterior"
+- extendedWaitUntil:
+    visible: "Bumper ✕"
+    timeout: 10000
+- extendedWaitUntil:
+    visible: "See All \\(${BUMPERS}\\) →"
+    timeout: 15000
+- assertNotVisible: "Tyre 265/65 R17 – MRF – New"
+- scrollUntilVisible:
+    element: ".*Bumper.*Genuine.*"
+    direction: DOWN
+- takeScreenshot: home-bumper
+
+# ── Removing the chip brings everything back ──
+- scrollUntilVisible:
+    element: "Bumper ✕"
+    direction: UP
+- tapOn: "Bumper ✕"
+- assertNotVisible: "Bumper ✕"
+- assertNotVisible: "See All \\(${BUMPERS}\\) →"
+
+# ── Home: type "light", tap the CATEGORY suggestion → a Lighting chip, only lighting parts ──
+- tapOn: "Search parts, part numbers, vehicles…"
+- inputText: "light"
+- extendedWaitUntil:
+    visible: "CATEGORIES"
+    timeout: 15000
+- tapOn: "All parts in Lighting"
+- extendedWaitUntil:
+    visible: "Lighting ✕"
+    timeout: 10000
+- extendedWaitUntil:
+    visible: "See All \\(${LIGHTING}\\) →"
+    timeout: 15000
+- tapOn: "Lighting ✕"
+- assertNotVisible: "Lighting ✕"
+
+# ── Home: a category tile works the same way ──
+- tapOn: "Lighting \\(${LIGHTING}\\)"
+- extendedWaitUntil:
+    visible: "Lighting ✕"
+    timeout: 10000
+- extendedWaitUntil:
+    visible: "See All \\(${LIGHTING}\\) →"
+    timeout: 15000
+- takeScreenshot: home-lighting-tile
+
+# ── Market shares the same state: the Lighting chip is there; a suggestion adds a chip on top ──
+- tapOn: "Market"
+- extendedWaitUntil:
+    visible: "Lighting ✕"
+    timeout: 10000
+- extendedWaitUntil:
+    visible: "${LIGHTING} parts? found within 60 km"
+    timeout: 15000
+- tapOn: "Clear all"
+- assertNotVisible: "Lighting ✕"
+- tapOn: "Search parts, part numbers, vehicles…"
+- inputText: "bumper"
+- extendedWaitUntil:
+    visible: "PARTS"
+    timeout: 15000
+- tapOn: "Body – Exterior"
+- extendedWaitUntil:
+    visible: "Bumper ✕"
+    timeout: 10000
+- extendedWaitUntil:
+    visible: "${BUMPERS} parts? found within 60 km"
+    timeout: 15000
+- takeScreenshot: market-bumper
+
+# ── Back on Home the same chip and count are shown (one shared state) ──
+- tapOn: "Home"
+- extendedWaitUntil:
+    visible: "Bumper ✕"
+    timeout: 10000
+- extendedWaitUntil:
+    visible: "See All \\(${BUMPERS}\\) →"
+    timeout: 15000

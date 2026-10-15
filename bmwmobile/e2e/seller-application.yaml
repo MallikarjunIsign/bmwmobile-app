@@ -1,0 +1,59 @@
+# "Want to sell?" form, signed out (from Sign up). Run by e2e/run-seller-application-e2e.sh, which then checks the
+# request in the database through the admin API. Env: EMAIL (a new address per run).
+appId: com.bidmywork.app
+---
+- launchApp:
+    clearState: true
+    permissions:
+      all: allow
+- runFlow:
+    when:
+      visible: "Allow"
+    commands:
+      - tapOn: "Allow"
+- extendedWaitUntil:
+    visible: "ENTER MARKETPLACE"
+    timeout: 180000
+- tapOn: "ENTER MARKETPLACE"
+- tapOn: "New to ShopCarParts\\? Create an account"
+- scrollUntilVisible:
+    element: "Want to sell on ShopCarParts\\? Apply to sell"
+    direction: DOWN
+- tapOn: "Want to sell on ShopCarParts\\? Apply to sell"
+- extendedWaitUntil:
+    visible: "Become a seller"
+    timeout: 10000
+
+# Contact
+- tapOn: "Full name"
+- inputText: "E2E Applicant"
+- tapOn: "Email"
+- inputText: ${EMAIL}
+- tapOn: "Mobile number"
+- inputText: "9876543210"
+- tapOn: "City \\(India\\)"
+- inputText: "Hyderabad"
+- hideKeyboard
+
+# Business
+- scrollUntilVisible:
+    element: "Parts shop"
+    direction: DOWN
+- tapOn: "Parts shop"
+- tapOn: "Both"
+- scrollUntilVisible:
+    element: "Business name"
+    direction: DOWN
+- tapOn: "Business name"
+- inputText: "E2E Auto Parts"
+- hideKeyboard
+- scrollUntilVisible:
+    element: "SEND TO OUR TEAM"
+    direction: DOWN
+- takeScreenshot: seller-form
+- tapOn: "SEND TO OUR TEAM"
+- extendedWaitUntil:
+    visible: "Thanks, E2E!"
+    timeout: 15000
+- assertVisible: ".*has been sent to our team.*"
+- takeScreenshot: seller-form-sent

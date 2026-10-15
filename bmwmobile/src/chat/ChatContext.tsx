@@ -4,6 +4,7 @@ import { useAuth } from '../auth/AuthContext';
 import { useLiveEvent } from '../services/notifications';
 import { ChatApi } from '../services/chatApi';
 import { registerForPush } from '../services/push';
+import { useLocations } from '../location/LocationContext';
 import type { ChatMessageEvent } from '../types/chat';
 
 type ChatValue = {
@@ -27,6 +28,11 @@ const ChatContext = createContext<ChatValue>({
  */
 export function ChatProvider({ children }: { children: React.ReactNode }) {
   const { status, user } = useAuth();
+  const { location } = useLocations();
+  // Where the phone is, rounded to ~10 km: the phone is registered again when the user moves that far (or changes country).
+  const lat = location ? Math.round(location.latitude * 10) / 10 : undefined;
+  const lon = location ? Math.round(location.longitude * 10) / 10 : undefined;
+  const countryCode = location?.countryCode ?? null;
   const signedIn = status === 'signedIn';
   const [unread, setUnread] = useState(0);
   const activeConversation = useRef<string | null>(null);
@@ -44,7 +50,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     refreshUnread();
     let cleanup: (() => void) | null = null;
     let cancelled = false;
-    registerForPush().then(off => (cancelled ? off() : (cleanup = off)));
+    registerForPush({ latitude: lat, longitude: lon, countryCode }).then(off => (cancelled ? off() : (cleanup = off)));
     // Coming back to the app: messages may have arrived as notifications meanwhile.
     const sub = AppState.addEventListener('change', s => s === 'active' && refreshUnread());
     return () => {
@@ -52,7 +58,9 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       cleanup?.();
       sub.remove();
     };
-  }, [signedIn, user?.id, refreshUnread]);
+    // Registered again when the role changes, so a buyer made a seller starts getting buyers' part requests.
+    // Location: sellers only get buyers' part requests near them.
+  }, [signedIn, user?.id, user?.role, lat, lon, countryCode, refreshUnread]);
 
   useLiveEvent('ChatMessage', (m: ChatMessageEvent) => {
     if (!m?.conversationId) return;

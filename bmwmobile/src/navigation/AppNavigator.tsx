@@ -20,6 +20,10 @@ import { ChatPushOpener } from '../components/ChatPushOpener';
 import { GarageScreen } from '../screens/GarageScreen';
 import { LocationsScreen } from '../screens/LocationsScreen';
 import { AddressFormScreen } from '../screens/AddressFormScreen';
+import { ProfileScreen } from '../screens/ProfileScreen';
+import { BuyerRequestsScreen } from '../screens/BuyerRequestsScreen';
+import { isSeller } from '../utils/roles';
+import { BrowseProvider } from '../search/BrowseContext';
 
 // Screens
 import { SplashScreen } from '../screens/SplashScreen';
@@ -28,6 +32,7 @@ import { OtpScreen } from '../screens/OtpScreen';
 import { SignUpScreen } from '../screens/SignUpScreen';
 import { ForgotPasswordScreen } from '../screens/ForgotPasswordScreen';
 import { ResetPasswordScreen } from '../screens/ResetPasswordScreen';
+import { SellerApplicationScreen } from '../screens/SellerApplicationScreen';
 import { useAuth } from '../auth/AuthContext';
 import { useLocations } from '../location/LocationContext';
 import { ProfilePreferencesScreen } from '../screens/ProfilePreferencesScreen';
@@ -67,8 +72,11 @@ const TabIcon = ({ icon, label, focused }: { icon: string; label: string; focuse
 function MainTabNavigator() {
   // Keep the bar's 64px look and add room for the system navigation bar (edge-to-edge).
   const insets = useSafeAreaInsets();
+  // Sell is for seller accounts only (role from the token; the backend refuses buyers too).
+  const seller = isSeller(useAuth().user);
   return (
-    <>
+    // Home and Market share Parts / Vehicles, All / Auction / Direct sale, the search and the filters.
+    <BrowseProvider>
       {/* "A part matching your request is now available" (custom orders) */}
       <CustomOrderAlerts />
       {/* Outbid, new bid, ending in 1 hour, won, lost, sold, ended – no bids */}
@@ -98,13 +106,15 @@ function MainTabNavigator() {
             tabBarIcon: ({ focused }) => <TabIcon icon="🔍" label="Market" focused={focused} />
           }}
         />
-        <Tab.Screen
-          name="Sell"
-          component={SellStartScreen}
-          options={{
-            tabBarIcon: ({ focused }) => <TabIcon icon="➕" label="Sell" focused={focused} />
-          }}
-        />
+        {seller ? (
+          <Tab.Screen
+            name="Sell"
+            component={SellStartScreen}
+            options={{
+              tabBarIcon: ({ focused }) => <TabIcon icon="➕" label="Sell" focused={focused} />
+            }}
+          />
+        ) : null}
         <Tab.Screen 
           name="MyBids" 
           component={MyBidsScreen} 
@@ -130,7 +140,7 @@ function MainTabNavigator() {
           />
         ) : null}
       </Tab.Navigator>
-    </>
+    </BrowseProvider>
   );
 }
 
@@ -194,6 +204,9 @@ export function AppNavigator() {
             <Stack.Screen name="Garage" component={GarageScreen} />
             <Stack.Screen name="Locations" component={LocationsScreen} />
             <Stack.Screen name="AddressForm" component={AddressFormScreen} />
+            <Stack.Screen name="Profile" component={ProfileScreen} />
+            <Stack.Screen name="BuyerRequests" component={BuyerRequestsScreen} />
+            <Stack.Screen name="SellerApplication" component={SellerApplicationScreen} />
             {FEATURES.containers ? <Stack.Screen name="PlannedContainers" component={PlannedContainersScreen} /> : null}
           </Stack.Group>
         ) : (
@@ -204,6 +217,7 @@ export function AppNavigator() {
             <Stack.Screen name="Otp" component={OtpScreen} />
             <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
             <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} />
+            <Stack.Screen name="SellerApplication" component={SellerApplicationScreen} />
           </Stack.Group>
         )}
       </Stack.Navigator>

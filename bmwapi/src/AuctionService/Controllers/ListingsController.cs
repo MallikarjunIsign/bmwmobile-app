@@ -2,6 +2,7 @@ using System.Security.Claims;
 using AuctionService.Data;
 using AuctionService.DTOs;
 using AuctionService.Entities;
+using AuctionService.Errors;
 using AuctionService.RequestHelpers;
 using AuctionService.Services;
 using Contracts;
@@ -28,6 +29,7 @@ public class ListingsController(AuctionDbContext context, IDbContextOutbox<Aucti
     private DateTime Now => clock.GetUtcNow().UtcDateTime;
 
     /// <summary>Starts a draft: "What are you adding?" (+ the part type when already chosen).</summary>
+    [SellerOnly]
     [HttpPost]
     public async Task<ActionResult<AuctionDto>> Create(CreateListingDto dto)
     {
@@ -100,6 +102,7 @@ public class ListingsController(AuctionDbContext context, IDbContextOutbox<Aucti
     /// Saves the sent fields (the app autosaves each step). Drafts and Live listings without bids only.
     /// A Live listing is re-checked with the publish rules and the change is sent to Bid/Search.
     /// </summary>
+    [SellerOnly]
     [HttpPut("{id}")]
     public async Task<ActionResult<AuctionDto>> Save(string id, SaveListingDto dto)
     {
@@ -149,6 +152,7 @@ public class ListingsController(AuctionDbContext context, IDbContextOutbox<Aucti
     }
 
     /// <summary>Checks everything (fitment, specs, details, photos, location, auction settings) and goes Live.</summary>
+    [SellerOnly]
     [HttpPost("{id}/publish")]
     public async Task<ActionResult<AuctionDto>> Publish(string id)
     {
@@ -181,6 +185,7 @@ public class ListingsController(AuctionDbContext context, IDbContextOutbox<Aucti
     }
 
     /// <summary>Description notes can be added at any time while Live (also after bids).</summary>
+    [SellerOnly]
     [HttpPost("{id}/notes")]
     public async Task<ActionResult<AuctionDto>> AddNote(string id, AddNoteDto dto)
     {
@@ -208,6 +213,7 @@ public class ListingsController(AuctionDbContext context, IDbContextOutbox<Aucti
     /// Cancel: a draft is deleted (with its photos); a Live listing without bids becomes Cancelled and is removed
     /// from bidding and search. Not possible once there are bids.
     /// </summary>
+    [SellerOnly]
     [HttpPost("{id}/cancel")]
     public async Task<IActionResult> Cancel(string id)
     {
@@ -234,6 +240,7 @@ public class ListingsController(AuctionDbContext context, IDbContextOutbox<Aucti
     }
 
     /// <summary>"Ended – no bids" → relist with one tap: a new Live listing with the same details, price and duration.</summary>
+    [SellerOnly]
     [HttpPost("{id}/relist")]
     public async Task<ActionResult<AuctionDto>> Relist(string id)
     {
@@ -416,7 +423,9 @@ public class ListingsController(AuctionDbContext context, IDbContextOutbox<Aucti
     {
         var errors = new Dictionary<string, string[]>();
         if (dto.PartPrice is <= 0) errors["partPrice"] = ["The part price must be more than 0"];
-        if (dto.ShippingFee is < 0) errors["shippingFee"] = ["The shipping fee can't be negative"];
+        if (dto.WeightLb is < 0 or > 20_000) errors["weightLb"] = ["Enter the weight in pounds"];
+        foreach (var (key, value) in new[] { ("lengthIn", dto.LengthIn), ("widthIn", dto.WidthIn), ("heightIn", dto.HeightIn) })
+            if (value is < 0 or > 1_000) errors[key] = ["Enter the box size in inches"];
         if (dto.DurationDays is not null && !ListingRules.Durations.Contains(dto.DurationDays.Value))
             errors["durationDays"] = ["Choose 1, 3, 5, 7 or 10 days"];
         if (dto.SaleType is not null && !(Enum.TryParse<SaleType>(dto.SaleType, true, out var saleType) && Enum.IsDefined(saleType)))
@@ -479,6 +488,10 @@ public class ListingsController(AuctionDbContext context, IDbContextOutbox<Aucti
             Currency = s.Currency,
             DeliveryOptions = s.DeliveryOptions,
             SizeClass = s.SizeClass,
+            WeightLb = s.WeightLb,
+            LengthIn = s.LengthIn,
+            WidthIn = s.WidthIn,
+            HeightIn = s.HeightIn,
             ShippingFee = s.ShippingFee,
             PickupAddress = s.PickupAddress,
             DurationDays = s.DurationDays,

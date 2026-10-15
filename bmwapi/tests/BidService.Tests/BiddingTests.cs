@@ -51,10 +51,12 @@ public class BiddingTests(AppFixture fixture)
     }
 
     private async Task<IScenarioResult> Accept(string auctionId, string bidId, string user = "bob",
-        HttpStatusCode expected = HttpStatusCode.OK)
+        HttpStatusCode expected = HttpStatusCode.OK, string role = "seller")
     {
         return await fixture.Host.Scenario(s =>
         {
+            s.RemoveClaim("role");
+            s.WithClaim(new Claim("role", role));
             s.WithClaim(new Claim("username", user));
             s.Post.Json(new AcceptBidDto { AuctionId = auctionId, BidId = bidId }).ToUrl("/api/bids/accept");
             s.StatusCodeShouldBe(expected);
@@ -361,6 +363,19 @@ public class BiddingTests(AppFixture fixture)
         Assert.Contains("A higher bid just came in", body);
         Assert.Contains("6000", body);
         Assert.Equal(AuctionStatus.Live, (await Reload(auction.Id)).Status);
+    }
+
+    [Fact]
+    public async Task Accept_ByBuyerAccount_Returns403WithFriendlyMessage()
+    {
+        var auction = await CreateAuctionAsync();
+        var bid = await (await Bid(auction.Id, 5050, "carol")).ReadAsJsonAsync<BidDto>();
+
+        // Even on their own auction, an account without the seller role can't accept bids.
+        var result = await Accept(auction.Id, bid.Id, "bob", HttpStatusCode.Forbidden, role: "buyer");
+        var body = await result.ReadAsTextAsync();
+        Assert.Contains("SELLER_ONLY", body);
+        Assert.Contains("Only seller accounts", body);
     }
 
     [Fact]

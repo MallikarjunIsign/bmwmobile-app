@@ -143,6 +143,17 @@ export const LoginScreen: React.FC<Props> = ({ navigation, route }) => {
                 New to ShopCarParts? <Text style={styles.signUpLink}>Create an account</Text>
               </Text>
             </TouchableOpacity>
+
+            {/* New sellers (created by an admin) set their first password with the code from the invite email. */}
+            <TouchableOpacity
+              style={styles.inviteRow}
+              onPress={() => navigation.navigate('ResetPassword', { email: email.trim(), resendAfterSeconds: 0, invite: true })}
+              hitSlop={8}
+            >
+              <Text style={styles.signUpText}>
+                Got a seller invite? <Text style={styles.signUpLink}>Set your password</Text>
+              </Text>
+            </TouchableOpacity>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -182,6 +193,10 @@ const styles = StyleSheet.create({
   signUpRow: {
     alignItems: 'center',
     marginTop: SPACING.lg,
+  },
+  inviteRow: {
+    alignItems: 'center',
+    marginTop: SPACING.md,
   },
   signUpText: {
     color: COLORS.textMuted,

@@ -1,6 +1,8 @@
+using Contracts;
 using AuctionService.Data;
 using AuctionService.DTOs;
 using AuctionService.Entities;
+using AuctionService.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -273,8 +275,8 @@ public class CatalogController(AuctionDbContext context, IConfiguration configur
         };
     }
 
-    /// <summary>Admins are listed by username in the "Admin:Usernames" setting.</summary>
-    private bool IsAdmin() =>
+    /// <summary>Admins: token role "admin", or listed by username in the "Admin:Usernames" setting.</summary>
+    private bool IsAdmin() => AppRoles.IsAdmin(User) ||
         Username is { } user &&
         (configuration.GetSection("Admin:Usernames").Get<string[]>() ?? []).Contains(user, StringComparer.OrdinalIgnoreCase);
 
@@ -302,6 +304,11 @@ public class CatalogController(AuctionDbContext context, IConfiguration configur
             Synonyms = p.Synonyms.ToList(),
             ImportantFitmentFields = p.ImportantFitmentFields.ToList(),
             SpecFields = p.SpecFields,
+            DefaultSizeClass = ShippingRules.DefaultSizeClass(ListingKind.CommonPart, p.Name).ToString(),
+            DefaultWeightLb = Package(p).WeightLb,
+            DefaultLengthIn = Package(p).LengthIn,
+            DefaultWidthIn = Package(p).WidthIn,
+            DefaultHeightIn = Package(p).HeightIn,
             MatchedSynonym = matchedSynonym
         };
     }
@@ -316,4 +323,6 @@ public class CatalogController(AuctionDbContext context, IConfiguration configur
         Id = m.Id, MakeId = m.MakeId, Make = make, Name = m.Name, Aliases = m.Aliases.ToList(), BodyType = m.BodyType,
         IsApproved = m.IsApproved
     };
+
+    private static Parcel Package(PartType p) => ParcelDefaults.For(p.Name, ShippingRules.DefaultSizeClass(ListingKind.CommonPart, p.Name));
 }

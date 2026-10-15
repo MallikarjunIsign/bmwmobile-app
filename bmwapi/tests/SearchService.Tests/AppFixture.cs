@@ -9,7 +9,7 @@ namespace SearchService.Tests;
 public class AppFixture : IAsyncLifetime
 {
     private readonly IContainer _meilisearchContainer 
-        = new ContainerBuilder("getmeili/meilisearch:v1.53.1")
+        = new ContainerBuilder("getmeili/meilisearch:v1.54.2")
             .WithPortBinding(7700, true)
             .WithEnvironment("MEILI_MASTER_KEY", "masterkey")
             .WithWaitStrategy(Wait.ForUnixContainer()
@@ -18,12 +18,14 @@ public class AppFixture : IAsyncLifetime
             .Build();
 
     public IAlbaHost Host { get; private set; } = null!;
-    
+
+    public string MeilisearchUrl { get; private set; } = "";
+
     public async Task InitializeAsync()
     {
         await _meilisearchContainer.StartAsync();
-        
-        var meilisearchUrl = 
+
+        var meilisearchUrl = MeilisearchUrl =
             $"http://{_meilisearchContainer.Hostname}:{_meilisearchContainer.GetMappedPublicPort(7700)}";
 
         Host = await AlbaHost.For<Program>(builder =>

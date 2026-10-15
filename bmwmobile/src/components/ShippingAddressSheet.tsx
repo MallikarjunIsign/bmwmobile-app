@@ -6,8 +6,14 @@ import { MarketApi } from '../services/marketApi';
 import { ServerError } from '../services/api';
 import { CheckboxRow } from './CheckboxRow';
 import { countryName } from '../utils/geo';
-import type { Address, FieldErrors, ShippingAddress } from '../types/listing';
-import type { CountryCode } from '../types/location';
+import { getCurrentPosition, GpsError } from '../utils/gps';
+import { useLocations } from '../location/LocationContext';
+import { shippingChargeText } from '../utils/delivery';
+import type { Address, FieldErrors, ShippingAddress, ShippingQuote } from '../types/listing';
+import type { CountryCode, SavedLocation } from '../types/location';
+
+/** Where the item goes, for the distance: one of the buyer's saved locations or the phone's GPS. */
+type Spot = { key: string; label: string; latitude: number; longitude: number; saved?: SavedLocation };
 
 /** "Ravi Kumar · +91 98480 12345 · 12 MG Road, Kukatpally, Hyderabad 500072". */
 export const addressText = (a: Address) =>
@@ -18,18 +24,29 @@ const POSTCODE_LABEL: Record<string, string> = { IN: 'PIN code', US: 'ZIP code',
 const EMPTY = (countryCode: string): Address => ({ name: '', phone: '', line1: '', line2: '', city: '', postcode: '', countryCode });
 
 /**
- * Where to ship: one of the buyer's saved addresses (the default first) or a new one, which is saved to the address
- * book (as the default if ticked). Shipping is within the seller's country, so the country is fixed.
+ * Where to ship: first the delivery location (one of the buyer's saved locations or the current GPS position – the
+ * backend works out the distance and shows the exact charge), then the address text: one of the buyer's saved
+ * addresses (the default first) or a new one (house, street, postcode, phone), saved to the address book. Shipping is
+ * within the seller's country, so the country is fixed. The app never sends a price.
  */
 export const ShippingAddressSheet: React.FC<{
   visible: boolean;
   /** The seller's country (ships within it). */
   countryCode: string;
+  /** The listing: for the exact shipping charge to the chosen location. */
+  listingId: string;
+  money: (amount: number) => string;
   onClose: () => void;
   /** Resolves with the server's answer; field errors are shown in the form. */
-  onSubmit: (to: { addressId?: string; address?: Address }) => Promise<void>;
-}> = ({ visible, countryCode, onClose, onSubmit }) => {
+  onSubmit: (to: { addressId?: string; address?: Address; latitude?: number; longitude?: number }) => Promise<void>;
+}> = ({ visible, countryCode, listingId, money, onClose, onSubmit }) => {
   const insets = useSafeAreaInsets();
+  const { addresses: savedLocations = [], location, usingCurrentLocation } = useLocations();
+  const places = savedLocations.filter(l => !l.countryCode || l.countryCode === countryCode);
+  const [spot, setSpot] = useState<Spot | null>(null);
+  const [gpsBusy, setGpsBusy] = useState(false);
+  const [quote, setQuote] = useState<ShippingQuote | null>(null);
+  const [quoting, setQuoting] = useState(false);
   const [book, setBook] = useState<ShippingAddress[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -38,6 +55,56 @@ export const ShippingAddressSheet: React.FC<{
   const [errors, setErrors] = useState<FieldErrors>({});
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Start with the location the app is using (a chosen saved address, or GPS) when it's in the seller's country.
+  useEffect(() => {
+    if (!visible) return;
+    const chosen = places.find(l => l.isPrimary) ?? null;
+    if (chosen) setSpot(spotFor(chosen));
+    else if (usingCurrentLocation && location && (!location.countryCode || location.countryCode === countryCode))
+      setSpot({ key: 'gps', label: `📡 Current location${location.city ? ` · ${location.city}` : ''}`, latitude: location.latitude, longitude: location.longitude });
+    else setSpot(null);
+  }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The exact charge for the chosen location (from the backend).
+  useEffect(() => {
+    setQuote(null);
+    if (!visible || !spot) return;
+    let alive = true;
+    setQuoting(true);
+    MarketApi.shippingEstimate(listingId, spot.latitude, spot.longitude, countryCode)
+      .then(e => alive && setQuote(e.shipping))
+      .catch(() => alive && setQuote(null))
+      .finally(() => alive && setQuoting(false));
+    return () => {
+      alive = false;
+    };
+  }, [visible, spot, listingId, countryCode]);
+
+  const useGps = async () => {
+    setGpsBusy(true);
+    setMessage(null);
+    try {
+      const pos = await getCurrentPosition({ prompt: true });
+      setSpot({ key: 'gps', label: '📡 Current location', latitude: pos.latitude, longitude: pos.longitude });
+    } catch (e) {
+      setMessage(e instanceof GpsError ? 'Turn on location (or choose a saved location) so we can work out the shipping.' : "Couldn't read your location.");
+    } finally {
+      setGpsBusy(false);
+    }
+  };
+
+  // A saved location fills in what it knows of the address (house / street, area, city, postcode).
+  const pickPlace = (l: SavedLocation) => {
+    setSpot(spotFor(l));
+    setForm(f => ({
+      ...f,
+      line1: f.line1 || l.addressLine || '',
+      line2: f.line2 || [l.area, l.landmark].filter(Boolean).join(', '),
+      city: f.city || l.placeName || '',
+      postcode: f.postcode || l.postalCode || '',
+    }));
+  };
 
   useEffect(() => {
     if (!visible) return;
@@ -61,20 +128,23 @@ export const ShippingAddressSheet: React.FC<{
   const set = (patch: Partial<Address>) => setForm(f => ({ ...f, ...patch }));
 
   const submit = async () => {
+    // Only with a location the backend can ship to (the button is disabled otherwise).
+    if (!spot || !quote?.available) return;
     setBusy(true);
     setErrors({});
     setMessage(null);
+    const where = { latitude: spot.latitude, longitude: spot.longitude };
     try {
       if (adding) {
         // Saved to the book first when it should become the default; otherwise the order saves it.
         if (makeDefault) {
-          const saved = await MarketApi.addShippingAddress({ ...form, isDefault: true });
-          await onSubmit({ addressId: saved.id });
+          const saved = await MarketApi.addShippingAddress({ ...form, ...where, isDefault: true });
+          await onSubmit({ addressId: saved.id, ...where });
         } else {
-          await onSubmit({ address: form });
+          await onSubmit({ address: { ...form, ...where }, ...where });
         }
       } else if (selected) {
-        await onSubmit({ addressId: selected });
+        await onSubmit({ addressId: selected, ...where });
       }
     } catch (e) {
       if (e instanceof ServerError && Object.keys(e.fields).length > 0) setErrors(e.fields);
@@ -94,6 +164,7 @@ export const ShippingAddressSheet: React.FC<{
   );
 
   const country = countryName(countryCode as CountryCode) ?? countryCode;
+  const blocked = busy || !spot || quoting || !quote?.available || (!adding && !selected);
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -107,6 +178,27 @@ export const ShippingAddressSheet: React.FC<{
           </View>
           <Text style={styles.hint}>The seller ships within {country} only.</Text>
 
+          {/* 1. Delivery location → the exact charge */}
+          <Text style={styles.label}>DELIVERY LOCATION</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={styles.places}>
+            {places.map(l => (
+              <TouchableOpacity key={l.id} style={[styles.place, spot?.key === l.id && styles.optionActive]} onPress={() => pickPlace(l)}
+                accessibilityState={{ selected: spot?.key === l.id }}>
+                <Text style={styles.placeText}>📍 {[l.label, l.area || l.placeName].filter(Boolean).join(' · ')}</Text>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity style={[styles.place, spot?.key === 'gps' && styles.optionActive]} onPress={useGps} disabled={gpsBusy}
+              accessibilityState={{ selected: spot?.key === 'gps' }}>
+              <Text style={styles.placeText}>{gpsBusy ? 'Finding you…' : '📡 Use my current location'}</Text>
+            </TouchableOpacity>
+          </ScrollView>
+          <Text style={[styles.charge, quote && !quote.available && styles.chargeWarn]}>
+            {!spot ? 'Choose a delivery location to see the shipping charge'
+              : quoting ? 'Working out the shipping charge…'
+              : quote ? `Shipping charge: ${shippingChargeText(quote, money)}` : "Couldn't work out the shipping charge – try again"}
+          </Text>
+
+          {/* 2. The address text */}
           {book === null ? (
             <ActivityIndicator color={COLORS.primaryGlow} style={styles.loader} />
           ) : (
@@ -152,9 +244,10 @@ export const ShippingAddressSheet: React.FC<{
           )}
 
           {message ? <Text style={styles.error}>{message}</Text> : null}
-          <TouchableOpacity style={[styles.submit, (busy || (!adding && !selected)) && styles.disabled]} onPress={submit}
-            disabled={busy || (!adding && !selected)}>
-            <Text style={styles.submitText}>{busy ? 'Saving…' : 'Ship to this address'}</Text>
+          <TouchableOpacity style={[styles.submit, blocked && styles.disabled]} onPress={submit} disabled={blocked}>
+            <Text style={styles.submitText}>
+              {busy ? 'Saving…' : quote?.available && quote.charge != null ? `Ship here · ${money(quote.charge)}` : 'Ship to this address'}
+            </Text>
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
@@ -186,4 +279,13 @@ const styles = StyleSheet.create({
   submit: { marginTop: SPACING.md, backgroundColor: COLORS.primary, paddingVertical: 14, borderRadius: RADIUS.md, alignItems: 'center' },
   submitText: { color: COLORS.text, fontWeight: '800', fontSize: 14 },
   disabled: { opacity: 0.5 },
+  places: { flexGrow: 0, marginBottom: SPACING.xs },
+  place: { borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.full, paddingHorizontal: SPACING.md, paddingVertical: 8, marginRight: SPACING.xs },
+  placeText: { color: COLORS.text, fontSize: 12, fontWeight: '700' },
+  charge: { color: COLORS.primaryGlow, fontSize: 14, fontWeight: '800', marginBottom: SPACING.sm },
+  chargeWarn: { color: COLORS.warningGlow },
+});
+
+const spotFor = (l: SavedLocation): Spot => ({
+  key: l.id, label: l.label, latitude: l.latitude, longitude: l.longitude, saved: l,
 });

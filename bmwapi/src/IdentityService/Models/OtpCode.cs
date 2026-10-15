@@ -4,6 +4,8 @@ public enum OtpPurpose
 {
     Login,
     ResetPassword,
+    /// <summary>A new seller sets their first password (longer expiry: Otp:InviteExpiryHours).</summary>
+    SellerInvite,
 }
 
 /// <summary>A 6-digit email code. Only a salted hash of the code is stored.</summary>

@@ -80,3 +80,6 @@ yarn-error.log
 android/app/google-services.json
 ios/GoogleService-Info.plist
 ios/BidMyWork/GoogleService-Info.plist
+
+# UI test results (pre-demo check)
+.e2e-results/

@@ -28,6 +28,13 @@ export interface PartType {
   importantFitmentFields: string[];
   specFields: SpecField[];
   matchedSynonym?: string | null;
+  /** Shipping size class the Sell form starts with (the seller can change it). */
+  defaultSizeClass?: SizeClass;
+  /** US shipping: the package the Sell form starts with (lb / inches). */
+  defaultWeightLb?: number;
+  defaultLengthIn?: number;
+  defaultWidthIn?: number;
+  defaultHeightIn?: number;
 }
 
 export interface Category {
@@ -152,6 +159,11 @@ export interface Listing {
   /** Pickup and / or Shipping. */
   deliveryOptions: DeliveryOption[];
   sizeClass?: string | null;
+  /** US shipping: package weight (lb) and box size (inches); null = the part type's default. */
+  weightLb?: number | null;
+  lengthIn?: number | null;
+  widthIn?: number | null;
+  heightIn?: number | null;
   /** Shipping fee (0 = free shipping); null without shipping. */
   shippingFee?: number | null;
   /** Shipping: the country it ships within (the listing country). */
@@ -207,6 +219,11 @@ export interface SaveListing {
   countryCode?: string;
   deliveryOptions?: DeliveryOption[];
   sizeClass?: string | null;
+  /** US shipping: package weight (lb) and box size (inches); null = the part type's default. */
+  weightLb?: number | null;
+  lengthIn?: number | null;
+  widthIn?: number | null;
+  heightIn?: number | null;
   /** Shipping: the fee; 0 = free shipping. */
   shippingFee?: number;
   /** true = free shipping; false = not free any more (enter the fee). */
@@ -252,8 +269,32 @@ export interface QueryChip {
   label: string;
 }
 
+/** A buyer's open part request as sellers see it (no buyer name, only the city). */
+export interface OpenPartRequest {
+  id: string;
+  /** "Front bumper – 2016 Toyota Hilux". */
+  title: string;
+  partName?: string | null;
+  partNumber?: string | null;
+  make?: string | null;
+  model?: string | null;
+  year?: number | null;
+  specs?: string | null;
+  maxBudget?: number | null;
+  locationName?: string | null;
+  countryCode?: string | null;
+  createdAt: string;
+}
+
+/** Home's first filter: what the buyer is looking for. */
+export type ItemTypeFilter = 'Part' | 'Vehicle';
+
+/** Shipping size class: Small, Medium, Large, Freight or Vehicle. */
+export type SizeClass = 'Small' | 'Medium' | 'Large' | 'Freight' | 'Vehicle';
+
 export interface Suggestion {
-  group: 'parts' | 'vehicles' | 'partNumbers' | 'recent';
+  /** fits = "Parts for Toyota Hilux 2016–2020" (a vehicle while Parts is chosen). */
+  group: 'parts' | 'vehicles' | 'fits' | 'partNumbers' | 'recent';
   label: string;
   chips: QueryChip[];
   subtitle?: string | null;
@@ -266,6 +307,8 @@ export interface FacetValue {
 
 export interface ListingSearchQuery {
   q?: string;
+  /** Parts or Vehicles (Home's first filter). */
+  itemType?: ItemTypeFilter;
   partType?: string;
   make?: string;
   model?: string;
@@ -377,6 +420,40 @@ export interface Address {
   /** Postcode / PIN / ZIP / Eircode. */
   postcode: string;
   countryCode: string;
+  /** The delivery location (a saved location or GPS): the shipping charge uses it. */
+  latitude?: number | null;
+  longitude?: number | null;
+}
+
+/** A shipping charge from the backend (the app never works out a price itself). */
+export interface ShippingQuote {
+  available: boolean;
+  /** Whole amount in the listing currency; null when not available. */
+  charge: number | null;
+  /** Road distance used (km, or mi in the USA). */
+  distance: number | null;
+  unit: 'km' | 'mi';
+  currency: string;
+  sizeClass: SizeClass;
+  /** Why shipping isn't possible, e.g. "Ships within India only". */
+  reason: string | null;
+  /** The rates are still the seeded placeholders. */
+  placeholderRates: boolean;
+  /** US: "USPS Ground Advantage" (with zone 1–8 and the billable weight) or "Freight". */
+  service?: string | null;
+  zone?: number | null;
+  billableWeightLb?: number | null;
+  /** The USPS price list edition, e.g. "2026-10-04". */
+  priceList?: string | null;
+  /** An industry-average estimate, not a carrier's price (US freight / vehicle transport for now): shown as "estimated rate". */
+  estimatedRate?: boolean;
+}
+
+export interface ShippingEstimate {
+  listingId: string;
+  pickupOffered: boolean;
+  shippingOffered: boolean;
+  shipping: ShippingQuote | null;
 }
 
 export interface ShippingAddress extends Address {
@@ -412,8 +489,19 @@ export interface Order {
   /** The breakdown: part price + winning bid + shipping fee (when shipped) = total. */
   partPrice?: number;
   winningBid?: number;
-  /** The listing's shipping fee (0 = free), null when it didn't offer shipping. */
+  /** Older apps: same as shippingCharge. */
   shippingFee?: number | null;
+  /** 0 for Pickup; Shipping: the charge calculated when the buyer chose it (fixed); null while not chosen. */
+  shippingCharge?: number | null;
+  /** Road distance the charge used and its unit, and the item's size class. */
+  shippingDistance?: number | null;
+  shippingDistanceUnit?: 'km' | 'mi' | null;
+  shippingSizeClass?: SizeClass | null;
+  /** US: "USPS Ground Advantage" (and its zone) or "Freight". */
+  shippingService?: string | null;
+  shippingZone?: number | null;
+  /** The charge used an industry-average estimate ("estimated rate"). */
+  shippingRateEstimated?: boolean;
   total?: number;
   currency?: string | null;
   locationName?: string | null;

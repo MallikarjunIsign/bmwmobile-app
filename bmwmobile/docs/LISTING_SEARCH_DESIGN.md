@@ -1,5 +1,5 @@
 ---
-title: "OKOH Parts – Part, Vehicle and Auction Listing & Search Design"
+title: "ShopCarParts – Part, Vehicle and Auction Listing & Search Design"
 subtitle: "Fields to capture, listing flows and how search finds the right part · 8 October 2026"
 ---
 
@@ -140,13 +140,14 @@ Only the spec fields for that part type, e.g. *Tyre: 265 / 65 / R17, load 112, s
 | Item location | Yes | Seller's primary location by default (already built) |
 | Delivery options | Yes – at least one | ☐ **Pickup** ☐ **Shipping** – one or both. ("Buyer arranges courier" was removed; listings that had it now offer Pickup. "Seller ships" is now called Shipping.) |
 | Exact pickup address | Optional, Pickup only | Pickup is always at the item location. Buyers only see the **city** ("Pickup in Hyderabad"); the exact address is shown to the buyer on the order after the sale |
-| Shipping fee | Yes if Shipping | Amount in the listing currency, or **Free shipping** (fee 0). Added to the order total when the buyer chooses Shipping |
-| Size class | Yes if Shipping | Small (parcel), Medium, Large (bumper, door), Freight (engine, gearbox) |
+| Shipping fee | – | **No manual fee.** The charge is calculated for each buyer (size class + distance + the country's rates, §15) |
+| Size class | Yes if Shipping | Small (parcel – bulb, filter), Medium (headlamp), Large (bumper, door, bonnet), Freight (engine, gearbox). Pre-selected from the part type; the seller can change it. Vehicles are always **Vehicle** |
 | Ships within | – | The seller's country (the only option for now): shipping addresses must be in that country |
 | Weight | Optional | Helps courier quotes |
 
-**How buyers see it** (cards and the listing detail): "📍 Pickup in Hyderabad · 🚚 Shipping ₹500", "📍 Pickup only · Hyderabad" or
-"🚚 Shipping only · Free shipping". Search has a **Delivery** filter (Pickup / Shipping).
+**How buyers see it:** cards show "📍 Pickup in Hyderabad (free) · 🚚 Shipping", "📍 Pickup only · Hyderabad" or "🚚 Shipping only";
+the listing detail adds the estimate for the buyer's selected location – "Shipping to Kukatpally: ~₹350 (estimate)" – or why shipping
+isn't possible ("Ships within India only", "Too far to ship …"). Search has a **Delivery** filter (Pickup / Shipping).
 
 **After the sale** (auction won or direct sale bought):
 
@@ -156,10 +157,13 @@ Only the spec fields for that part type, e.g. *Tyre: 265 / 65 / R17, load 112, s
 | Shipping only | Shipping – no pickup option. The buyer must add a shipping address before the seller can ship |
 | Both | The buyer chooses Pickup or Shipping on the order screen |
 
-- **Shipping address:** name, phone, address line 1 and 2, city, postcode / PIN / ZIP / Eircode (Nigeria optional), country (fixed to
-  the seller's). Saved to the buyer's **address book** (one default) and offered first next time; the order keeps its own copy.
-- **Order total:** part price + winning bid (+ shipping fee when Shipping), e.g. "Part price ₹14,000 + winning bid ₹100 + shipping ₹500
-  = ₹14,600". Direct sales: price × quantity (+ shipping).
+- **Delivery location + address:** the buyer first picks the delivery location – one of their saved locations or the current GPS
+  position (coordinates only, no paid maps API) – and sees the exact charge; then the address text: name, phone, address line 1 and 2,
+  city, postcode / PIN / ZIP / Eircode (Nigeria optional), country (fixed to the seller's). Saved to the buyer's **address book** (one
+  default, with its coordinates) and offered first next time; the order keeps its own copy.
+- **Order total:** part price + winning bid (+ the calculated shipping charge when Shipping; Pickup = 0), e.g. "Part price ₹14,000 +
+  winning bid ₹100 + shipping ₹350 (22 km) = ₹14,450" or "… + pickup free = ₹14,100". Direct sales: price × quantity (+ shipping).
+  The charge is **fixed on the order** when the buyer chooses Shipping: later rate changes don't change it.
 - **Order status:**
   - Pickup: Sold → Ready for pickup (seller) → Picked up (seller) → Completed (buyer confirms)
   - Shipping: Sold → Shipped (seller; courier name and tracking number optional) → Delivered (buyer confirms) → Completed
@@ -221,7 +225,9 @@ These follow the auction rules agreed earlier (reserve, increment, seller early-
 
 ## 7.3 My Garage
 
-Buyers save their vehicles (year, make, model, optional trim / engine). The app already shows "Filter by your garage" chips; choosing one applies the vehicle filter to every search and to the Home list, so a buyer can just type "bumper".
+Buyers save their vehicles (year, make, model, optional trim / engine) in **Profile → My Garage**. Choosing one in the search **filter
+sheet** ("My Garage" section) applies the vehicle filter to every parts search, so a buyer can just type "bumper". (The garage chips and
+"Add your vehicle" were removed from Home – listings are added only from Sell.)
 
 ## 7.4 How a listing is stored in the search index
 
@@ -240,6 +246,44 @@ Meilisearch (already in the backend) supports synonyms, typo tolerance, filterab
 | deliveryOptions, shippingFee, pickupCity | [Pickup, Shipping], 500, Hyderabad |
 
 Searching "2016 hilux bumper" then becomes a simple filter: `fitKeys = "toyota|hilux|2016" OR fitmentMode IN [universal, spec]`, plus the part type and radius.
+
+## 7.5 Home: Parts / Vehicles, Auction / Direct sale, counts
+
+Top of Home, applied to everything below **and** to every search (Home and Market share one set of filters):
+
+1. **What:** [ Parts ] [ Vehicles ] (default Parts).
+2. **How:** [ All ] [ Auction ] [ Direct sale ].
+
+Below them:
+
+- **Parts:** the part **categories** as tiles with the number of parts available, e.g. "🛑 Brakes (24)", "💡 Lighting (12)" – inside the
+  selected location's radius and the Auction / Direct sale choice; categories with 0 are hidden. A tile opens Market filtered by that
+  category, with its **part types** as chips with counts ("Brake pads (5)").
+- **Vehicles:** the total ("128 vehicles near you") and all available vehicles, with **make** chips and counts ("Toyota (12)") to
+  narrow down; Market then shows models as chips.
+
+The numbers are **Meilisearch facet counts** from the same query as the results (never counted in the app). Each document has
+`listingType` (Part / Vehicle), `_geo` (exact radius with `_geoRadius`), `makes`, `models` and `years`. A chosen category / part type /
+make keeps its siblings with their counts (a second facet query without that one filter); what the typed text means always counts.
+
+## 7.6 Search + filters together (the bug that was fixed)
+
+**What went wrong:** suggestions appeared, but the chosen filters weren't applied.
+
+- Home's search box turned the picked chips into plain text and opened Market, and Market **reset the chips** when it received the
+  text – so structured filters were lost and Home's choices (Parts / Vehicles, Auction / Direct sale) were never sent.
+- Market's category / model pills and counts came from an older endpoint (`/search/filters`) that **ignored the search text and every
+  filter**, so the counts didn't match the results.
+- Suggestions didn't know whether the buyer was looking for parts or vehicles.
+
+**Now:**
+
+- Home and Market share one filter state; **every** search request carries all active filters: Parts / Vehicles, Auction / Direct
+  sale, category / part type, location radius (or country), My Garage and the filter-sheet values, plus the text and chips.
+- Suggestions are limited to the current choice (Vehicles → vehicles only; Parts → parts, part numbers and "Parts for Toyota Hilux").
+- Picking a suggestion **adds** its chips to the existing ones (a chip of the same kind is replaced); filters stay.
+- Result counts and category counts come from the same query, so they update with the search.
+- Clearing the search (✕) keeps the filters; **Clear all** clears the search and the filters (Parts / Vehicles stays).
 
 # 8. Data model
 
@@ -297,10 +341,133 @@ Searching "2016 hilux bumper" then becomes a simple filter: `fitKeys = "toyota|h
 3. Which **countries' vehicle lists** should be seeded first (India, Nigeria, USA – all at once)?
 4. Who maintains the **master data** (makes, models, part types) – admin team or developers?
 5. Should **used grade A / B / C** be mandatory for used parts?
-6. ~~Is shipping handled by the platform?~~ Decided: the seller offers Pickup and / or Shipping (fee or free, within their country),
-   the buyer chooses after the sale; couriers are booked by the seller (tracking number optional). See §4.6.
+6. ~~Is shipping handled by the platform?~~ Decided: the seller offers Pickup and / or Shipping (within their country); the shipping
+   charge is calculated from size class and distance (§15); the buyer chooses after the sale; couriers are booked by the seller
+   (tracking number optional). See §4.6. **Still open:** the real rates per country (the seeded ones are placeholders).
 7. Should the **VIN** be mandatory for whole-vehicle auctions?
 8. Are **lots** (several parts in one auction, e.g. "set of 4 wheels") needed in phase 1?
+
+# 13. Accounts and roles – who can list
+
+Listings come only from **sellers**. Every account has exactly one role, kept in the Identity service and sent in the
+access token as `"role"`. The app chooses its screens from it and **every service checks it again** (the app is never trusted).
+
+| Role | How an account gets it | Can do |
+|---|---|---|
+| **Buyer** | Signing up in the app – email, Google or Apple. Always buyer, there is no role choice. | Browse and search, bid, Buy now, chat, orders as buyer, reviews, saved locations / addresses, My Garage |
+| **Seller** | Created by an admin (`POST /api/admin/sellers`), or a buyer upgraded by an admin (`make-seller`). No seller sign-up in the app ("Want to sell? Contact us" emails the team). | Everything a buyer can, plus: Sell (add part / vehicle, auction or direct sale), edit / publish / cancel / relist, photos, accept & close bids, Sales (mark ready / handed over / shipped), seller profile with reviews |
+| **Admin** | Seeded from secrets for local testing; no admin screens yet (API + Swagger) | Seller accounts (create, invite, update, disable / enable, list, upgrade a buyer), catalogue approvals, hiding reviews |
+
+**New seller:** the admin enters full name, email, phone, country and optionally business name and city. The seller
+gets an email with a one-time 6-digit code (72 hours) and sets a password in the app (Login → "Got a seller invite?
+Set your password"), then logs in normally with email + password + OTP. A disabled account can't log in and its
+refresh tokens stop working.
+
+**Role changes:** the token carries the role, and a token refresh re-reads it. The app also checks `/me` when it comes
+back to the foreground and refreshes the token at once if the role changed, so an upgraded buyer sees **Sell** without
+signing in again or reinstalling.
+
+**Checks on the backend** (403 with a message the app can show):
+
+| Action | Rule | Code |
+|---|---|---|
+| Create, save, publish, add a note, cancel, relist a listing; add / remove / reorder photos; older `/api/auctions` create, update, delete | role seller | `SELLER_ONLY` |
+| Accept a bid (close the auction) | role seller **and** the auction's own seller | `SELLER_ONLY` / `NOT_AUCTION_SELLER` |
+| Order fulfilment steps (ready for pickup, picked up, packed, shipped …) | the order's seller (buyer: delivered / completed) | `NOT_ORDER_PARTY` |
+| `/api/admin/*` | role admin | `ADMIN_ONLY` |
+| Buy now, bid | any signed-in account, never on your own listing | – |
+
+**Existing data:** when roles were introduced every existing account became a buyer, and accounts that already had
+listings became sellers (a one-time step: Identity asks the Auction service for the usernames that have listings).
+
+# 14. Direct sale
+
+On Sell the seller chooses **Auction** or **Direct sale (fixed price)**. Direct sale: price, quantity (default 1), the same photos,
+details and delivery options. Buyers see **"Buy now – ₹4,500"** instead of bidding; buying creates an order straight away (the same
+order / fulfilment flow as a won auction), the quantity goes down and the listing shows **Sold out** at 0. A seller can't buy their own
+item. Existing auctions stay auctions. Home's Auction / Direct sale filter applies to everything.
+
+# 15. Shipping charges
+
+- **Pickup** is always free (charge 0).
+- **Shipping** is calculated by the backend – the app never sends a price:
+  - **Size class** of the item: Small, Medium, Large, Freight, Vehicle. Each part type has a default (bulb Small, headlamp Medium,
+    bumper / door Large, engine / gearbox Freight) the seller can change; vehicles are Vehicle.
+  - **Distance** from the item location to the buyer's delivery location (a saved location or GPS): straight line (Haversine) × **1.3**
+    road factor, in km (miles in the USA).
+  - **Price** = base fee + distance × rate per km / mile for the size class, rounded to a whole number, kept between the size class's
+    minimum and maximum.
+  - Not available when the distance is above the size class's **maximum distance**, or the buyer is in another country – the app
+    says why.
+- **Rates** live in the `ShippingRates` table per country and currency (country, size class, base fee, rate per unit, min fee, max fee,
+  max distance). Admin API: `GET /api/shipping/rates`, `PUT /api/shipping/rates/{country}/{sizeClass}` (admin only).
+- **Seeded PLACEHOLDER values** (marked `isPlaceholder` until an admin replaces them – not real courier prices):
+
+| Country | Unit | Small | Medium | Large | Freight | Vehicle |
+|---|---|---|---|---|---|---|
+| India (₹) | km | 60 + 1/km (max 600, ≤ 2,500 km) | 120 + 2/km (max 1,500, ≤ 2,500) | 300 + 5/km (max 4,000, ≤ 2,000) | 800 + 12/km (max 15,000, ≤ 1,500) | 2,000 + 25/km (max 60,000, ≤ 1,500) |
+| USA ($) | mile | 8 + 0.15/mi (max 60, ≤ 3,000 mi) | 15 + 0.30 (max 150, ≤ 3,000) | 40 + 0.80 (max 400, ≤ 2,500) | 120 + 2.00 (max 1,500, ≤ 2,000) | 250 + 2.50 (max 3,000, ≤ 2,000) |
+| Nigeria (₦) | km | 1,500 + 30 (max 20,000, ≤ 1,200) | 3,000 + 60 (max 50,000, ≤ 1,200) | 8,000 + 150 (max 120,000, ≤ 1,000) | 25,000 + 400 (max 400,000, ≤ 800) | 60,000 + 800 (max 1,200,000, ≤ 800) |
+| Ireland (€) | km | 6 + 0.15 (max 40, ≤ 500) | 12 + 0.30 (max 80, ≤ 500) | 30 + 0.80 (max 200, ≤ 500) | 90 + 2.00 (max 600, ≤ 500) | 200 + 2.50 (max 1,200, ≤ 500) |
+
+  The minimum fee is the base fee in every row.
+
+- **Where it shows:** listing detail ("Shipping to Kukatpally: ~₹350 (estimate)" for the buyer's selected location; "Pickup: free");
+  Buy now / after winning the buyer chooses Pickup or Shipping (if both are offered) and sees the exact charge before confirming;
+  the order total = item price (+ winning bid for auctions) + shipping charge (0 for pickup); the order shows the breakdown to both
+  sides. Endpoints: `GET /api/shipping/estimate?listingId&lat&lon&country` (estimate) and `POST /api/orders/{id}/delivery-method`
+  with the address and `latitude` / `longitude` (calculates and **stores** the charge on the order).
+- Orders from before this change keep the seller's manual fee.
+
+## 15.1 USA: USPS Ground Advantage (official prices, no API keys needed)
+
+In the USA, parts that fit USPS are priced like **USPS Ground Advantage – Retail**, from the official price list
+(**USPS Notice 123, edition effective 4 Oct 2026**, stored as `AuctionService/Data/Seed/usps-ground-advantage-retail.csv`):
+
+- **Package:** weight (lb) and box size (in) on the listing – pre-filled for the part type (e.g. headlamp 8 lb, 24 × 16 × 14 in;
+  bulb 0.5 lb; unknown types from the size class), editable by the seller on Sell.
+- **Zone 1–8** from the straight-line distance between the item and the buyer's delivery location (≤ 50 mi zone 1, ≤ 150 zone 2,
+  ≤ 300 zone 3, ≤ 600 zone 4, ≤ 1,000 zone 5, ≤ 1,400 zone 6, ≤ 1,800 zone 7, farther zone 8). USPS uses a ZIP-to-ZIP zone chart,
+  so near a band edge the zone can differ by one.
+- **Weight step:** 4, 8, 12, 15.999 oz, then whole pounds up to 70 lb (rounded up). Over one cubic foot the **greater of actual and
+  dimensional weight** (L × W × H ÷ 166, rounded up) is charged.
+- **Oversized:** length + girth over 108 in (up to 130 in) → the oversized price for the zone.
+- **Non-standard fees:** longest side over 22 in +$4.50, over 30 in +$10.00; over 2 ft³ +$21.00.
+- The total is **rounded up to a whole dollar** (order amounts are whole numbers).
+- **Too big for USPS** (over 70 lb or 130 in length + girth), **Freight** and **Vehicle**: delivered anywhere in the US (up to
+  3,500 road miles) at **US industry-average estimates**, labelled **"estimated rate"** in the app and on the order until a carrier
+  is chosen (then an admin enters the carrier's rates and the label disappears):
+
+  | | Formula (road miles = straight line × 1.3) | Min / max | Check | Sources |
+  |---|---|---|---|---|
+  | Freight (LTL, 1 pallet ≤ ~500 lb) | $250 + $0.35/mi | $250 / $1,500 | 200 mi ≈ $320; 1,000 mi ≈ $600 | Warp LTL rate index ($532–582 national average, Aug–Sep 2026); ParcelPath and Red Stag 2026 guides |
+  | Vehicle (open carrier, running car) | $350 + $0.70/mi | $400 / $2,800 | 300 mi ≈ $560; 1,000 mi ≈ $1,050; New York → Los Angeles ≈ $2,580 | FreightWaves 2026; Ship A Car 2026 ($2,200–2,800 coast to coast); Kelley Blue Book (~$1/mi at 1,000 mi); AmeriFreight |
+
+  Real prices vary with weight / freight class, liftgate and residential delivery (freight), and enclosed transport, non-running
+  vehicles and season (vehicles: +$150–300 non-running, +30–60% enclosed).
+- Quotes and orders show the service and zone ("$12 · USPS Ground Advantage, zone 2 · 2 lb"); the order stores the charge,
+  service and zone.
+
+**Later, with USPS API keys:** Domestic Prices API (exact ZIP-to-ZIP prices), Addresses API (validate the buyer's address),
+Tracking API; labels / carrier pickup / adjustments need a USPS business account (CRID, MID, funded EPS account).
+When USPS publishes a new Notice 123, replace the CSV (same format) and restart AuctionService.
+
+# 16. Part requests (custom orders) – buyers ask, sellers are told
+
+1. **A buyer requests a part they can't find** (search found nothing → "Create a custom order": part, vehicle, part number,
+   budget, their area). **The sellers near the buyer are notified** – within the
+   buyer's radius (60 km / 60 mi by default) when the buyer's location is known, otherwise anywhere in the buyer's country, and
+   **never a seller in another country** (a seller whose location / country isn't known isn't told). Live in the app ("🔎 A buyer is looking for a part – Front bumper –
+   2016 Toyota Hilux (Hyderabad)") and by push when the app is closed. Sellers see all open requests in **Buyer requests**
+   (Profile, or tap the notification) – the same rule decides which requests they see: what is wanted, the vehicle, the buyer's **city** and budget – never the buyer's name or exact
+   location. "I have this – list it" opens Sell. Buyers aren't notified, and a seller isn't told about their own request.
+2. **A seller lists a matching part** (auction or direct sale) → **every buyer with a matching open request is notified** ("A part
+   matching your request is now available", live and by push; tap → the listing) and the request becomes *Matched*. A match is
+   the same part number, or the same part type that fits the buyer's vehicle, within the buyer's radius (60 km by default).
+
+How it flows: AuctionService publishes `PartRequestCreated` → NotificationService sends it to the SignalR group of connected sellers
+(joined from the token's role) and ChatService pushes it to every phone registered by a seller account; on publish,
+`CustomOrderMatcher` → `CustomOrderMatched` → the buyer (live + push). Endpoint for sellers: `GET /api/partrequests/open`.
 
 # Sources
 

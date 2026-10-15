@@ -1,4 +1,4 @@
-# Run and test BidMyParts locally (Windows, Git Bash)
+# Run and test ShopCarParts locally (Windows, Git Bash)
 
 This guide starts the backend (Docker + .NET services) and the React Native app on the Android emulator.
 All commands are for **Git Bash**. Folder paths:
@@ -41,7 +41,14 @@ These are stored only on your PC (user-secrets), never in the repo.
 | Auction | `ImageStorage:Provider` | `Local` (photos saved in `src/AuctionService/uploads`, served by the Gateway under `/images`) | `appsettings.json`; `GoogleCloudStorage` for the cloud bucket |
 | Auction | `ImageStorage:Gcs:Bucket` | empty | only with `GoogleCloudStorage`: `dotnet user-secrets set "ImageStorage:Gcs:Bucket" "<bucket-name>"` or env var `ImageStorage__Gcs__Bucket`. Optional `ImageStorage:Gcs:PublicBaseUrl` (CDN), `ImageStorage:Gcs:ObjectPrefix` (`listings`) |
 | Auction | Google credentials | – | **never in settings**: env var `GOOGLE_APPLICATION_CREDENTIALS=<path to service-account .json outside the repo>` (or the workload identity in Google Cloud). The account needs *Storage Object Admin* on the bucket; the bucket must allow public reads (or put a CDN in front) |
-| Auction | `Admin:Usernames` | `[]` | usernames that may approve makes/models sellers request (`/api/catalog/pending`, `/approve`), e.g. env var `Admin__Usernames__0=alice` |
+| Auction | `Admin:Usernames` | `[]` | usernames that may approve makes/models sellers request (`/api/catalog/pending`, `/approve`), e.g. env var `Admin__Usernames__0=alice`. Accounts with the **admin role** (section 5A) may do this too |
+| Identity | `Seed:AdminEmail` / `Seed:AdminPassword` | empty (no admin) | the local admin account, **user-secrets or env vars only** (section 5A); Docker: `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` in `bmwapi/.env` |
+| Identity | `Seed:SellerEmail` / `Seed:SellerPassword` | empty (no test seller) | one test seller (India, Hyderabad), same way (section 5A); Docker: `SEED_SELLER_EMAIL` / `SEED_SELLER_PASSWORD` |
+| Identity | `Otp:InviteExpiryHours` | `72` | how long a new seller's "set your password" code works (`appsettings.json`) |
+| Identity | `RoleBackfill:AuctionServiceUrl` | `http://localhost:7001` | used once to make existing users with listings sellers (section 5A); empty = skip |
+| Identity | `SellerApplications:NotifyEmails` | `[]` | extra addresses told about new seller applications (every **admin account** is always emailed); `appsettings.json` or env var `SellerApplications__NotifyEmails__0=ops@…` |
+| Identity | `RateLimits:AccountPerMinute` / `RateLimits:SellerApplicationsPerMinute` | `20` / `5` | requests per minute per IP address for `/api/account` and the seller form |
+| Auction | Shipping rates (table `ShippingRates`) | seeded **PLACEHOLDER** values per country and size class (`isPlaceholder = true`) | not a setting: an admin sets the real ones with `PUT /shipping/rates/{country}/{sizeClass}` (`src/AuctionService/Shipping.http`). Design doc §15 lists the placeholders |
 
 The Google key needs the **Geocoding API** enabled in Google Cloud Console (APIs & Services). Results are cached per
 ~1 km for `Geocoding:CacheHours` (24), so phones in the same area don't call Google again.
@@ -158,9 +165,9 @@ npm run android -- --active-arch-only --no-packager
 - First build: 5–15 minutes. Ready when you see `BUILD SUCCESSFUL` and the app opens on the emulator.
 - After the first build you only need Metro: change code → the app reloads; or press `r` in the Metro window.
   Rebuild (`npm run android ...`) only after adding a native package **or changing the app name**.
-- **Rebuild needed now:** the app was renamed to **BidMyParts** (launcher label and the registered component name
-  `BidMyParts` in `app.json` / `MainActivity.kt`). An old build with the new JavaScript shows
-  *"BidMyParts has not been registered"* – run `npm run android -- --active-arch-only --no-packager` once.
+- **Rebuild needed after a rename:** the app is called **ShopCarParts** (launcher label and the registered component name
+  `ShopCarParts` in `app.json` / `MainActivity.kt`). An old build with the new JavaScript shows
+  *"ShopCarParts has not been registered"* – run `npm run android -- --active-arch-only --no-packager` once.
   The Android package id stays `com.bidmywork.app` (Google sign-in keeps working, the app updates in place).
   New JS-only package `@microsoft/signalr` (live updates) needs `npm install` but no native rebuild.
 - **Rebuild needed again for "+ Sell":** the new native package `react-native-image-picker` (camera + gallery for
@@ -176,6 +183,48 @@ adb reverse tcp:6001 tcp:6001
 ```
 
 and in `src/config.ts` change `DEV_HOST` to `'localhost'` (do not commit that change).
+
+---
+
+## 3A. UI tests on the emulator (Maestro)
+
+One-time install (Git Bash): `mkdir -p ~/.maestro && cd ~/.maestro && curl -sSL -o maestro.zip https://github.com/mobile-dev-inc/maestro/releases/latest/download/maestro.zip && unzip -qo maestro.zip`
+
+Run the search UI test (backend, Metro and emulator running): `cd /c/Bmwmobile/bmwmobile && bash e2e/run-search-e2e.sh`
+
+It logs in as the e2e test buyer and seller (accounts from `bmwapi/.run/e2e.env`, created by the pre-demo check below), types
+`bumper` on Home, taps the suggestion and checks that only bumpers are shown, then a category suggestion, a category tile and
+Market. Flows: `e2e/search-filters.yaml`, `e2e/subflows/login.yaml`. Screenshots of a failed run: `~/.maestro/tests/<latest>`.
+
+Seller application form ("Want to sell?", signed out from Sign up → stored → admin API lists it → admins notified):
+`cd /c/Bmwmobile/bmwmobile && bash e2e/run-seller-application-e2e.sh` (needs the e2e admin – start the backend once with the pre-demo check below).
+
+If a UI test seems stuck: every adb call and each Maestro run has a time limit (15 min), so it ends with FAILED and a reason.
+"The emulator doesn't respond" → close the emulator and cold boot it (Device Manager → ⋮ → Cold Boot Now), then run again.
+Leftover Maestro processes from an interrupted run are stopped automatically (`e2e/stop-stale-maestro.sh`).
+
+---
+
+## 3B. Pre-demo check – run this before every demo
+
+```bash
+cd /c/Bmwmobile/bmwmobile
+bash e2e/pre-demo-check.sh
+```
+
+Needs Docker Desktop running and Maestro installed (3A); it starts the emulator (`Pixel_8`, or `AVD=<name>`) if none is running.
+It starts from clean and tests search the way a user uses it (10–15 minutes):
+
+1. stops the .NET services and Metro (data is kept)
+2. backend search tests: every filter alone and combined with text, category counts = results, index settings re-applied after a restart
+3. starts the backend with `./start-backend.sh` (fresh build) plus an e2e test seller; creates the e2e test buyer
+4. live API tests: app → Gateway → Search → Meilisearch with the demo data (each category tile's count = what tapping it returns, …)
+5. app unit tests (`npx jest`)
+6. Metro with `--reset-cache`, clears the app data, then the UI test (3A) as buyer **and** seller
+
+It ends with `=> READY for the demo` or `=> NOT READY` and the failed step. Logs: `bmwmobile/.e2e-results/`.
+The e2e accounts (`e2e.buyer@…`, `e2e.seller@…`) and their random passwords are in `bmwapi/.run/e2e.env` (git-ignored, never printed).
+The backend keeps running afterwards for the demo.
 
 ---
 
@@ -216,6 +265,61 @@ Codes expire after 10 minutes, allow 5 tries, and can be resent after 30 seconds
 
 ---
 
+## 5A. Accounts and roles: buyer, seller, admin
+
+Every account has one role, stored in Identity and put in the access token as `"role"`:
+
+| Role | How it is created | What the app shows | Backend rules |
+|---|---|---|---|
+| **buyer** | Sign up in the app (email, Google or Apple) – always a buyer, no role choice | Home, Market, listing, Place bid / Buy now, My Bids, Orders (purchases), Messages, Profile (locations, addresses, My Garage, "Want to sell? **Apply to sell**") | can bid, buy, chat, review |
+| **seller** | Only by an admin through the API below (or an upgraded buyer) | everything a buyer sees **plus** the Sell tab, My Listings, Orders → **Sales** (mark ready / handed over / shipped), seller profile with reviews, accept & close bids | only sellers create / edit / publish / cancel / relist listings, add photos and accept bids; only the order's seller moves fulfilment steps. Others get **403** `{ "message": "Only seller accounts can list…", "code": "SELLER_ONLY" }` |
+| **admin** | Seeded from user-secrets (below) | – (no admin screens yet: use Swagger or the `.http` file) | `/api/admin/*` on Identity; approves catalogue requests and hides reviews |
+
+**Existing data (one-time migration, automatic at the first start of the new Identity):** every existing account
+becomes a **buyer**; accounts that already have listings (asked once from the Auction service, retried while it
+starts) become **sellers**. Identity log: `Gave the buyer role to N existing accounts` and
+`Role backfill: N existing users with listings are now sellers`. It runs once (table `DataMigrations`).
+
+### Local admin and test seller (secrets – never commit them)
+
+Pick your own emails and passwords (passwords: 8+ characters with upper, lower, number and symbol):
+
+```bash
+cd /c/Bmwmobile/bmwapi/src/IdentityService
+dotnet user-secrets set "Seed:AdminEmail"     "admin@your-test-domain"
+dotnet user-secrets set "Seed:AdminPassword"  "<admin password>"
+dotnet user-secrets set "Seed:SellerEmail"    "seller@your-test-domain"
+dotnet user-secrets set "Seed:SellerPassword" "<seller password>"
+```
+
+Restart Identity: the accounts are created if missing (log: `Seeded admin account …` – never the password).
+Docker instead: put `SEED_ADMIN_EMAIL`, `SEED_ADMIN_PASSWORD`, `SEED_SELLER_EMAIL`, `SEED_SELLER_PASSWORD` in `bmwapi/.env`.
+Both log in with the normal Login screen + OTP code (section 5).
+
+### Admin API (Identity, `http://localhost:5001`)
+
+Swagger: <http://localhost:5001/swagger> (Development) → **Authorize** → paste an admin access token.
+Ready-made requests: `bmwapi/src/IdentityService/IdentityService.http` (section "Admin").
+
+| Request | What it does |
+|---|---|
+| `POST /api/admin/sellers` `{ fullName, email, phoneNumber, countryCode, businessName?, city? }` | create a seller; emails a one-time code to set the password (test mode: the code is in the response as `devInviteCode` and in the Identity log: `DEV OTP for … (SellerInvite)`) |
+| `POST /api/admin/sellers/{id}/invite` | send the code again (only before the seller has set a password; 30 s cooldown) |
+| `PATCH /api/admin/sellers/{id}` `{ "disabled": true }` (or name, phone, country, city, businessName) | update, disable (signs them out everywhere, login refused) or enable |
+| `GET /api/admin/sellers?search=ravi` | list / search sellers by name, email, username or business name |
+| `GET /api/admin/users?search=ravi` | all accounts with their role (to find a buyer's id) |
+| `GET /api/admin/seller-applications?status=New` | requests from the app's "Become a seller" form (name, email, phone, city, business type, what they sell, business name / address, tax number, message) |
+| `PATCH /api/admin/seller-applications/{id}` `{ "status": "InReview" \| "Rejected", "adminNote": "…" }` | review a request; a rejection note is shown to the applicant (Profile) and they can apply again |
+| `POST /api/admin/users/{id}/make-seller` | upgrade a buyer; the app picks up the new role at the next token refresh, or at once when it comes back to the foreground – no reinstall |
+
+Get an admin token: the `.http` file signs in like the app (email + password, then the OTP code).
+Anyone else gets **403** `{ "message": "Only admins can do this.", "code": "ADMIN_ONLY" }`; no token → 401.
+
+**New seller in the app:** Login → **Got a seller invite? Set your password** → email + code from the invite + new
+password → log in with email + password + OTP. Before that, logging in says "You haven't set a password yet…".
+
+---
+
 ## 6. Database (pgAdmin)
 
 | Setting | Value |
@@ -226,7 +330,7 @@ Codes expire after 10 minutes, allow 5 tries, and can be resent after 30 seconds
 | Password | the `POSTGRES_PASSWORD` value in `bmwapi/docker-compose.yml` |
 | Databases | `identity` (users, OTP codes, trusted devices, refresh tokens, `UserLocations` – no longer used by the app), `auctions` (`Auctions`, `Items` with location, `PartRequests` = custom orders, `Purchases`), `bids` |
 
-pgAdmin: right-click **Servers → Register → Server…**, name it e.g. `BidMyParts local`, fill the **Connection** tab as above.
+pgAdmin: right-click **Servers → Register → Server…**, name it e.g. `ShopCarParts local`, fill the **Connection** tab as above.
 
 New tables are created automatically when the Auction service starts (EF Core migrations `CustomOrders` and
 `ListingModel` – they only **add** tables and columns; existing data is untouched):
@@ -237,6 +341,14 @@ New tables are created automatically when the Auction service starts (EF Core mi
 - `Orders` (with delivery method, address, courier, tracking number) and `OrderEvents` (one row per tracking step,
   migration `OrderTracking`), `GarageVehicles` (My Garage)
 - identity database: `UserLocations` gets address columns (house/street, area, landmark, postal code – migration `UserAddresses`)
+- auctions database (migration `ShippingCharges`): new table `ShippingRates` (placeholder rows seeded at start); `Orders` gets
+  `ShippingSizeClass`, `ShippingDistance`, `ShippingDistanceUnit` (the charge itself stays in `ShippingFee`, now calculated and fixed when
+  the buyer chooses Shipping); addresses get `Latitude` / `Longitude`. Listings that ship but had no size class get the part type's default.
+- search index: documents get `_geo`, `listingType`, `makes`, `models`, `years` – the Search service re-fetches older documents once at start.
+- identity database: roles `buyer` / `seller` / `admin` in `AspNetRoles` / `AspNetUserRoles`; `AspNetUsers` gets
+  `BusinessName`, `CountryCode`, `City`, `InvitedAt`, `IsDisabled`; new table `DataMigrations` (migration `SellerAccounts`)
+- identity database (migration `SellerApplications`): new table `SellerApplications` – the "Become a seller" requests from the app
+  (contact and business details, status New / InReview / Approved / Rejected, admin note, the seller account made for it)
 
 On the first start the master data is seeded and **17 demo listings** of all three kinds (bumpers, tyres,
 batteries, a Hilux, …, with generated placeholder photos) are added in India, Nigeria, the USA and Ireland; older auctions are converted to the new model.
@@ -291,10 +403,10 @@ Next time start again with section 1.
 
 ## 9. Quick test checklist
 
-1. App opens on the dark **BidMyParts** splash screen; the launcher label is "BidMyParts".
+1. App opens on the dark **ShopCarParts** splash screen; the launcher label is "ShopCarParts".
 2. ENTER MARKETPLACE → Create an account → code from section 5 → Android asks for location → parts list.
    There is **no** location screen any more.
-3. Log out (Home → `👤 name · Log out`), log in again: with "Remember this device" ticked no code is asked.
+3. Log out (Home → `👤 name · Profile` → **Log out**), log in again: with "Remember this device" ticked no code is asked.
 4. Forgot password → code → new password → log in.
 
 ### Automatic location (mock positions on the emulator)
@@ -384,3 +496,114 @@ Use two accounts (A = seller, B = buyer). Rebuild the app first (section 3, imag
     Home/Work/Other). A chosen address is used for the 60 km / 60 mi search and as the default item location; GPS no
     longer changes it until you pick *Use my current location* again.
 36. Cancel a live listing without bids → Cancelled; once it has bids the Cancel link is gone (the API refuses with "A listing with bids can't be cancelled").
+
+### Roles – buyer, seller, admin (section 5A)
+
+Accounts: **B** = a new buyer you sign up in the app; **S** = the seeded test seller (`Seed:SellerEmail`);
+**A** = the seeded admin (`Seed:AdminEmail`). Your older test accounts with listings are now sellers, those without are buyers.
+
+37. Sign up → no role choice; under the form **Want to sell on ShopCarParts? Apply to sell** opens the **Become a seller** form
+    (contact: name, email, mobile, city; business: you are – individual / parts shop / dealer / garage / scrapyard / other, you want
+    to sell – parts / vehicles / both, business name, address, GSTIN/EIN/TIN/VAT, message) → **SEND TO OUR TEAM** → "Thanks, …!".
+    The admins get an email "New seller application: …" with all details (test mode without Gmail: in the Identity log,
+    `grep -A12 "New seller application" /c/Bmwmobile/bmwapi/.run/logs/identity.log`). Sending again with the same email →
+    "We already have your request from …".
+38. Log in as **B**: tabs Home / Market / My Bids / Orders (no **Sell**). Orders shows **MY PURCHASES** only, no "My listings".
+    Home → `👤 name · Profile`: badge **BUYER**, Saved locations & addresses, My Garage, **APPLY TO SELL** (form pre-filled with name, email, phone,
+    city), Log out. After sending: "✅ Request sent on …". Admin: `GET /api/admin/seller-applications?status=New`, then
+    `POST /api/admin/users/<userId>/make-seller` (or `POST /api/admin/sellers` for someone without an account) → the request
+    shows **Approved**; `PATCH …/seller-applications/<id>` `{ "status": "Rejected", "adminNote": "…" }` → Profile shows the note.
+39. **B** can bid on auctions and Buy now on direct sales as before. Through the API **B** can't list:
+    `curl -X POST -H "Authorization: Bearer <B token>" -H "Content-Type: application/json" -d '{"kind":"CommonPart"}' http://localhost:6001/listings` → 403 `SELLER_ONLY`.
+40. Log in as **S**: the **Sell** tab is there; Orders has **Purchases | Sales (n)** and "My listings →"; Profile shows
+    **SELLER**, Sell an item, My Listings, My seller profile & reviews. On S's own auction with bids: **ACCEPT … AND CLOSE**.
+41. Admin creates a seller (`.http` → Admin): `POST /api/admin/sellers` → the response has `devInviteCode` (test mode).
+    In the app: Login → **Got a seller invite? Set your password** → email + code + new password → log in (OTP) → Sell tab.
+42. Admin upgrades **B**: `GET /api/admin/users?search=<B's name>` → `POST /api/admin/users/<id>/make-seller`.
+    In the app (still signed in as B): send the app to the background and reopen it → the **Sell** tab appears.
+43. Admin disables that seller: `PATCH /api/admin/sellers/<id>` `{ "disabled": true }` → logging in says
+    "This account has been disabled. Please contact support."; `{ "disabled": false }` lets them in again.
+44. **B**'s token on `GET /api/admin/sellers` → 403 "Only admins can do this."
+
+### Home filters, direct sale and search (Step 2)
+
+Accounts: **B** (buyer) and **S** (seller with a few parts and one vehicle – e.g. the seeded test seller). No app rebuild needed (reload in Metro).
+After pulling the change, restart the backend once so the Search service re-indexes (log: `Search index populated with N items`).
+
+45. Home (as B): no "All vehicles" / "+ Add your vehicle" / garage chips. Under the search box: **[Parts] [Vehicles]** and
+    **[All] [Auction] [Direct sale]**. Parts shows **SHOP BY CATEGORY** tiles with counts, e.g. "🛑 Brakes (3)"; categories with 0 are hidden.
+46. Tap **Direct sale** → the tiles' counts and the list below show only direct sales; **Auction** → only auctions.
+47. Change the location (Home → 📍) to another city / country → the counts change (only listings within 60 km / 60 mi).
+48. Tap a tile (e.g. Body – Exterior) → it is highlighted, a **Body – Exterior ✕** chip appears in the search box and the list below
+    and "See All (n)" update at once (Home stays open). **See All →** opens Market with the same filter and the part types as chips with counts ("Bumper (2)").
+49. **Vehicles** → "N vehicles near you", make chips with counts ("Toyota (2)"); tap one → only that make. Market shows models as chips.
+50. **The search bug:** on **Home** (and on Market) choose **Direct sale** and a category, type `front bum` → pick a suggestion → a chip
+    appears and the list updates at once, keeping Direct sale + the category (check the count). Pick a second suggestion (e.g. a part
+    number) → its chip is **added**. Type `brake` → **CATEGORIES: Brakes** ("All parts in Brakes") → a Brakes chip, like the tile.
+    Home and Market share one search: what you pick on one is on the other. With **Vehicles** chosen, typing `hilux` suggests only
+    vehicles; with **Parts**, "Parts for Toyota Hilux …". The keyboard's search key searches the typed words with all chips.
+51. ✕ in the search box clears the text and every chip in it (also the category chip) but keeps Direct sale / Auction;
+    **Clear all** (Home and Market) clears everything.
+52. My Garage: Profile → My Garage to add a vehicle; Market → ⚙ filters → **My Garage** section → pick it → results for that vehicle.
+53. Direct sale (as S): Sell → **Direct sale** → price, quantity (default 1). As B the card says **Buy now – ₹4,500**; buy 1 → the order
+    appears in Orders and the units left go down; at 0 the listing shows **SOLD OUT**. S can't buy their own item.
+
+### Shipping charges (Step 3)
+
+Use B and S in the same country (e.g. India). The rates are the seeded **placeholders** (design doc §15).
+
+54. Sell (as S): Shipping ticked → **no fee field**; "No fee to enter …" and the **Size class** chips with the part type's default
+    pre-selected (bumper → Large, headlamp → Medium, bulb → Small); vehicles show "Vehicle".
+55. Listing (as B, location e.g. Kukatpally): "📍 Pickup in Hyderabad (free) · 🚚 Shipping" and
+    "🚚 Shipping to Kukatpally: ~₹… (estimate)". Move the location to another country (e.g. `adb emu geo fix 3.3792 6.5244`, Lagos) →
+    "Shipping not available to Lagos: Ships within India only".
+56. Buy now → the confirmation says "Pickup: free. Shipping: ~₹… – the exact charge is shown when you choose it."
+57. Orders → **Ship it to me** → **Next: shipping address** → the sheet shows **DELIVERY LOCATION** (your saved locations and
+    "📡 Use my current location") and "Shipping charge: ₹… · about N km"; pick another location → the charge changes; fill in the
+    address → **Ship here · ₹…**. The order shows "Part price ₹… + shipping ₹… (N km) = ₹…" on both phones.
+58. Choose **I will pick it up · free** on another order → "… + pickup free = ₹…".
+59. Too far: as S list a part with size class **Freight** in Hyderabad; as B choose a delivery location in Delhi (add it in My locations)
+    → "Too far to ship: about 1,6xx km (up to 1,500 km for freight items)" and the button stays disabled.
+60. Admin: `GET /shipping/rates?country=IN` (all `isPlaceholder: true`); `PUT /shipping/rates/IN/Small` with new values
+    (`src/AuctionService/Shipping.http`) → new estimates change; the order from item 57 keeps its charge. A non-admin gets 403 `ADMIN_ONLY`.
+
+### Part requests: buyers ask, sellers are told (custom orders)
+
+Accounts: **B** (buyer) and **S** (seller), on two emulators/phones (or switch accounts). Push (app closed) needs Firebase
+(`google-services.json` + ChatService `Push:Provider = Firebase`); without it everything below still works live while the app is open.
+
+61. As B search for something nobody sells (e.g. `zzz bumper`) → **Create custom order** → fill part / vehicle → submit.
+62. S (app open) gets a banner **"🔎 A buyer is looking for a part – Front bumper – 2016 Toyota Hilux (Hyderabad)"**; tapping it opens
+    **Buyer requests** (also in Profile → Buyer requests). The list shows the part, vehicle, the buyer's city and budget – never their name.
+    With push set up, S also gets it as a phone notification when the app is closed; tapping opens Buyer requests.
+63. B (or any buyer) never gets this banner; a seller who makes a request doesn't get their own.
+    **Only sellers near the buyer are told:** within the buyer's radius (60 km / 60 mi) when the buyer's location is on, otherwise
+    anywhere in the buyer's country – **never in another country**. Try it: move S to Delhi (`adb emu geo fix 77.2090 28.6139`)
+    → S no longer gets B's Hyderabad requests (and doesn't see them in Buyer requests); move S to Lagos → never India's requests.
+    The seller's location is the app's current location (re-sent when it moves ~10 km) – for the live banner, the one in their
+    sign-in token (updated at the next token refresh, at most an hour).
+64. S taps **I have this – list it** → Sell → lists a matching part (auction or direct sale) within the buyer's radius → publish.
+65. B gets **"A part matching your request is now available"** (live, plus a push when the app is closed; tap → the listing);
+    B's Orders → MY CUSTOM ORDERS shows **MATCHED**. Every buyer with a matching open request is told.
+66. API: `GET http://localhost:6001/partrequests/open` with S's token → the open requests; with B's token → 403 `SELLER_ONLY`.
+
+### US shipping: USPS Ground Advantage (from 14 Oct 2026 all testing is US-first)
+
+Use US accounts and locations: seller in **New York** (`adb emu geo fix -74.0060 40.7128`), buyer in **Philadelphia**
+(`adb emu geo fix -75.1652 39.9526`, ~81 mi → zone 2) or **Los Angeles** (`adb emu geo fix -118.2437 34.0522`, zone 8).
+Prices come from the official USPS Notice 123 list (effective 4 Oct 2026) – no USPS keys needed. Restart the backend once
+(migration `UspsShipping` adds the package fields).
+
+67. Sell (US seller, a part, Shipping ticked): **PACKAGE (FOR THE USPS PRICE)** with weight (lb) and box L × W × H (in) pre-filled
+    for the part type (e.g. Dash cam 2 lb, 10 × 8 × 6). Change them → saved with the draft. India / Nigeria / Ireland listings don't show it.
+68. Listing as the Philadelphia buyer: "🚚 Shipping to Philadelphia: ~$12 (USPS Ground Advantage, estimate)" for a 2 lb dash cam.
+    As the Los Angeles buyer the same item is zone 8 (~$20).
+69. Buy now → Orders → Ship it to me → the sheet shows "Shipping charge: $12 · USPS Ground Advantage, zone 2 · 2 lb" → Ship here.
+    The order: "Part price $120 + shipping $12 (USPS Ground Advantage, zone 2) = $132" for buyer and seller.
+70. Heavy / big: set the weight to 90 lb (or list a bumper – its default box is over 130 in) → "~$287 (Freight, estimated rate)"
+    New York → Philadelphia. Freight and vehicles are delivered anywhere in the US at US industry-average estimates
+    (freight $250 + $0.35/road mi, vehicles $350 + $0.70/road mi), labelled **estimated rate** on the listing, at checkout and on the
+    order. When a carrier is chosen: `PUT /shipping/rates/US/Freight` (and `/Vehicle`) with the carrier's numbers and a `source`
+    → the label disappears (existing orders keep their charge).
+71. A buyer outside the US → "Shipping not available: Ships within USA only".
+

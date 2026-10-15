@@ -25,6 +25,9 @@ public interface IOtpService
     Task VerifyAsync(ApplicationUser user, OtpPurpose purpose, string code, CancellationToken ct = default);
 
     int ResendCooldownSeconds { get; }
+
+    /// <summary>Of the given purposes, the one with the newest unused, unexpired code (null = none).</summary>
+    Task<OtpPurpose?> NewestActiveAsync(ApplicationUser user, OtpPurpose[] purposes, CancellationToken ct = default);
 }
 
 public class OtpService(ApplicationDbContext db, IOtpSender sender, IOptions<OtpOptions> options) : IOtpService
@@ -62,7 +65,7 @@ public class OtpService(ApplicationDbContext db, IOtpSender sender, IOptions<Otp
             Purpose = purpose,
             CodeHash = Hash(user.Id, code),
             CreatedAt = now,
-            ExpiresAt = now.AddMinutes(_opt.ExpiryMinutes),
+            ExpiresAt = purpose == OtpPurpose.SellerInvite ? now.AddHours(_opt.InviteExpiryHours) : now.AddMinutes(_opt.ExpiryMinutes),
         });
         await db.SaveChangesAsync(ct);
 
@@ -97,6 +100,16 @@ public class OtpService(ApplicationDbContext db, IOtpSender sender, IOptions<Otp
 
         otp.UsedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
+    }
+
+    public async Task<OtpPurpose?> NewestActiveAsync(ApplicationUser user, OtpPurpose[] purposes, CancellationToken ct = default)
+    {
+        var now = DateTime.UtcNow;
+        var newest = await db.OtpCodes
+            .Where(o => o.UserId == user.Id && purposes.Contains(o.Purpose) && o.UsedAt == null && o.ExpiresAt > now)
+            .OrderByDescending(o => o.CreatedAt)
+            .FirstOrDefaultAsync(ct);
+        return newest?.Purpose;
     }
 
     private static string GenerateCode(int length)

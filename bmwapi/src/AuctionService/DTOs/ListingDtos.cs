@@ -100,6 +100,11 @@ public class SaveListingDto
     public List<string>? DeliveryOptions { get; set; }
     /// <summary>Shipping: Small, Medium, Large, Freight.</summary>
     public string? SizeClass { get; set; }
+    /// <summary>Shipping (US): the package weight in pounds and box size in inches (defaults from the part type).</summary>
+    public decimal? WeightLb { get; set; }
+    public decimal? LengthIn { get; set; }
+    public decimal? WidthIn { get; set; }
+    public decimal? HeightIn { get; set; }
     /// <summary>Shipping: the fee in the listing currency; 0 = free shipping.</summary>
     public int? ShippingFee { get; set; }
     /// <summary>true = free shipping (fee 0); false = not free any more (the fee has to be entered again).</summary>

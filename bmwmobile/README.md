@@ -1,5 +1,5 @@
 # bmwmobile
-bidmywork mobile code – BidMyParts app (React Native CLI 0.87, TypeScript).
+ShopCarParts mobile app (React Native CLI 0.87, TypeScript).
 
 ## Requirements
 - Node 22.11+

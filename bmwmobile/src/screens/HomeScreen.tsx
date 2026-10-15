@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl, Alert } from 'react-native';
+import React from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CompositeScreenProps } from '@react-navigation/native';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
@@ -8,15 +8,18 @@ import { MainTabParamList, RootStackParamList } from '../types/navigation';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
 import { AuctionCard } from '../components/AuctionCard';
 import { Badge } from '../components/Badge';
+import { RoleBadge } from '../components/RoleBadge';
 import { useAuth } from '../auth/AuthContext';
 import { useLocations } from '../location/LocationContext';
 import { FEATURES } from '../config';
 import { LocationBanner } from '../components/LocationBanner';
 import { NoPartsFound } from '../components/NoPartsFound';
-import { SearchBox, rememberSearch, type SearchState } from '../components/SearchBox';
-import { garageLabel, useGarage } from '../location/GarageContext';
+import { BrowseFilters } from '../components/BrowseFilters';
+import { CategoryTiles } from '../components/CategoryTiles';
 import { useListingSearch } from '../hooks/useListingSearch';
-import { locationText } from '../utils/geo';
+import { categoryChip, useBrowse } from '../search/BrowseContext';
+import { BrowseSearchBox } from '../search/BrowseSearchBox';
+import { REGIONS, formatRadius, locationText } from '../utils/geo';
 import { useChat } from '../chat/ChatContext';
 
 type Props = CompositeScreenProps<
@@ -25,31 +28,28 @@ type Props = CompositeScreenProps<
 >;
 
 export const HomeScreen: React.FC<Props> = ({ navigation }) => {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const { unread } = useChat();
-  // Parts within 60 km / 60 mi of the location (GPS or a chosen address), or country-wide while location is off.
-  const { country, location, locationOff } = useLocations();
-  // My Garage: choosing a vehicle filters this list (and every search) by it.
-  const { vehicles, selected: garage, select: selectGarage } = useGarage();
-  const [search, setSearch] = useState<SearchState>({ text: '', chips: [] });
-  const input = useMemo(() => ({ text: '', chips: [], filters: { sort: 'endingSoon' as const } }), []);
-  const { results: auctions, loading, reload: loadData } = useListingSearch(input);
+  // Listings within 60 km / 60 mi of the location (GPS or a chosen address), or country-wide while location is off.
+  const { country, location, locationOff, near } = useLocations();
+  // Parts / Vehicles and All / Auction / Direct sale: shared with Market, so they apply to every search too.
+  const browse = useBrowse();
+  const { itemType, saleType } = browse;
+  const parts = itemType === 'Part';
+  const make = parts ? undefined : browse.filters.make;
 
-  // One search box: searching opens the Market with the results.
-  const submitSearch = (next: SearchState) => {
-    rememberSearch(next);
-    const text = [...next.chips.map(c => c.label), next.text].filter(Boolean).join(' ');
-    if (text) navigation.navigate('Marketplace', { searchTerm: text });
-    setSearch({ text: '', chips: [] });
-  };
+  // The SAME search as Market (search box chips + every filter), so the counts and the list match Market's.
+  const { results: auctions, facets, total, loading, reload: loadData } = useListingSearch(browse.input);
+  const makeFacets = facets.make ?? [];
 
-  const handleAccountPress = () => {
-    if (!user) return;
-    Alert.alert('Log out', `Signed in as ${user.email}`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Log out', style: 'destructive', onPress: () => logout() },
-    ]);
-  };
+  // A category tile works like a category suggestion: a chip in the search box, the list below updates at once.
+  const openCategory = (category: string) => browse.applyChips([categoryChip(category)]);
+  const setMake = (value?: string) => browse.setFilters(f => ({ ...f, make: value, model: undefined }));
+
+  // Market shows the same results with more filters (part types, models, the filter sheet).
+  const seeAll = () => navigation.navigate('Marketplace');
+
+  const where = near && location ? 'near you' : `in ${REGIONS[country].name}`;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -57,24 +57,35 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
       <View style={styles.topHeader}>
         <View style={styles.headerLeft}>
           <Text style={styles.brandTitle}>SHOPCARPARTS ⚡</Text>
-          {/* Signed-in user (tap to log out) */}
-          <TouchableOpacity onPress={handleAccountPress} hitSlop={8} activeOpacity={0.7}>
-            <Text style={styles.userLine} numberOfLines={1}>
-              👤 {user?.fullName} · <Text style={styles.linkBold}>Log out</Text>
-            </Text>
-          </TouchableOpacity>
-          {/* The user's location (GPS or a chosen address): just the place and country – tap to change it. */}
+          {/* Signed-in user: tap for Profile (locations, garage, selling, log out) */}
           <TouchableOpacity
-            onPress={() => navigation.navigate('Locations')}
+            onPress={() => navigation.navigate('Profile')}
             hitSlop={8}
             activeOpacity={0.7}
             accessibilityRole="button"
-            accessibilityLabel="Change location"
+            accessibilityLabel="Profile"
           >
-            <Text style={styles.locationLine} numberOfLines={1}>
-              {locationText(location) ?? (locationOff ? 'Location off – set your location' : 'Finding your location…')}
+            <Text style={styles.userLine} numberOfLines={1}>
+              👤 {user?.fullName} · <Text style={styles.linkBold}>Profile</Text>
             </Text>
           </TouchableOpacity>
+          {/* [SELLER] / [BUYER] then the location (GPS or a chosen address) – tap the location to change it.
+              A long location is shortened with "…", never the badge. */}
+          <View style={styles.locationRow}>
+            <RoleBadge role={user?.role} />
+            <TouchableOpacity
+              style={styles.locationTouch}
+              onPress={() => navigation.navigate('Locations')}
+              hitSlop={8}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="Change location"
+            >
+              <Text style={styles.locationLine} numberOfLines={1} ellipsizeMode="tail">
+                📍 {locationText(location) ?? (locationOff ? 'Location off – set your location' : 'Finding your location…')}
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
         <View style={styles.headerRight}>
           {/* Messages (buyer–seller chat) with the unread count. */}
@@ -102,15 +113,23 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
         </View>
       </View>
 
-      <ScrollView 
+      {/* "handled": a tap on a search suggestion must reach it. Without it the first tap only closes the keyboard and
+          the suggestion is lost (the Home search bug). */}
+      <ScrollView
         contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
         refreshControl={<RefreshControl refreshing={loading} onRefresh={loadData} tintColor={COLORS.primaryGlow} />}
       >
         {/* Location denied / GPS off */}
         <LocationBanner />
 
         <View style={styles.searchWrap}>
-          <SearchBox value={search} onChange={setSearch} onSubmit={submitSearch} country={country} />
+          <BrowseSearchBox />
+        </View>
+
+        {/* Step 1 – what: Parts / Vehicles. Step 2 – how: All / Auction / Direct sale. */}
+        <View style={styles.browseWrap}>
+          <BrowseFilters />
         </View>
 
         {/* Planned Containers Schedule Banner (hidden while FEATURES.containers is off) */}
@@ -132,36 +151,51 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
           </TouchableOpacity>
         ) : null}
 
-        {/* Garage Filter Shortcuts */}
-        <View style={styles.garageBar}>
-          <Text style={styles.sectionHeader}>FILTER BY YOUR GARAGE</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}>
-            <TouchableOpacity style={[styles.filterChip, !garage && styles.filterChipActive]} onPress={() => selectGarage(null)}>
-              <Text style={[styles.filterText, !garage && styles.filterTextActive]}>All vehicles</Text>
-            </TouchableOpacity>
-            {vehicles.map(v => (
-              <TouchableOpacity
-                key={v.id}
-                style={[styles.filterChip, garage?.id === v.id && styles.filterChipActive]}
-                onPress={() => selectGarage(garage?.id === v.id ? null : v.id!)}
-              >
-                <Text style={[styles.filterText, garage?.id === v.id && styles.filterTextActive]}>🚗 {garageLabel(v)}</Text>
-              </TouchableOpacity>
-            ))}
-            <TouchableOpacity style={styles.filterChip} onPress={() => navigation.navigate('Garage')}>
-              <Text style={styles.filterText}>{vehicles.length ? '⚙ My Garage' : '+ Add your vehicle'}</Text>
-            </TouchableOpacity>
-          </ScrollView>
-        </View>
+        {parts ? (
+          <>
+            {/* Part categories with the number of parts available (location radius + Auction / Direct sale). */}
+            <Text style={styles.sectionHeader}>SHOP BY CATEGORY</Text>
+            <View style={styles.tiles}>
+              <CategoryTiles categories={facets.category ?? []} selected={browse.filters.category} onPress={openCategory} />
+            </View>
+          </>
+        ) : (
+          <>
+            {/* All available vehicles: the total and make chips with counts. */}
+            <Text style={styles.vehicleTotal}>
+              {loading && !total ? 'Finding vehicles…' : `${total} ${total === 1 ? 'vehicle' : 'vehicles'} ${where}`}
+              {near && location ? <Text style={styles.vehicleWithin}> · within {formatRadius(location.radiusKm, country)}</Text> : null}
+            </Text>
+            {makeFacets.length > 0 ? (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll} keyboardShouldPersistTaps="handled">
+                <TouchableOpacity style={[styles.filterChip, !make && styles.filterChipActive]} onPress={() => setMake(undefined)}
+                  accessibilityState={{ selected: !make }}>
+                  <Text style={[styles.filterText, !make && styles.filterTextActive]}>All makes</Text>
+                </TouchableOpacity>
+                {makeFacets.map(m => (
+                  <TouchableOpacity key={m.value} style={[styles.filterChip, make === m.value && styles.filterChipActive]}
+                    onPress={() => setMake(make === m.value ? undefined : m.value)} accessibilityState={{ selected: make === m.value }}>
+                    <Text style={[styles.filterText, make === m.value && styles.filterTextActive]}>{m.value} ({m.count})</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            ) : null}
+          </>
+        )}
 
-        {/* Live Auctions Ticker Section */}
+        {/* Live listings for the filters above */}
         <View style={styles.sectionRow}>
-          <Text style={styles.sectionTitle}>
-            {garage ? `🔥 FOR YOUR ${garage.year} ${garage.model.toUpperCase()}` : '🔥 LIVE LISTINGS'}
-          </Text>
-          <TouchableOpacity onPress={() => navigation.navigate('Marketplace', {})}>
-            <Text style={styles.seeAll}>See All ({auctions.length}) →</Text>
-          </TouchableOpacity>
+          <Text style={styles.sectionTitle}>{parts ? '🔥 LIVE LISTINGS' : make ? `🚗 ${make.toUpperCase()}` : '🚗 ALL VEHICLES'}</Text>
+          <View style={styles.sectionActions}>
+            {browse.hasAnything ? (
+              <TouchableOpacity onPress={browse.clearAll} accessibilityLabel="Clear all" hitSlop={8}>
+                <Text style={styles.clearAll}>Clear all</Text>
+              </TouchableOpacity>
+            ) : null}
+            <TouchableOpacity onPress={seeAll}>
+              <Text style={styles.seeAll}>See All ({total}) →</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {auctions.map(item => (
@@ -224,11 +258,19 @@ const styles = StyleSheet.create({
     color: COLORS.primaryGlow,
     fontWeight: '700',
   },
+  locationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  locationTouch: {
+    flex: 1,
+    minWidth: 0,
+  },
   locationLine: {
     color: COLORS.textSecondary,
     fontSize: 12,
     fontWeight: '600',
-    marginTop: 4,
   },
   userLine: {
     color: COLORS.text,
@@ -286,6 +328,23 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.md,
     zIndex: 10,
   },
+  browseWrap: {
+    marginBottom: SPACING.md,
+  },
+  tiles: {
+    marginBottom: SPACING.md,
+  },
+  vehicleTotal: {
+    color: COLORS.text,
+    fontSize: 16,
+    fontWeight: '800',
+    marginBottom: SPACING.sm,
+  },
+  vehicleWithin: {
+    color: COLORS.textMuted,
+    fontSize: 12,
+    fontWeight: '600',
+  },
   scroll: {
     padding: SPACING.md,
     paddingBottom: SPACING.xxl,
@@ -330,9 +389,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 13,
   },
-  garageBar: {
-    marginBottom: SPACING.md,
-  },
   sectionHeader: {
     color: COLORS.textMuted,
     fontSize: 11,
@@ -342,6 +398,7 @@ const styles = StyleSheet.create({
   },
   filterScroll: {
     flexDirection: 'row',
+    marginBottom: SPACING.md,
   },
   filterChip: {
     backgroundColor: COLORS.card,
@@ -377,6 +434,16 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
     letterSpacing: 0.5,
+  },
+  sectionActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.md,
+  },
+  clearAll: {
+    color: COLORS.danger,
+    fontSize: 12,
+    fontWeight: '700',
   },
   seeAll: {
     color: COLORS.primaryGlow,

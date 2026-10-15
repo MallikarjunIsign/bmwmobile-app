@@ -2,6 +2,7 @@ using System.Security.Claims;
 using BidService.Data;
 using BidService.DTOs;
 using BidService.Services;
+using Contracts;
 
 namespace BidService.Endpoints;
 
@@ -48,6 +49,9 @@ public static class BidEndpoints
 
     private static async Task<IResult> AcceptBid(AcceptBidDto dto, ClaimsPrincipal user, BiddingService biddingService)
     {
+        // Accepting and closing bids is for seller accounts (BiddingService also checks it's their own auction).
+        if (!AppRoles.IsSeller(user))
+            return Results.Json(new { message = AppRoles.SellerOnlyMessage, code = AppRoles.SellerOnlyCode }, statusCode: StatusCodes.Status403Forbidden);
         if (string.IsNullOrWhiteSpace(dto.AuctionId) || string.IsNullOrWhiteSpace(dto.BidId))
             return Results.BadRequest("auctionId and bidId are required");
 
@@ -100,7 +104,7 @@ public static class BidEndpoints
         BidOutcome.Ok ok => Results.Ok(ok.Bid),
         BidOutcome.NotFound notFound => Results.NotFound(notFound.Message),
         BidOutcome.Invalid invalid => Results.BadRequest(invalid.Message),
-        BidOutcome.Forbidden => Results.Forbid(),
+        BidOutcome.Forbidden => Results.Json(new { message = "Only the seller of this auction can accept bids", code = "NOT_AUCTION_SELLER" }, statusCode: StatusCodes.Status403Forbidden),
         BidOutcome.Conflict conflict => Results.Conflict(new { message = conflict.Message, highBid = conflict.HighBid }),
         _ => Results.StatusCode(StatusCodes.Status500InternalServerError)
     };

@@ -6,7 +6,14 @@ export type RootStackParamList = {
   SignUp: undefined;
   Otp: { challengeId: string; maskedEmail: string; resendAfterSeconds: number; devOtp?: string | null; rememberMe: boolean };
   ForgotPassword: { email?: string } | undefined;
-  ResetPassword: { email: string; resendAfterSeconds: number; devOtp?: string | null };
+  /** invite: a new seller sets their first password with the code from the invite email (email can be typed). */
+  ResetPassword: { email: string; resendAfterSeconds: number; devOtp?: string | null; invite?: boolean };
+  /** The signed-in user: role, saved locations and addresses, My Garage; sellers also My Listings and their reviews. */
+  Profile: undefined;
+  /** "Want to sell?": the seller application form (signed in from Profile, or signed out from Sign up with the email typed). */
+  SellerApplication: { email?: string } | undefined;
+  /** Sellers: open part requests from buyers ("A buyer is looking for …"). */
+  BuyerRequests: undefined;
   ProfilePreferences: undefined;
 
   MainTabs: { screen?: string } | undefined;

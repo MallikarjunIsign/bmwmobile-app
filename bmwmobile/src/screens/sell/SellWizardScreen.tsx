@@ -15,7 +15,7 @@ import { REGIONS, distanceUnit } from '../../utils/geo';
 import { label } from '../../utils/time';
 import type { DeliveryOption, FieldErrors, Fitment, Listing, PartType, SaveListing, VehicleDetails } from '../../types/listing';
 import { CheckboxRow } from '../../components/CheckboxRow';
-import { shippingFeeText } from '../../utils/delivery';
+import { PackageFields } from './PackageFields';
 import { ChipGroup, Field, FieldError, MakeModelPicker, PartTypePicker, PickerField, SectionTitle, styles as ui } from './sellUi';
 import { PhotosStep, PHOTO_LIMITS } from './PhotosStep';
 import { EndTimePicker, endProblem, formatEnd } from './EndTimePicker';
@@ -99,6 +99,10 @@ function formFrom(l: Listing): SaveListing {
     countryCode: l.countryCode ?? undefined,
     deliveryOptions: l.deliveryOptions ?? ['Pickup'],
     sizeClass: l.sizeClass ?? null,
+    weightLb: l.weightLb ?? null,
+    lengthIn: l.lengthIn ?? null,
+    widthIn: l.widthIn ?? null,
+    heightIn: l.heightIn ?? null,
     shippingFee: l.shippingFee ?? undefined,
     pickupAddress: l.pickupAddress ?? undefined,
     partPrice: l.startingPrice > 1 ? l.startingPrice : undefined,
@@ -587,6 +591,9 @@ export const SellWizardScreen: React.FC<Props> = ({ route, navigation }) => {
     </View>
   );
 
+  // The part type's default size class until the seller picks another one; vehicles are always Vehicle.
+  const shippingSize = kind === 'Vehicle' ? 'Vehicle' : form.sizeClass ?? partType?.defaultSizeClass ?? 'Medium';
+
   const renderLocation = () => {
     const options = form.deliveryOptions ?? [];
     const pickup = options.includes('Pickup');
@@ -637,34 +644,46 @@ export const SellWizardScreen: React.FC<Props> = ({ route, navigation }) => {
         ) : null}
         {shipping ? (
           <>
-            <View style={[styles.rowBetween, styles.switchRow]}>
-              <Text style={styles.switchLabel}>Free shipping</Text>
-              <Switch value={form.shippingFee === 0} onValueChange={v => update({ freeShipping: v, shippingFee: v ? 0 : undefined })}
-                trackColor={{ false: COLORS.border, true: COLORS.primary }} accessibilityLabel="Free shipping" />
-            </View>
-            {form.shippingFee !== 0 ? (
-              <Field label={`Shipping fee (${REGIONS[country]?.currencyCode ?? ''})`} keyboardType="number-pad" suffix={currency}
-                value={form.shippingFee ? String(form.shippingFee) : ''} placeholder="e.g. 500"
-                onChangeText={v => update({ freeShipping: false, shippingFee: parseInt(v.replace(/[^0-9]/g, ''), 10) || undefined })} />
-            ) : null}
-            <FieldError messages={errorsFor('shippingFee')} />
             <View style={ui.field}>
               <Text style={ui.label}>SHIPS WITHIN</Text>
               <Text style={styles.locationText}>{REGIONS[country]?.name ?? country}</Text>
-              <Text style={ui.hint}>Shipping is within your country only for now.</Text>
+              <Text style={ui.hint}>
+                No fee to enter: each buyer's shipping charge is worked out from the size class and the distance to them.
+              </Text>
             </View>
-            <ChipGroup
-              label="Size class"
-              options={[
-                { value: 'Small', hint: 'Small – fits in a parcel' },
-                { value: 'Medium', hint: 'Medium – a large box' },
-                { value: 'Large', hint: 'Large – bumper, door, bonnet' },
-                { value: 'Freight', hint: 'Freight – engine, gearbox' },
-              ]}
-              value={form.sizeClass ?? null}
-              onChange={v => update({ sizeClass: v })}
-            />
+            {kind === 'Vehicle' ? (
+              <View style={ui.field}>
+                <Text style={ui.label}>SIZE CLASS</Text>
+                <Text style={styles.locationText}>Vehicle</Text>
+              </View>
+            ) : (
+              <ChipGroup
+                label="Size class"
+                options={[
+                  { value: 'Small', hint: 'Small – fits in a parcel (bulb, filter)' },
+                  { value: 'Medium', hint: 'Medium – a large box (headlamp)' },
+                  { value: 'Large', hint: 'Large – bumper, door, bonnet' },
+                  { value: 'Freight', hint: 'Freight – engine, gearbox' },
+                ]}
+                value={shippingSize}
+                onChange={v => update({ sizeClass: v })}
+              />
+            )}
             <FieldError messages={errorsFor('sizeClass')} />
+            {/* US: the package for the USPS price (pre-filled for the part type). */}
+            {country === 'US' && kind !== 'Vehicle' ? (
+              <>
+                <PackageFields
+                  value={{ weightLb: form.weightLb, lengthIn: form.lengthIn, widthIn: form.widthIn, heightIn: form.heightIn }}
+                  defaults={{
+                    weightLb: partType?.defaultWeightLb, lengthIn: partType?.defaultLengthIn,
+                    widthIn: partType?.defaultWidthIn, heightIn: partType?.defaultHeightIn,
+                  }}
+                  onChange={update}
+                />
+                <FieldError messages={errorsFor('weightLb', 'lengthIn', 'widthIn', 'heightIn')} />
+              </>
+            ) : null}
           </>
         ) : null}
       </View>
@@ -757,7 +776,11 @@ export const SellWizardScreen: React.FC<Props> = ({ route, navigation }) => {
       ['Location', form.locationName],
       ['Pickup', (form.deliveryOptions ?? []).includes('Pickup') ? `Yes${form.locationName ? ` – ${form.locationName}` : ''}` : 'No'],
       ['Shipping', (form.deliveryOptions ?? []).includes('Shipping')
-        ? [shippingFeeText(form.shippingFee, money) || 'Fee missing', form.sizeClass, `within ${REGIONS[country]?.name ?? country}`].filter(Boolean).join(' · ')
+        ? [shippingSize,
+          country === 'US' && kind !== 'Vehicle' && (form.weightLb ?? partType?.defaultWeightLb)
+            ? `${form.weightLb ?? partType?.defaultWeightLb} lb, ${form.lengthIn ?? partType?.defaultLengthIn} × ${form.widthIn ?? partType?.defaultWidthIn} × ${form.heightIn ?? partType?.defaultHeightIn} in`
+            : null,
+          'charge calculated for each buyer', `within ${REGIONS[country]?.name ?? country}`].filter(Boolean).join(' · ')
         : 'No'],
       ['Selling', isFixed ? 'Direct sale' : 'Auction'],
       [isFixed ? 'Price' : 'Part price', form.partPrice ? money(form.partPrice) : null],

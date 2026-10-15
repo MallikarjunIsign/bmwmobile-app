@@ -1,0 +1,39 @@
+# Logs in from a cleared app: email + password, then the test-mode OTP code shown on the OTP screen.
+# Needs EMAIL and PASSWORD (passed with -e by e2e/run-search-e2e.sh; never hard-code them).
+appId: com.bidmywork.app
+---
+- launchApp:
+    clearState: true
+    permissions:
+      all: allow
+- runFlow:
+    when:
+      visible: "Allow"
+    commands:
+      - tapOn: "Allow"
+- extendedWaitUntil:
+    visible: "ENTER MARKETPLACE"
+    timeout: 180000
+- tapOn: "ENTER MARKETPLACE"
+- runFlow:
+    when:
+      notVisible: "you@example.com"
+    commands:
+      - tapOn: "Log in"
+- tapOn: "you@example.com"
+- inputText: ${EMAIL}
+- tapOn: "Enter password"
+- inputText: ${PASSWORD}
+- hideKeyboard
+- tapOn: "LOG IN"
+- extendedWaitUntil:
+    visible: "Test mode: your code is .*"
+    timeout: 20000
+- copyTextFrom: "Test mode: your code is .*"
+- tapOn: "Verification code"
+# The 6th digit submits the code by itself. (No "VERIFY & CONTINUE" tap: it raced with the switch to Home and
+# could land on Home's "Profile" link.)
+- inputText: ${maestro.copiedText.replace(/\D/g, '')}
+- extendedWaitUntil:
+    visible: "SHOP BY CATEGORY"
+    timeout: 30000

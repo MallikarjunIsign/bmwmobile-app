@@ -31,12 +31,17 @@ public enum DeliveryOptions
     Shipping = 2
 }
 
+/// <summary>
+/// How big the item is for shipping: each part type has a default (bulb Small, headlamp Medium, bumper / door Large,
+/// engine / gearbox Freight) the seller can change; whole vehicles are Vehicle. The charge comes from ShippingRates.
+/// </summary>
 public enum SizeClass
 {
     Small = 0,
     Medium = 1,
     Large = 2,
-    Freight = 3
+    Freight = 3,
+    Vehicle = 4
 }
 
 /// <summary>Part details (parts only), one row per item.</summary>
@@ -242,8 +247,25 @@ public class Order
     public int FinalTotal { get; set; }
     /// <summary>The listing's part price (× quantity): FinalTotal − PartPrice is the winning bid.</summary>
     public int PartPrice { get; set; }
-    /// <summary>The listing's shipping fee (0 = free) when it offered shipping; added to the total only for Shipping.</summary>
+    /// <summary>
+    /// The shipping charge, calculated by the backend when the buyer chose Shipping (size class + distance + the
+    /// country's rates) and then fixed: later rate changes don't change it. Null until then; not added for Pickup.
+    /// Older orders keep the seller's manual fee.
+    /// </summary>
     public int? ShippingFee { get; set; }
+    /// <summary>The item's size class when it was sold (used for the charge).</summary>
+    public SizeClass? ShippingSizeClass { get; set; }
+    /// <summary>Road distance used for the charge (straight line × 1.3), in ShippingDistanceUnit (km, or mi in the USA).</summary>
+    public int? ShippingDistance { get; set; }
+    [MaxLength(2)]
+    public string? ShippingDistanceUnit { get; set; }
+    /// <summary>"USPS Ground Advantage" or "Freight" (US); null elsewhere.</summary>
+    [MaxLength(40)]
+    public string? ShippingService { get; set; }
+    /// <summary>USPS zone (1–8) the price used.</summary>
+    public int? ShippingZone { get; set; }
+    /// <summary>The charge used an industry-average estimate (US freight / vehicle until a carrier is chosen).</summary>
+    public bool ShippingRateEstimated { get; set; }
     /// <summary>The listing's country: shipping goes to addresses in this country only.</summary>
     [MaxLength(2)]
     public string? CountryCode { get; set; }
@@ -365,6 +387,13 @@ public class AddressInfo
     /// <summary>IN, US, NG or IE.</summary>
     [MaxLength(2)]
     public string CountryCode { get; set; } = "";
+
+    /// <summary>
+    /// Where it goes (a saved location or the phone's GPS): the shipping charge uses these coordinates.
+    /// Null on older addresses.
+    /// </summary>
+    public double? Latitude { get; set; }
+    public double? Longitude { get; set; }
 
     /// <summary>"Ravi Kumar, +91 98…, 12 MG Road, Kukatpally, Hyderabad 500072, IN".</summary>
     public string OneLine() =>

@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using AuctionService.Data;
 using AuctionService.DTOs;
 using AuctionService.Entities;
+using AuctionService.Errors;
 using AuctionService.Services;
 using Contracts;
 using Microsoft.AspNetCore.Authorization;
@@ -32,9 +33,23 @@ public class OrderDto
     /// <summary>The breakdown: part price, the winning bid on top of it (0 for direct sales), shipping and the total.</summary>
     public int PartPrice { get; set; }
     public int WinningBid { get; set; }
-    /// <summary>The listing's shipping fee (0 = free) when it offered shipping, else null.</summary>
+    /// <summary>Older apps: the shipping charge (same as ShippingCharge).</summary>
     public int? ShippingFee { get; set; }
-    /// <summary>What the buyer pays: FinalTotal + the shipping fee when the method is Shipping.</summary>
+    /// <summary>
+    /// 0 for Pickup; for Shipping the charge calculated when the buyer chose it (fixed – later rate changes don't
+    /// change it); null while not chosen yet.
+    /// </summary>
+    public int? ShippingCharge { get; set; }
+    /// <summary>Road distance the charge used (km, or mi in the USA) and the item's size class.</summary>
+    public int? ShippingDistance { get; set; }
+    public string? ShippingDistanceUnit { get; set; }
+    public string? ShippingSizeClass { get; set; }
+    /// <summary>US: "USPS Ground Advantage" (with its zone) or "Freight".</summary>
+    public string? ShippingService { get; set; }
+    public int? ShippingZone { get; set; }
+    /// <summary>The charge used an industry-average estimate (the app shows "estimated rate").</summary>
+    public bool ShippingRateEstimated { get; set; }
+    /// <summary>What the buyer pays: FinalTotal + the shipping charge (0 for Pickup).</summary>
     public int Total { get; set; }
     public string? Currency { get; set; }
     public string? LocationName { get; set; }
@@ -98,7 +113,8 @@ public class OrderStatusDto
 [ApiController]
 [Authorize]
 [Route("api/orders")]
-public class OrdersController(AuctionDbContext context, IDbContextOutbox<AuctionDbContext> outbox, TimeProvider clock) : ControllerBase
+public class OrdersController(AuctionDbContext context, IDbContextOutbox<AuctionDbContext> outbox, TimeProvider clock,
+    ShippingService shipping) : ControllerBase
 {
     private string Username => User.Identity?.Name ?? throw new UnauthorizedAccessException();
     private DateTime Now => clock.GetUtcNow().UtcDateTime;
@@ -150,7 +166,7 @@ public class OrdersController(AuctionDbContext context, IDbContextOutbox<Auction
     {
         var (order, error) = await LoadAsync(id);
         if (error != null) return error;
-        if (order!.Buyer != Username) return Forbid();
+        if (order!.Buyer != Username) return Forbidden.With("Only the buyer can choose how to get this order", "NOT_BUYER");
         if (order.Status != OrderStatus.SoldAwaitingHandover)
             return BadRequest(new { message = "The seller has already started on this order" });
         if (OrderTracking.ParseMethod(dto.Method) is not { } method || !OrderTracking.Choices(order).Contains(method))
@@ -176,13 +192,39 @@ public class OrdersController(AuctionDbContext context, IDbContextOutbox<Auction
             if (order.CountryCode is { } country && !string.Equals(address.CountryCode, country, StringComparison.OrdinalIgnoreCase))
                 return BadRequest(new { message = $"The seller ships within {RegionRules.CountryName(country)} only" });
 
+            // The delivery location (saved location or GPS) gives the distance for the charge.
+            if (dto.Latitude is { } lat && dto.Longitude is { } lon && GeoMath.IsValidCoordinate(lat, lon))
+                (address.Latitude, address.Longitude) = (lat, lon);
+            if (address.Latitude is null || address.Longitude is null)
+                return BadRequest(new { message = "Choose your delivery location (a saved location or your current location) so we can work out the shipping charge", code = "LOCATION_REQUIRED" });
+
+            // Calculated here and fixed on the order (the app never sends a price).
+            var item = await context.Set<Item>().Include(i => i.PartType).FirstOrDefaultAsync(i => i.Id == order.AuctionId);
+            if (item is null) return BadRequest(new { message = "This listing no longer exists" });
+            var quote = await shipping.QuoteAsync(item, address.CountryCode, address.Latitude.Value, address.Longitude.Value, order.ShippingSizeClass);
+            if (!quote.Available) return BadRequest(new { message = quote.Reason, code = "SHIPPING_NOT_AVAILABLE" });
+
             order.ShipTo = address;
             order.DeliveryAddress = address.OneLine();
+            order.ShippingFee = quote.Charge;
+            order.ShippingDistance = quote.Distance;
+            order.ShippingDistanceUnit = quote.Unit;
+            order.ShippingService = quote.Service;
+            order.ShippingZone = quote.Zone;
+            order.ShippingRateEstimated = quote.EstimatedRate;
+            order.ShippingSizeClass ??= Enum.Parse<SizeClass>(quote.SizeClass);
         }
         else
         {
+            // Pickup is free.
             order.ShipTo = null;
             order.DeliveryAddress = null;
+            order.ShippingFee = null;
+            order.ShippingDistance = null;
+            order.ShippingDistanceUnit = null;
+            order.ShippingService = null;
+            order.ShippingZone = null;
+            order.ShippingRateEstimated = false;
         }
 
         order.DeliveryMethod = method;
@@ -202,7 +244,7 @@ public class OrdersController(AuctionDbContext context, IDbContextOutbox<Auction
             return BadRequest(new { message = "Unknown order step" });
 
         var problem = OrderTracking.CheckMove(order!, Username, next);
-        if (problem != null) return problem.StartsWith("Only") ? Forbid() : BadRequest(new { message = problem });
+        if (problem != null) return problem.StartsWith("Only") ? Forbidden.With(problem, "NOT_ORDER_PARTY") : BadRequest(new { message = problem });
 
         if (next == OrderStatus.Shipped)
         {
@@ -219,7 +261,7 @@ public class OrdersController(AuctionDbContext context, IDbContextOutbox<Auction
     {
         var (order, error) = await LoadAsync(id);
         if (error != null) return error;
-        if (order!.Seller != Username) return Forbid();
+        if (order!.Seller != Username) return Forbidden.With("Only this order's seller can update fulfilment", "NOT_ORDER_SELLER");
         var step = order.DeliveryMethod == DeliveryOptions.Shipping ? OrderStatus.Shipped : OrderStatus.PickedUp;
         if (OrderTracking.CheckMove(order, Username, step) is { } problem)
             return BadRequest(new { message = problem });
@@ -233,7 +275,7 @@ public class OrdersController(AuctionDbContext context, IDbContextOutbox<Auction
     {
         var (order, error) = await LoadAsync(id);
         if (error != null) return error;
-        if (order!.Buyer != Username) return Forbid();
+        if (order!.Buyer != Username) return Forbidden.With("Only the buyer can confirm they received it", "NOT_BUYER");
         if (order.Status == OrderStatus.Completed) return BadRequest(new { message = "This order is already completed" });
         return await MoveAsync(order, order.DeliveryMethod == DeliveryOptions.Shipping ? OrderStatus.Delivered : OrderStatus.Completed);
     }
@@ -298,7 +340,8 @@ public class OrdersController(AuctionDbContext context, IDbContextOutbox<Auction
 
     private static AddressInfo Copy(AddressInfo a) => new()
     {
-        Name = a.Name, Phone = a.Phone, Line1 = a.Line1, Line2 = a.Line2, City = a.City, Postcode = a.Postcode, CountryCode = a.CountryCode
+        Name = a.Name, Phone = a.Phone, Line1 = a.Line1, Line2 = a.Line2, City = a.City, Postcode = a.Postcode, CountryCode = a.CountryCode,
+        Latitude = a.Latitude, Longitude = a.Longitude,
     };
 
     private static string? Clean(string? text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
@@ -346,7 +389,19 @@ public class OrdersController(AuctionDbContext context, IDbContextOutbox<Auction
             // Older orders have no part price stored: show it all as the item price.
             PartPrice = o.PartPrice > 0 ? o.PartPrice : o.FinalTotal,
             WinningBid = o.PartPrice > 0 ? Math.Max(o.FinalTotal - o.PartPrice, 0) : 0,
-            ShippingFee = o.ShippingFee,
+            ShippingFee = o.DeliveryMethod == DeliveryOptions.Pickup ? 0 : o.ShippingFee,
+            ShippingCharge = o.DeliveryMethod switch
+            {
+                DeliveryOptions.Pickup => 0,
+                DeliveryOptions.Shipping => o.ShippingFee,
+                _ => null,
+            },
+            ShippingDistance = o.DeliveryMethod == DeliveryOptions.Shipping ? o.ShippingDistance : null,
+            ShippingDistanceUnit = o.DeliveryMethod == DeliveryOptions.Shipping ? o.ShippingDistanceUnit : null,
+            ShippingSizeClass = o.ShippingSizeClass?.ToString(),
+            ShippingService = o.DeliveryMethod == DeliveryOptions.Shipping ? o.ShippingService : null,
+            ShippingZone = o.DeliveryMethod == DeliveryOptions.Shipping ? o.ShippingZone : null,
+            ShippingRateEstimated = o.DeliveryMethod == DeliveryOptions.Shipping && o.ShippingRateEstimated,
             Total = OrderTracking.Total(o),
             Currency = o.Currency,
             LocationName = o.LocationName,

@@ -8,7 +8,7 @@ import { ServerError } from '../services/api';
 import { ShippingAddressSheet, addressText } from './ShippingAddressSheet';
 import type { Address, DeliveryOption, Order, OrderStatus } from '../types/listing';
 import { formatWhen } from '../utils/time';
-import { shippingFeeText } from '../utils/delivery';
+import { orderShippingText } from '../utils/delivery';
 
 export const methodLabel = (method?: string | null) =>
   method === 'Pickup' ? 'Pickup' : method === 'Shipping' ? 'Shipping' : 'Not chosen yet';
@@ -24,14 +24,17 @@ interface Props {
   onReview?: (order: Order) => void;
 }
 
-/** "Part price ₹14,000 + winning bid ₹100 + shipping ₹500 = ₹14,600" (shipping only once it's the method). */
+/**
+ * "Part price ₹14,000 + winning bid ₹100 + shipping ₹350 (22 km) = ₹14,450" or "… + pickup free = ₹14,100".
+ * The shipping charge is the one the backend fixed on the order; nothing about delivery while it isn't chosen.
+ */
 export function totalBreakdown(order: Order, money: (n: number) => string): string {
   const qty = order.quantity ?? 1;
   const partPrice = order.partPrice ?? order.finalTotal;
   const parts = [order.saleType === 'FixedPrice' && qty > 1 ? `${qty} × ${money(partPrice / qty)}` : `Part price ${money(partPrice)}`];
   if (order.winningBid) parts.push(`winning bid ${money(order.winningBid)}`);
-  if (order.deliveryMethod === 'Shipping' && order.shippingFee != null)
-    parts.push(order.shippingFee === 0 ? 'free shipping' : `shipping ${money(order.shippingFee)}`);
+  const delivery = orderShippingText(order, money);
+  if (delivery) parts.push(delivery);
   return parts.length > 1 ? `${parts.join(' + ')} = ${money(order.total ?? order.finalTotal)}` : parts[0];
 }
 
@@ -109,13 +112,11 @@ export const OrderTrackingCard: React.FC<Props> = ({ order, money, onChange, onO
   };
 
   // The sheet shows field errors itself, so errors are passed on to it rather than shown in an alert.
-  const shipTo = async (to: { addressId?: string; address?: Address }) => {
+  const shipTo = async (to: { addressId?: string; address?: Address; latitude?: number; longitude?: number }) => {
     const updated = await MarketApi.chooseDelivery(order.id, 'Shipping', to);
     setAddressSheet(false);
     onChange(updated);
   };
-
-  const fee = shippingFeeText(order.shippingFee, money);
 
   return (
     <View style={styles.card}>
@@ -214,11 +215,11 @@ export const OrderTrackingCard: React.FC<Props> = ({ order, money, onChange, onO
           {order.deliveryChoices.map(c => (
             <TouchableOpacity key={c} style={[styles.option, method === c && styles.optionActive]} onPress={() => setMethod(c)}
               accessibilityState={{ selected: method === c }}>
-              <Text style={styles.optionTitle}>{c === 'Pickup' ? '📍 I will pick it up' : `🚚 Ship it to me${fee ? ` · ${fee}` : ''}`}</Text>
+              <Text style={styles.optionTitle}>{c === 'Pickup' ? '📍 I will pick it up · free' : '🚚 Ship it to me'}</Text>
               <Text style={styles.metaSmall}>
                 {c === 'Pickup'
                   ? `In ${order.locationName ?? 'the seller’s area'} – the exact address is shown once you choose`
-                  : 'Add your address next; shipping is added to the total'}
+                  : 'Choose your delivery location next – you see the exact shipping charge before confirming'}
               </Text>
             </TouchableOpacity>
           ))}
@@ -228,8 +229,8 @@ export const OrderTrackingCard: React.FC<Props> = ({ order, money, onChange, onO
         </View>
       ) : order.needsShippingAddress && !seller ? (
         <View style={styles.choose}>
-          <Text style={styles.chooseTitle}>🚚 This item is shipped{fee ? ` · ${fee}` : ''}</Text>
-          <Text style={styles.metaSmall}>Add the address the seller should ship it to.</Text>
+          <Text style={styles.chooseTitle}>🚚 This item is shipped</Text>
+          <Text style={styles.metaSmall}>Add where it should go – you see the exact shipping charge before confirming.</Text>
           <TouchableOpacity style={[styles.actionBtn, busy && styles.disabled]} onPress={() => setAddressSheet(true)} disabled={busy}>
             <Text style={styles.actionText}>Add shipping address</Text>
           </TouchableOpacity>
@@ -260,7 +261,8 @@ export const OrderTrackingCard: React.FC<Props> = ({ order, money, onChange, onO
       ) : null}
 
       {!seller ? (
-        <ShippingAddressSheet visible={addressSheet} countryCode={order.countryCode ?? 'IN'} onClose={() => setAddressSheet(false)} onSubmit={shipTo} />
+        <ShippingAddressSheet visible={addressSheet} countryCode={order.countryCode ?? 'IN'} listingId={order.auctionId} money={money}
+          onClose={() => setAddressSheet(false)} onSubmit={shipTo} />
       ) : null}
 
       {/* Shipped: optional courier and tracking number */}

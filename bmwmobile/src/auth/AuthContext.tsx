@@ -1,9 +1,9 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert } from 'react-native';
+import { AppState } from 'react-native';
 import { ApiError, AuthApi, isOtpChallenge, type SignInResult } from '../services/authApi';
 import { setDemoOwner } from '../services/api';
-import { config } from '../config';
-import type { AuthSession, AuthUser, OtpChallenge, OtpSentResponse, RegisterRequest, UserRole } from '../types/auth';
+import type { AuthSession, AuthUser, OtpChallenge, OtpSentResponse, RegisterRequest } from '../types/auth';
+import { normalizeRole, roleFromAccessToken } from '../utils/roles';
 import { getSession, getValidAccessToken, setSession, setTokenHandlers } from './session';
 import {
   clearRememberedEmail,
@@ -39,16 +39,6 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-function chooseRole(): Promise<UserRole | null> {
-  return new Promise(resolve =>
-    Alert.alert('One more step', 'How will you use ShopCarParts?', [
-      { text: 'Customer', onPress: () => resolve('customer') },
-      { text: 'Service Pro', onPress: () => resolve('pro') },
-      { text: 'Cancel', style: 'cancel', onPress: () => resolve(null) },
-    ]),
-  );
-}
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('loading');
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -56,9 +46,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signingOut = useRef(false);
 
   const apply = useCallback((session: AuthSession | null) => {
-    setSession(session);
-    setDemoOwner(session?.user.username ?? null);
-    setUser(session?.user ?? null);
+    // Older saved sessions have role "user": they are buyers until the server says otherwise.
+    const next = session ? { ...session, user: { ...session.user, role: normalizeRole(session.user.role) } } : null;
+    setSession(next);
+    setDemoOwner(next?.user.username ?? null);
+    setUser(next?.user ?? null);
   }, []);
 
   const startSession = useCallback(
@@ -92,8 +84,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const tokens = await AuthApi.refresh(refreshToken);
           const current = getSession();
           if (!current) return null;
-          const next = { ...current, ...tokens };
-          setSession(next);
+          // The new token carries the current role: e.g. an admin made this buyer a seller → Sell appears now.
+          const role = roleFromAccessToken(tokens.accessToken);
+          const roleChanged = role !== null && role !== current.user.role;
+          const next = { ...current, ...tokens, user: roleChanged ? { ...current.user, role } : current.user };
+          if (roleChanged) apply(next);
+          else setSession(next);
           if (remember.current) await saveSession(next);
           return tokens;
         } catch (err) {
@@ -111,7 +107,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       },
     });
     return () => setTokenHandlers({ refresh: null, expired: null });
-  }, [endSession]);
+  }, [endSession, apply]);
+
+  // Back in the app: check the role. If an admin changed it, get a new token at once (the backend reads the
+  // role from the token), so a buyer who was made a seller sees Sell without signing in again.
+  useEffect(() => {
+    if (status !== 'signedIn') return;
+    const sub = AppState.addEventListener('change', async state => {
+      if (state !== 'active') return;
+      try {
+        const accessToken = await getValidAccessToken();
+        const current = getSession();
+        if (!accessToken || !current) return;
+        const fresh = await AuthApi.me(accessToken);
+        if (normalizeRole(fresh.role) === current.user.role) return;
+        await getValidAccessToken(true);
+        const after = getSession();
+        if (after) {
+          const next = { ...after, user: { ...fresh, role: normalizeRole(fresh.role) } };
+          apply(next);
+          if (remember.current) await saveSession(next);
+        }
+      } catch {
+        // Offline: try again next time.
+      }
+    });
+    return () => sub.remove();
+  }, [status, apply]);
 
   // App start: restore a remembered session, then refresh the user from the server.
   useEffect(() => {
@@ -183,25 +205,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         throw err;
       }
 
-      const send = (role?: UserRole) =>
-        AuthApi.socialLogin({
-          provider: credential.provider,
-          idToken: credential.idToken,
-          nonce: credential.nonce,
-          fullName: credential.fullName,
-          role,
-        });
-
-      let result: SignInResult;
-      try {
-        result = await send();
-      } catch (err) {
-        // New account while roles are on: ask Customer / Service Pro, then try again.
-        if (!(config.ENABLE_ROLES && err instanceof ApiError && err.code === 'ROLE_REQUIRED')) throw err;
-        const role = await chooseRole();
-        if (!role) return false;
-        result = await send(role);
-      }
+      // A new Google / Apple account is always a buyer (no role choice).
+      const result = await AuthApi.socialLogin({
+        provider: credential.provider,
+        idToken: credential.idToken,
+        nonce: credential.nonce,
+        fullName: credential.fullName,
+      });
       await startSession(result, true);
       return true;
     },

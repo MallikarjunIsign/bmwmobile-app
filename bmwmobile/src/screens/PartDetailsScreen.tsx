@@ -9,6 +9,8 @@ import { Badge } from '../components/Badge';
 import { mapRawDtoToAuction, ServerError } from '../services/api';
 import { MarketApi } from '../services/marketApi';
 import { isCurrentUser } from '../auth/session';
+import { useAuth } from '../auth/AuthContext';
+import { isSeller as isSellerAccount } from '../utils/roles';
 import { useMoney } from '../location/useMoney';
 import { useLocations } from '../location/LocationContext';
 import { FEATURES } from '../config';
@@ -18,7 +20,8 @@ import { NextBidCalculation } from '../components/NextBidCalculation';
 import { Countdown } from '../components/Countdown';
 import { formatDistance } from '../utils/geo';
 import { label, maskUsername } from '../utils/time';
-import { deliverySummary, shippingFeeText, shipsWithinText } from '../utils/delivery';
+import { deliverySummary, shippingEstimateText, shipsWithinText } from '../utils/delivery';
+import { useShippingEstimate } from '../hooks/useShippingEstimate';
 import { ratingText } from '../utils/rating';
 import { ReviewApi } from '../services/reviewApi';
 import { ReviewCard } from '../components/ReviewCard';
@@ -48,6 +51,7 @@ export function bidOutcome(listing: Pick<Listing, 'status' | 'seller' | 'winner'
 /** Listing detail ("View Specs"): photos, title, fitment, details / specs, seller, the next-bid calculation, time left, bid history. */
 export const PartDetailsScreen: React.FC<Props> = ({ route, navigation }) => {
   const money = useMoney();
+  const sellerAccount = isSellerAccount(useAuth().user);
   const { country } = useLocations();
   const { auctionId, auction: initialAuction } = route.params;
   const [listing, setListing] = useState<Listing | null>(null);
@@ -110,6 +114,12 @@ export const PartDetailsScreen: React.FC<Props> = ({ route, navigation }) => {
     return () => clearInterval(t);
   }, []);
 
+  // "Shipping to Kukatpally: ~₹350 (estimate)" for the buyer's selected location (not for the seller).
+  const { quote: shippingQuote, place: shippingPlace, hasLocation } = useShippingEstimate(
+    listing?.id,
+    !!listing && listing.deliveryOptions.includes('Shipping') && !isCurrentUser(listing.seller),
+  );
+
   if (!listing) {
     return (
       <SafeAreaView style={styles.container}>
@@ -121,6 +131,9 @@ export const PartDetailsScreen: React.FC<Props> = ({ route, navigation }) => {
 
   const auction = { ...mapRawDtoToAuction(listing), distanceKm: initialAuction?.distanceKm };
   const isSeller = isCurrentUser(listing.seller);
+  const offersShipping = listing.deliveryOptions.includes('Shipping');
+  // Editing, accepting bids and relisting need a seller account (the backend refuses buyers too).
+  const canManage = isSeller && sellerAccount;
   // Fixed price: bought at the price until sold out – no bids, no end time.
   const isFixed = listing.saleType === 'FixedPrice';
   const available = listing.quantityAvailable ?? 0;
@@ -192,7 +205,18 @@ export const PartDetailsScreen: React.FC<Props> = ({ route, navigation }) => {
   const buy = () =>
     Alert.alert(
       `Buy ${qty > 1 ? `${qty} × ` : ''}for ${money(listing.startingPrice * qty)}?`,
-      'The seller is told at once. You arrange payment and handover with them in your Orders.',
+      [
+        'The seller is told at once. You arrange payment and handover with them in your Orders.',
+        // Pickup is free; shipping is added at the exact, fixed charge when you choose it in Orders.
+        [
+          listing.deliveryOptions.includes('Pickup') ? 'Pickup: free.' : null,
+          offersShipping
+            ? shippingQuote?.available && shippingQuote.charge != null
+              ? `Shipping: ~${money(shippingQuote.charge)}${shippingPlace ? ` to ${shippingPlace}` : ''} – the exact charge is shown when you choose it.`
+              : 'Shipping: the charge is shown when you choose your delivery location.'
+            : null,
+        ].filter(Boolean).join(' '),
+      ].filter(Boolean).join('\n\n'),
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -255,6 +279,13 @@ export const PartDetailsScreen: React.FC<Props> = ({ route, navigation }) => {
           <Text style={styles.title}>{listing.title}</Text>
           {listing.fitmentSummary ? <Text style={styles.fitment}>{listing.fitmentSummary}</Text> : null}
           {deliverySummary(listing, money) ? <Text style={styles.delivery}>{deliverySummary(listing, money)}</Text> : null}
+          {/* The shipping charge to the buyer's selected location (calculated by the backend). */}
+          {offersShipping && !isSeller ? (
+            <Text style={[styles.delivery, shippingQuote && !shippingQuote.available && styles.deliveryWarn]}>
+              🚚 {shippingQuote ? shippingEstimateText(shippingQuote, shippingPlace, money)
+                : hasLocation ? 'Working out the shipping charge…' : 'Set your location to see the shipping charge'}
+            </Text>
+          ) : null}
           <Text style={styles.seller}>
             Listed by:{' '}
             <Text style={[styles.sellerBold, styles.sellerLink]} onPress={openSeller} accessibilityRole="link">
@@ -379,11 +410,12 @@ export const PartDetailsScreen: React.FC<Props> = ({ route, navigation }) => {
               <Row k="Warranty / returns" v={d?.warranty} />
             </>
           )}
-          <Row k="Pickup" v={listing.deliveryOptions.includes('Pickup') ? `Yes – in ${listing.pickupCity ?? listing.locationName ?? 'the seller’s area'}` : 'Not offered'} />
+          <Row k="Pickup" v={listing.deliveryOptions.includes('Pickup') ? `Free – in ${listing.pickupCity ?? listing.locationName ?? 'the seller’s area'}` : 'Not offered'} />
           <Row
             k="Shipping"
-            v={listing.deliveryOptions.includes('Shipping')
-              ? [shippingFeeText(listing.shippingFee, money) || 'Fee agreed with the seller', shipsWithinText(listing.shipsWithin ?? listing.countryCode)].join(' · ')
+            v={offersShipping
+              ? [shippingQuote?.available && shippingQuote.charge != null ? `~${money(shippingQuote.charge)} to ${shippingPlace ?? 'you'} (estimate)` : 'Calculated from size and distance',
+                shipsWithinText(listing.shipsWithin ?? listing.countryCode)].join(' · ')
               : 'Not offered'}
           />
           <Row k="Size class" v={listing.deliveryOptions.includes('Shipping') ? listing.sizeClass : null} />
@@ -422,7 +454,7 @@ export const PartDetailsScreen: React.FC<Props> = ({ route, navigation }) => {
         ) : null}
 
         {/* Seller tools */}
-        {isSeller && (listing.status === 'Live' || listing.status === 'Draft') ? (
+        {canManage && (listing.status === 'Live' || listing.status === 'Draft') ? (
           <View style={styles.card}>
             <Text style={styles.sectionHeading}>YOUR LISTING</Text>
             {listing.canEdit ? (
@@ -450,11 +482,11 @@ export const PartDetailsScreen: React.FC<Props> = ({ route, navigation }) => {
       {/* Fixed Bottom Action Bar */}
       <View style={styles.bottomBar}>
         {isSeller ? (
-          isLive && hasBids && highBid ? (
+          canManage && isLive && hasBids && highBid ? (
             <TouchableOpacity style={styles.bidBarBtn} onPress={accept} disabled={busy}>
               <Text style={styles.bidBarText}>ACCEPT {money(highBid.amount)} AND CLOSE</Text>
             </TouchableOpacity>
-          ) : listing.status === 'Unsold' ? (
+          ) : canManage && listing.status === 'Unsold' ? (
             <TouchableOpacity style={styles.bidBarBtn} onPress={relist}>
               <Text style={styles.bidBarText}>ENDED – NO BIDS · RELIST</Text>
             </TouchableOpacity>
@@ -481,7 +513,7 @@ export const PartDetailsScreen: React.FC<Props> = ({ route, navigation }) => {
               </View>
             ) : null}
             <TouchableOpacity style={[styles.bidBarBtn, styles.buyBarBtn]} onPress={buy} disabled={busy}>
-              <Text style={styles.bidBarText}>BUY NOW · {money(listing.startingPrice * qty)}</Text>
+              <Text style={styles.bidBarText}>BUY NOW – {money(listing.startingPrice * qty)}</Text>
             </TouchableOpacity>
           </View>
         ) : isLive ? (
@@ -549,6 +581,7 @@ const styles = StyleSheet.create({
   title: { color: COLORS.text, fontSize: 18, fontWeight: '800', lineHeight: 24 },
   fitment: { color: COLORS.badgeText, fontSize: 13, fontWeight: '700', marginTop: 4 },
   delivery: { color: COLORS.textSecondary, fontSize: 13, fontWeight: '700', marginTop: 4 },
+  deliveryWarn: { color: COLORS.warningGlow },
   seller: { color: COLORS.textMuted, fontSize: 13, marginTop: 4, marginBottom: SPACING.md },
   sellerBold: { color: COLORS.textSecondary, fontWeight: '700' },
   chatBtn: {

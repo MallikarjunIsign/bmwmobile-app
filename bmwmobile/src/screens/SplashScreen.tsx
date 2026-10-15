@@ -13,7 +13,7 @@ export const SplashScreen: React.FC<Props> = ({ navigation }) => {
       <View style={styles.content}>
         {/* Brand Glow Emblem */}
         <View style={styles.logoBadge}>
-          <Text style={styles.logoText}>BidMy</Text>
+          <Text style={styles.logoText} numberOfLines={1} adjustsFontSizeToFit>ShopCar</Text>
           <Text style={styles.subLogoText}>PARTS</Text>
         </View>
 
@@ -69,9 +69,11 @@ const styles = StyleSheet.create({
   },
   logoText: {
     color: COLORS.text,
-    fontSize: 28,
+    fontSize: 24,
     fontWeight: '900',
-    letterSpacing: 2,
+    letterSpacing: 1,
+    // Shrinks to fit the round badge on one line.
+    maxWidth: 120,
   },
   subLogoText: {
     color: COLORS.primaryGlow,
