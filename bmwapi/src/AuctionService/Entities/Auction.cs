@@ -40,12 +40,19 @@ public class Auction
     /// <summary>FixedPrice: units bought so far. A concurrency token, so two buyers can't take the last unit.</summary>
     [ConcurrencyCheck]
     public int QuantitySold { get; set; }
+    /// <summary>
+    /// FixedPrice with online payment: units held for buyers who are paying right now (Buy now, 15 minutes).
+    /// Also a concurrency token: two buyers can't reserve the last unit.
+    /// </summary>
+    [ConcurrencyCheck]
+    public int QuantityReserved { get; set; }
     public required Item Item { get; set; }
 
     /// <summary>FixedPrice: units listed (parts: the quantity, vehicles: 1).</summary>
     public int QuantityListed => Item.ItemType == ItemType.Vehicle ? 1 : Math.Max(Item.Quantity ?? 1, 1);
 
-    public int QuantityAvailable => SaleType == SaleType.FixedPrice ? Math.Max(QuantityListed - QuantitySold, 0) : 0;
+    /// <summary>Units anyone can buy now (sold and reserved ones excluded).</summary>
+    public int QuantityAvailable => SaleType == SaleType.FixedPrice ? Math.Max(QuantityListed - QuantitySold - QuantityReserved, 0) : 0;
 
     public bool HasReservePrice() => ReservePrice > StartingPrice;
 

@@ -51,6 +51,15 @@ export function rethrowServerError(e: unknown, fallback: string): void {
   }
 }
 
+/** A listing that doesn't exist (any more) – removed, or only in the other database: what the user sees for a 404. */
+export const LISTING_GONE = 'This listing is no longer available';
+
+/** The message for a failed listing request: "no longer available" for a 404, else the server's message. */
+export function listingErrorMessage(e: unknown, fallback: string): string {
+  if (!(e instanceof ServerError)) return fallback;
+  return e.status === 404 ? LISTING_GONE : e.message;
+}
+
 /** Any failure as a ServerError (no answer from the server → "Can't reach the server"). */
 export function toServerError(e: unknown, fallback: string): ServerError {
   if (e instanceof ServerError) return e;
@@ -59,8 +68,15 @@ export function toServerError(e: unknown, fallback: string): ServerError {
   } catch (server) {
     return server as ServerError;
   }
+  // No answer: too slow (timed out) is not the same as unreachable.
+  if ((e as AxiosError)?.code === 'ECONNABORTED' || (e as AxiosError)?.code === 'ETIMEDOUT') {
+    return new ServerError("The server didn't answer in time. Please try again.", 0);
+  }
   return new ServerError("Can't reach the server. Check your connection and try again.", 0);
 }
+
+/** Checkout, payments and saving an order's address: several database and Stripe steps on the server. */
+export const SLOW_REQUEST = { timeout: 45000 };
 
 /** Image URLs from the backend say "localhost"; the Android emulator reaches the PC at 10.0.2.2. */
 export function fixUrl(url?: string | null): string | undefined {

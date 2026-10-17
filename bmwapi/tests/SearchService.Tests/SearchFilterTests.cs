@@ -253,3 +253,32 @@ public class IndexSettingsTests(AppFixture fixture)
         await Assert.ThrowsAnyAsync<Exception>(() => DbInitializer.ConfigureIndex(down, attempts: 2, delay: TimeSpan.FromMilliseconds(10)));
     }
 }
+
+/// <summary>
+/// Switching databases (local ↔ cloud, start-backend.sh): the shared index becomes an exact copy of the database in use –
+/// its listings added or updated, listings only in the other database removed (no "Not found" from Search results).
+/// </summary>
+[Collection("search-service")]
+public class FullResyncTests(AppFixture fixture)
+{
+    private MeilisearchClient Client => fixture.Host.Services.GetRequiredService<MeilisearchClient>();
+
+    [Fact]
+    public async Task FullResync_AddsAndUpdatesTheDatabasesListings_RemovesTheOthers()
+    {
+        // Its own index: the other tests' listings stay untouched.
+        var name = $"resync-{Guid.NewGuid():N}";
+        var index = Client.Index(name);
+        var before = await index.AddDocumentsAsync(
+            [TestData.CreateItem(i => { i.Id = "a"; i.Title = "Old title"; }), TestData.CreateItem(i => i.Id = "only-in-other-db")], primaryKey: "id");
+        await Client.WaitForTaskAsync(before.TaskUid);
+
+        await DbInitializer.FullResync(Client,
+            [TestData.CreateItem(i => { i.Id = "a"; i.Title = "New title"; }), TestData.CreateItem(i => i.Id = "b")], name);
+
+        var docs = (await index.GetDocumentsAsync<Item>(new Meilisearch.QueryParameters.DocumentsQuery { Limit = 100 })).Results.ToList();
+        Assert.Equal(["a", "b"], docs.Select(d => d.Id).Order());
+        Assert.Equal("New title", docs.Single(d => d.Id == "a").Title);
+        await Client.DeleteIndexAsync(name);
+    }
+}

@@ -10,7 +10,10 @@ import { ApiService, ServerError } from '../services/api';
 import { useCurrencyLabel } from '../location/useMoney';
 import { useLocations } from '../location/LocationContext';
 import { FEATURES } from '../config';
-import { formatRadius, REGIONS } from '../utils/geo';
+import { DEFAULT_RADIUS, formatRadius, isCountryCode, placeLabel, radiusFor, REGIONS } from '../utils/geo';
+import { PlaceSearch } from '../components/PlaceSearch';
+import { RadiusPicker } from '../components/RadiusPicker';
+import type { CountryCode, PlaceDetails } from '../types/location';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'OrderPartRequest'>;
 
@@ -34,6 +37,15 @@ export const OrderPartRequestScreen: React.FC<Props> = ({ route, navigation }) =
   const [preferredPort, setPreferredPort] = useState('Lagos Apapa Port');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Where the part is needed: the app's location to start with, or any searched place; with its own radius.
+  const [place, setPlace] = useState<PlaceDetails | null>(location ? {
+    placeId: null, formattedAddress: '', lat: location.latitude, lon: location.longitude,
+    label: placeLabel(location) ?? 'Current location', area: location.area, city: location.city, countryCode: location.countryCode,
+    supported: true, source: 'local',
+  } : null);
+  const [radius, setRadius] = useState<number | null>(location?.radiusValue ?? DEFAULT_RADIUS);
+  const placeCountry: CountryCode = isCountryCode(place?.countryCode) ? (place!.countryCode!.toUpperCase() as CountryCode) : country;
+  const radiusKm = place && radius != null ? radiusFor(radius, placeCountry).radiusKm : undefined;
 
   const handleSubmit = async () => {
     if (!partName.trim() && !partNumber.trim()) {
@@ -43,6 +55,10 @@ export const OrderPartRequestScreen: React.FC<Props> = ({ route, navigation }) =
     const yearValue = year.trim() ? parseInt(year, 10) : 0;
     if (year.trim() && (Number.isNaN(yearValue) || yearValue < 1900 || yearValue > new Date().getFullYear() + 1)) {
       setError('Enter a valid year, or leave it empty for any year.');
+      return;
+    }
+    if (place && radius == null) {
+      setError('Choose a radius for the location.');
       return;
     }
 
@@ -59,11 +75,11 @@ export const OrderPartRequestScreen: React.FC<Props> = ({ route, navigation }) =
         specs: specs.trim() || undefined,
         maxBudget: parseFloat(maxBudget) || undefined,
         // Only listings within the buyer's radius will match (country-wide when the location is unknown).
-        locationName: location?.city ?? undefined,
-        countryCode: location?.countryCode ?? country,
-        latitude: location?.latitude,
-        longitude: location?.longitude,
-        radiusKm: location?.radiusKm,
+        locationName: place ? placeLabel(place) ?? place.label : undefined,
+        countryCode: place ? placeCountry : country,
+        latitude: place?.lat,
+        longitude: place?.lon,
+        radiusKm,
       });
       navigation.replace('RequestSubmitted', { request });
     } catch (err) {
@@ -123,11 +139,22 @@ export const OrderPartRequestScreen: React.FC<Props> = ({ route, navigation }) =
           </>
         ) : null}
 
+        <View style={styles.locationBlock}>
+          <PlaceSearch
+            label="Where do you need it?"
+            value={place}
+            onPick={setPlace}
+            near={place ? { latitude: place.lat, longitude: place.lon } : location}
+            testID="request-place-search"
+          />
+          {place ? <RadiusPicker value={radius} country={placeCountry} onChange={setRadius} /> : null}
+        </View>
+
         <View style={styles.feasibilityBox}>
           <Text style={styles.feaTitle}>🔔 GET NOTIFIED</Text>
           <Text style={styles.feaText}>
-            {location
-              ? `When a matching part is listed for pickup within ${formatRadius(location.radiusKm, country)}${location.city ? ` of ${location.city}` : ''}, or with shipping anywhere in ${REGIONS[country].name}, we'll let you know.`
+            {place && radiusKm
+              ? `When a matching part is listed for pickup within ${formatRadius(radiusKm, placeCountry)} of ${placeLabel(place) ?? place.label}, or with shipping anywhere in ${REGIONS[placeCountry].name}, we'll let you know.`
               : "When a matching part is listed, we'll let you know."}
           </Text>
         </View>
@@ -209,6 +236,7 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     fontWeight: '700',
   },
+  locationBlock: { marginTop: SPACING.lg },
   feasibilityBox: {
     backgroundColor: COLORS.card,
     padding: SPACING.md,

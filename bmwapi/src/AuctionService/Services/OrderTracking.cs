@@ -91,13 +91,20 @@ public static class OrderTracking
     /// <summary>Position of the order's status in its pipeline (a step from another method counts as the last seller step).</summary>
     public static int Position(Order order)
     {
+        // Not paid yet / cancelled: still at the start.
+        if (order.Status is OrderStatus.AwaitingPayment or OrderStatus.Cancelled) return 0;
         var steps = Pipeline(order.DeliveryMethod);
         var index = steps.ToList().FindIndex(s => s.Status == order.Status);
         if (index >= 0) return index;
         return Math.Max(0, steps.ToList().FindLastIndex(s => !s.ByBuyer));
     }
 
-    public static string Label(Order order) => Pipeline(order.DeliveryMethod)[Position(order)].Label;
+    public static string Label(Order order) => order.Status switch
+    {
+        OrderStatus.AwaitingPayment => "Awaiting payment",
+        OrderStatus.Cancelled => order.CancelReason ?? "Cancelled",
+        _ => Pipeline(order.DeliveryMethod)[Position(order)].Label,
+    };
 
     /// <summary>The delivery options the buyer can choose from.</summary>
     public static List<DeliveryOptions> Choices(Order order)
@@ -119,7 +126,7 @@ public static class OrderTracking
 
     /// <summary>The buyer can still choose / change how to receive it (and add the shipping address).</summary>
     public static bool CanChooseMethod(Order order, string user) =>
-        order.Buyer == user && order.Status == OrderStatus.SoldAwaitingHandover &&
+        order.Buyer == user && order.Status is OrderStatus.SoldAwaitingHandover or OrderStatus.AwaitingPayment &&
         (Choices(order).Count > 1 || NeedsShippingAddress(order));
 
     /// <summary>What the buyer pays: the item, plus the (calculated, fixed) shipping charge when it is shipped; pickup is free.</summary>
@@ -130,6 +137,10 @@ public static class OrderTracking
     public static string? CheckMove(Order order, string user, OrderStatus next)
     {
         if (order.Status == OrderStatus.Completed) return "This order is already completed";
+        // No cash on delivery: nothing happens before the online payment arrives.
+        if (order.Status == OrderStatus.AwaitingPayment) return "Waiting for the buyer's payment";
+        if (order.Status == OrderStatus.Cancelled) return "This order was cancelled";
+        if (next is OrderStatus.AwaitingPayment or OrderStatus.Cancelled) return "That step doesn't apply to this delivery method";
         var steps = Pipeline(order.DeliveryMethod);
         var target = steps.ToList().FindIndex(s => s.Status == next);
         if (target < 0) return "That step doesn't apply to this delivery method";
@@ -146,7 +157,7 @@ public static class OrderTracking
     /// <summary>What the caller can do now: the next seller step (seller), or the buyer's confirmation.</summary>
     public static List<Step> NextActions(Order order, string user)
     {
-        if (order.Status == OrderStatus.Completed) return [];
+        if (order.Status is OrderStatus.Completed or OrderStatus.AwaitingPayment or OrderStatus.Cancelled) return [];
         var steps = Pipeline(order.DeliveryMethod);
         // The buyer's first step to confirm ("Delivered" for shipping, "Completed" otherwise).
         if (order.Buyer == user) return NeedsShippingAddress(order) ? [] : [steps.First(s => s.ByBuyer)];

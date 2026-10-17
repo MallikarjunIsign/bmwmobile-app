@@ -25,7 +25,12 @@ public record UserLocationDto(
     string? Landmark = null,
     string? PostalCode = null,
     int RadiusValue = 0,
-    string RadiusUnit = "km");
+    string RadiusUnit = "km",
+    // From "Search location" (null on older rows): Google place ID, full address, city and state.
+    string? PlaceId = null,
+    string? FormattedAddress = null,
+    string? City = null,
+    string? State = null);
 
 /// <summary>All of the user's locations (primary first) and the auto-update setting.</summary>
 public record MyLocationsResponse(bool AutoUpdatePrimary, IReadOnlyList<UserLocationDto> Locations);
@@ -46,7 +51,12 @@ public record SaveLocationRequest(
     [StringLength(100)] string? Landmark = null,
     [StringLength(12)] string? PostalCode = null,
     // The radius in the location's unit (mi in the USA, km elsewhere), 5–1,000. Wins over RadiusKm.
-    int? RadiusValue = null);
+    int? RadiusValue = null,
+    // From "Search location" (GET /api/places/{placeId}); all optional.
+    [StringLength(300)] string? PlaceId = null,
+    [StringLength(300)] string? FormattedAddress = null,
+    [StringLength(100)] string? City = null,
+    [StringLength(100)] string? State = null);
 
 /// <summary>Change only the radius of a saved location or the GPS row (Home → location line).</summary>
 public record RadiusRequest([Required(ErrorMessage = "Choose a radius.")] int? RadiusValue);

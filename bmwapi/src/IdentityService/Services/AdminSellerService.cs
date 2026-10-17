@@ -22,6 +22,7 @@ public class AdminSellerService(
     ITrustedDeviceService devices,
     IPersistedGrantService grants,
     SellerApplicationService applications,
+    ISellerPaymentAccounts paymentAccounts,
     ILogger<AdminSellerService> logger)
 {
     public async Task<SellerInviteResponse> CreateSellerAsync(CreateSellerRequest req, CancellationToken ct)
@@ -45,6 +46,8 @@ public class AdminSellerService(
 
         var code = await SendInviteAsync(user, ct);
         await applications.MarkApprovedAsync(user, ct);
+        // USA / Ireland: the payment account (Stripe Connect) – best effort, opened on first visit otherwise.
+        await paymentAccounts.OpenAsync(user, ct);
         logger.LogInformation("Admin created seller {Username}", user.UserName);
         return new SellerInviteResponse(await ToDtoAsync(user), $"Seller created. We emailed {AccountService.MaskEmail(email)} a code to set their password.",
             accounts.DevCode(code));
@@ -118,6 +121,7 @@ public class AdminSellerService(
             await accounts.AddRoleAsync(user, AppRoles.Seller);
             if (await users.IsInRoleAsync(user, AppRoles.Buyer)) await users.RemoveFromRoleAsync(user, AppRoles.Buyer);
             await applications.MarkApprovedAsync(user, ct);
+            await paymentAccounts.OpenAsync(user, ct);
             logger.LogInformation("Admin upgraded {Username} to seller", user.UserName);
         }
         return await ToDtoAsync(user);

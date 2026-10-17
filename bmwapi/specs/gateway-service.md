@@ -52,6 +52,7 @@ None.
 |orders|`/orders/{**catch-all}` → `api/orders/{**catch-all}`|any|AuctionService (sold → handed over → completed)|Auth|
 |garage|`/garage/{**catch-all}` → `api/garage/{**catch-all}`|any|AuctionService (My Garage)|Auth|
 |geo|`/geo/{**catch-all}` → `api/geo/{**catch-all}`|GET (`/geo/reverse?lat&lon`)|AuctionService (reverse geocoding)|Auth|
+|places|`/places/{**catch-all}` → `api/places/{**catch-all}`|GET (`/places/autocomplete`, `/places/{placeId}`, `/places/reverse`)|IdentityService ("Search location", Google Places proxy) – cluster `identity` (`localhost:5001` / `identity-svc`)|Auth|
 |images|`/images/{**catch-all}` (path unchanged)|GET, HEAD|AuctionService (static files)|Anon|
 |search|`/search/{**catch-all}` → `api/search/{**catch-all}`|GET|SearchService|Anon|
 |bidsWrite|`/bids/{**catch-all}` → `api/bids/{**catch-all}`|POST (place bid, `/bids/accept`)|BidService|Auth|
@@ -97,3 +98,8 @@ None.
 | /reviews/{**} (GET) | auctions | api/reviews/{**} | – |
 | /reviews/{**} (POST, PUT, DELETE) | auctions | api/reviews/{**} | signed in |
 | /sellers/{**} (GET) | auctions | api/sellers/{**} | – |
+
+
+### Payments routes
+`/payments/{**}` → AuctionService `api/payments/{**}` (signed in); `/payments/stripe/{**}` → `api/payments/stripe/{**}` **without**
+sign-in (Stripe webhooks – signature checked by AuctionService – and the onboarding return pages).

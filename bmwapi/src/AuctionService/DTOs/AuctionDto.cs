@@ -107,6 +107,8 @@ public class AuctionDto
     /// <summary>FixedPrice: units still for sale / bought so far.</summary>
     public int QuantityAvailable { get; set; }
     public int QuantitySold { get; set; }
+    /// <summary>Units held for buyers who are paying right now (Buy now, 15 minutes): "Reserved" when none are left.</summary>
+    public int QuantityReserved { get; set; }
     /// <summary>The seller's average rating (null: no reviews yet) and number of ratings – "⭐ 4.7 (32)".</summary>
     public double? SellerRating { get; set; }
     public int SellerRatingCount { get; set; }

@@ -118,7 +118,8 @@ public class ShippingAddressesController(AuctionDbContext context, TimeProvider 
     private static ShippingAddressDto ToDto(ShippingAddress a) => new()
     {
         Id = a.Id, IsDefault = a.IsDefault, Name = a.Address.Name, Phone = a.Address.Phone, Line1 = a.Address.Line1,
-        Line2 = a.Address.Line2, City = a.Address.City, Postcode = a.Address.Postcode, CountryCode = a.Address.CountryCode
+        Line2 = a.Address.Line2, City = a.Address.City, State = a.Address.State, PlaceId = a.Address.PlaceId,
+        Postcode = a.Address.Postcode, CountryCode = a.Address.CountryCode
     };
 
     private ActionResult Invalid(Dictionary<string, string[]> errors)

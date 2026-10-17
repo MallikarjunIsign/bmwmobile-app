@@ -1,0 +1,53 @@
+# A NEW buyer signs up on the emulator and buys the seller's Direct-sale part with Stripe's test card, then the order
+# is Paid (part of e2e/run-buy-now-e2e.sh). Env: EMAIL (new per run), PASSWORD, BRAND (the listing to buy), PRICE.
+#   Sign up → test-mode code → Home → search BRAND → the listing → BUY NOW → Pickup → PAY → card 4242 4242 4242 4242
+#   → "Paid ✓" → View order → the order (paid)
+# Needs the Stripe CLI forwarding webhooks (bmwapi/stripe-listen.sh): an order is Paid only from Stripe's webhook.
+appId: com.bidmywork.app
+---
+- launchApp:
+    clearState: true
+    permissions:
+      all: allow
+- runFlow:
+    when:
+      visible: "Allow"
+    commands:
+      - tapOn: "Allow"
+- extendedWaitUntil:
+    visible: "ENTER MARKETPLACE"
+    timeout: 180000
+- tapOn: "ENTER MARKETPLACE"
+- tapOn: "New to ShopCarParts\\? Create an account"
+
+# 1. Sign up
+- extendedWaitUntil:
+    visible: "Create Account"
+    timeout: 30000
+- tapOn: "Your full name"
+- inputText: "E2E Buyer"
+- tapOn: "Mobile number"
+- inputText: "9876501234"
+- tapOn: "you@example.com"
+- inputText: ${EMAIL}
+- tapOn: "Create a password"
+- inputText: ${PASSWORD}
+# The keyboard is open here, so Back only closes it.
+- hideKeyboard
+- scrollUntilVisible:
+    element: "CREATE ACCOUNT"
+    direction: DOWN
+- tapOn:
+    text: ".*I agree to the.*"
+    point: "5%,50%"
+- tapOn: "CREATE ACCOUNT"
+- extendedWaitUntil:
+    visible: "Test mode: your code is .*"
+    timeout: 60000
+- copyTextFrom: "Test mode: your code is .*"
+- tapOn: "Verification code"
+- inputText: ${maestro.copiedText.replace(/\D/g, '')}
+- extendedWaitUntil:
+    visible: "SHOP BY CATEGORY"
+    timeout: 90000
+- takeScreenshot: buyer-home

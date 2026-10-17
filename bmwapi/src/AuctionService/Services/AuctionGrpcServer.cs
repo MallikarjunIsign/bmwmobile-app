@@ -4,8 +4,12 @@ using GrpcAuctionService;
 
 namespace AuctionService.Services;
 
-public class AuctionGrpcServer(AuctionDbContext dbContext) : GrpcAuction.GrpcAuctionBase
+public class AuctionGrpcServer(AuctionDbContext dbContext, Payments.StrikeService strikes) : GrpcAuction.GrpcAuctionBase
 {
+    /// <summary>BidService before each bid: too many unpaid wins (non-payment strikes) → no bidding.</summary>
+    public override async Task<BidderStandingResponse> GetBidderStanding(BidderStandingRequest request, ServerCallContext context) =>
+        new() { BlockedReason = await strikes.BiddingBlockedReasonAsync(request.Bidder, context.CancellationToken) ?? string.Empty };
+
     public override async Task<GrpcAuctionResponse> GetAuction(GetAuctionRequest request, ServerCallContext context)
     {
         var auction = await dbContext.Auctions.FindAsync(request.AuctionId)

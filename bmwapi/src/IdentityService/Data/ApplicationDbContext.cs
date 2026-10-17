@@ -73,6 +73,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
             l.Property(x => x.Landmark).HasMaxLength(100);
             l.Property(x => x.PostalCode).HasMaxLength(12);
             l.Property(x => x.CountryCode).HasMaxLength(2);
+            l.Property(x => x.PlaceId).HasMaxLength(300);
+            l.Property(x => x.FormattedAddress).HasMaxLength(300);
+            l.Property(x => x.City).HasMaxLength(100);
+            l.Property(x => x.State).HasMaxLength(100);
             l.HasIndex(x => x.UserId);
             // At most one primary location per user.
             l.HasIndex(x => x.UserId).IsUnique().HasFilter("\"IsPrimary\" = true").HasDatabaseName("IX_UserLocations_UserId_Primary");

@@ -62,6 +62,10 @@ public class CustomProfileService(
             context.IssuedClaims.Add(new Claim(PartRequestAudience.CountryClaim, user.CountryCode));
         }
 
+        // The account's own country: AuctionService opens a seller's payment account there.
+        if (!string.IsNullOrWhiteSpace(user.CountryCode))
+            context.IssuedClaims.Add(new Claim(AppRoles.AccountCountryClaim, user.CountryCode));
+
         // Marketplace role: buyer, seller or admin. Always issued; every service checks it (Contracts.AppRoles).
         // Refresh tokens re-read it (UpdateAccessTokenClaimsOnRefresh), so an upgrade to seller shows up on the next refresh.
         context.IssuedClaims.Add(new Claim(AppRoles.ClaimType, await accounts.GetRoleAsync(user)));

@@ -3,6 +3,7 @@ using AuctionService.Data;
 using AuctionService.DTOs;
 using AuctionService.Entities;
 using AuctionService.Errors;
+using AuctionService.Payments;
 using AuctionService.RequestHelpers;
 using AuctionService.Services;
 using Contracts;
@@ -154,11 +155,14 @@ public class ListingsController(AuctionDbContext context, IDbContextOutbox<Aucti
     /// <summary>Checks everything (fitment, specs, details, photos, location, auction settings) and goes Live.</summary>
     [SellerOnly]
     [HttpPost("{id}/publish")]
-    public async Task<ActionResult<AuctionDto>> Publish(string id)
+    public async Task<ActionResult<AuctionDto>> Publish(string id, [FromServices] SellerPaymentService payments)
     {
         var (auction, error) = await LoadOwnAsync(id);
         if (error != null) return error;
         if (auction!.Status != Status.Draft) return BadRequest(new { message = "Only drafts can be published" });
+        // USA / Ireland: buyers pay online, so the seller's payment account must be active first.
+        if (await payments.PublishBlockedReasonAsync(Username, auction.Item.CountryCode, HttpContext.RequestAborted) is { } blocked)
+            return Conflict(new { message = blocked, code = "PAYMENTS_NOT_READY" });
 
         ListingRules.SyncDerivedFields(auction.Item);
         var now = Now;
@@ -242,13 +246,15 @@ public class ListingsController(AuctionDbContext context, IDbContextOutbox<Aucti
     /// <summary>"Ended – no bids" → relist with one tap: a new Live listing with the same details, price and duration.</summary>
     [SellerOnly]
     [HttpPost("{id}/relist")]
-    public async Task<ActionResult<AuctionDto>> Relist(string id)
+    public async Task<ActionResult<AuctionDto>> Relist(string id, [FromServices] SellerPaymentService payments)
     {
         var source = await context.Auctions.AsNoTracking().WithDetails().FirstOrDefaultAsync(x => x.Id == id);
         if (source == null) return NotFound();
         if (source.Seller != Username) return Forbid();
         if (source.Status is not (Status.Unsold or Status.ReserveNotMet))
             return BadRequest(new { message = "Only listings that ended without a sale can be relisted" });
+        if (await payments.PublishBlockedReasonAsync(Username, source.Item.CountryCode, HttpContext.RequestAborted) is { } blocked)
+            return Conflict(new { message = blocked, code = "PAYMENTS_NOT_READY" });
 
         var copy = await CopyAsync(source);
         var now = Now;
@@ -315,10 +321,13 @@ public class ListingsController(AuctionDbContext context, IDbContextOutbox<Aucti
     /// phase); the last unit marks the listing Sold. Two buyers racing for the last unit: the second gets 409.
     /// </summary>
     [HttpPost("{id}/buy")]
-    public async Task<ActionResult<OrderDto>> Buy(string id, BuyListingDto dto)
+    public async Task<ActionResult<OrderDto>> Buy(string id, BuyListingDto dto, [FromServices] SellerPaymentService payments)
     {
         var auction = await context.Auctions.WithDetails().FirstOrDefaultAsync(x => x.Id == id);
         if (auction == null || auction.Status is Status.Draft or Status.Cancelled) return NotFound();
+        // USA / Ireland: paid online first (POST /payments/checkout/buy-now) – no order without payment.
+        if (payments.IsOnline(auction.Item.CountryCode))
+            return Conflict(new { message = "Pay online to buy this item – please update the app.", code = "PAYMENT_REQUIRED" });
         if (auction.SaleType != SaleType.FixedPrice) return BadRequest(new { message = "This is an auction – place a bid instead" });
         if (auction.Seller == Username) return BadRequest(new { message = "You can't buy your own listing" });
         if (await context.UserBlocks.AnyAsync(b => b.Blocker == auction.Seller && b.Blocked == Username))
@@ -361,7 +370,7 @@ public class ListingsController(AuctionDbContext context, IDbContextOutbox<Aucti
             return Conflict(new { message = "Someone else just bought it – check how many are left" });
         }
 
-        return OrdersController.ToDto(order, Username);
+        return OrdersController.ToDto(order, Username, now: Now);
     }
 
     /// <summary>"Copy fitment from my last listing": the fitment rows of the seller's latest vehicle-specific part.</summary>
@@ -388,7 +397,12 @@ public class ListingsController(AuctionDbContext context, IDbContextOutbox<Aucti
         Status.Draft => "Draft",
         Status.Live => "Live",
         Status.Cancelled => "Cancelled",
-        Status.Sold => orders.Count > 0 && orders.All(o => o.Status == OrderStatus.Completed) ? "Completed" : "Sold",
+        // Online payment: the winner (or the next bidder) has to pay first; nobody paid → offered on / Unsold.
+        Status.Sold when orders.Any(o => o.Status == OrderStatus.AwaitingPayment) => "AwaitingPayment",
+        Status.Sold when orders.Count > 0 && orders.All(o => o.Status == OrderStatus.Cancelled) => "OfferedToNextBidder",
+        Status.Sold => orders.Where(o => o.Status != OrderStatus.Cancelled).ToList() is { Count: > 0 } live && live.All(o => o.Status == OrderStatus.Completed)
+            ? "Completed" : "Sold",
+        Status.Unsold when orders.Any(o => o.Status == OrderStatus.Cancelled) => "UnsoldNotPaid",
         _ => "EndedNoBids"
     };
 

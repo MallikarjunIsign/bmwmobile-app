@@ -1,0 +1,100 @@
+# The US test seller publishes a Direct-sale part on the emulator (part of e2e/run-buy-now-e2e.sh).
+# Env: EMAIL, PASSWORD (the seller), BRAND (unique per run – the buyer finds the listing by it), PRICE.
+# Needs 3+ photos in the emulator's gallery (the script puts them there) and the emulator's GPS in the USA.
+#   Sell → Common part → Dash cam → Aftermarket / BRAND / New → 3 photos from the gallery → my location, Pickup + Shipping
+#   → Direct sale, PRICE → Publish listing
+appId: com.bidmywork.app
+---
+- runFlow: subflows/login.yaml
+- tapOn: "Sell"
+- extendedWaitUntil:
+    visible: "Common part"
+    timeout: 30000
+- tapOn: "Common part"
+
+# 1. Part type
+- extendedWaitUntil:
+    visible: "What part is it\\?"
+    timeout: 60000
+- tapOn: "Search: bumper, bonnet, headlight…"
+- tapOn: "Type a part: bumper, bonnet, tyre, dash cam…"
+- inputText: "Dash cam"
+- extendedWaitUntil:
+    visible: "Dash cam"
+    timeout: 30000
+- tapOn:
+    text: "Dash cam"
+    index: 1
+- tapOn: "Next: .*"
+
+# 2. Details
+- extendedWaitUntil:
+    visible: "Part details"
+    timeout: 30000
+- tapOn: "Aftermarket"
+- tapOn: "Bosch, Denso, TYC…"
+- inputText: ${BRAND}
+- hideKeyboard
+- scrollUntilVisible:
+    element: "New"
+    direction: DOWN
+- tapOn: "New"
+- tapOn: "Next: .*"
+
+# 3. Photos (gallery – the system photo picker)
+- extendedWaitUntil:
+    visible: "Add photos"
+    timeout: 30000
+- tapOn: "Add photos"
+- tapOn: "Gallery"
+- runFlow: subflows/pick-3-photos.yaml
+- extendedWaitUntil:
+    visible: "3 / .* photos"
+    timeout: 120000
+- tapOn: "Next: .*"
+
+# 4. Location and delivery
+- extendedWaitUntil:
+    visible: "Where is it\\?"
+    timeout: 30000
+- tapOn: "Use my location.*"
+- scrollUntilVisible:
+    element: "Shipping"
+    direction: DOWN
+# A new draft offers Pickup; add Shipping (the review below checks both).
+- runFlow:
+    when:
+      notVisible: "SHIPS WITHIN"
+    commands:
+      - tapOn: "Shipping"
+- tapOn: "Next: .*"
+
+# 5. Direct sale and price
+- extendedWaitUntil:
+    visible: "How do you want to sell it\\?"
+    timeout: 30000
+- tapOn: "Direct sale"
+# The input itself (its accessibility label), not the label text above it.
+- tapOn: "Price \\(USD\\)"
+- inputText: ${PRICE}
+# Not hideKeyboard: on Android it can send Back, which leaves the wizard.
+- tapOn: "How do you want to sell it\\?"
+- tapOn: "Next: .*"
+
+# 6. Publish
+- extendedWaitUntil:
+    visible: "Check and publish"
+    timeout: 30000
+- takeScreenshot: seller-review
+- assertVisible: "\\$${PRICE}"
+- assertVisible: "Yes – .*"
+- assertVisible: "Direct sale"
+- scrollUntilVisible:
+    element: "Publish listing"
+    direction: DOWN
+- tapOn: "Publish listing"
+- extendedWaitUntil:
+    notVisible: "Publishing…"
+    timeout: 120000
+- assertNotVisible: "Please fix these first"
+- takeScreenshot: seller-published

@@ -8,7 +8,10 @@ using IdentityService.Infrastructure;
 using IdentityService.Models;
 using IdentityService.Options;
 using IdentityService.Services;
+using IdentityService.Services.Places;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -82,7 +85,20 @@ internal static class HostingExtensions
         // Existing users with listings → seller, once (asks AuctionService who has listings).
         _ = builder.Services.AddHttpClient(nameof(RoleBackfillService), c => c.Timeout = TimeSpan.FromSeconds(15));
         _ = builder.Services.AddHostedService<RoleBackfillService>();
+        // New sellers (USA / Ireland): their payment account is opened in AuctionService (Stripe Connect).
+        _ = builder.Services.AddHttpClient(nameof(SellerPaymentAccounts), c => c.Timeout = TimeSpan.FromSeconds(20));
+        _ = builder.Services.AddScoped<ISellerPaymentAccounts, SellerPaymentAccounts>();
         _ = builder.Services.AddScoped<LocationService>();
+        // "Search location" (/api/places): Google Places (New) + Geocoding behind our own API. The key comes only from
+        // user-secrets / environment (GoogleMaps:ApiKey); without it the built-in city list is used.
+        _ = builder.Services.Configure<GoogleMapsOptions>(builder.Configuration.GetSection(GoogleMapsOptions.SectionName));
+        _ = builder.Services.AddHttpClient<GoogleMapsClient>((sp, c) =>
+                c.Timeout = TimeSpan.FromSeconds(Math.Max(sp.GetRequiredService<IOptions<GoogleMapsOptions>>().Value.TimeoutSeconds, 1)))
+            .RemoveAllLoggers(); // the geocoding URL carries the key: never log request URLs
+        builder.Services.TryAddSingleton(TimeProvider.System);
+        _ = builder.Services.AddSingleton<PlacesCache>();
+        _ = builder.Services.AddSingleton<PlacesUsage>();
+        _ = builder.Services.AddScoped<PlacesService>();
         _ = builder.Services.AddScoped<IOtpService, OtpService>();
         _ = builder.Services.AddScoped<ITrustedDeviceService, TrustedDeviceService>();
         _ = builder.Services.AddSingleton<IOtpSender, EmailOtpSender>();

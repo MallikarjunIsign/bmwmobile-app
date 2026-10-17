@@ -4,6 +4,7 @@ import { LocationProvider, useLocations } from '../src/location/LocationContext'
 import { ApiService } from '../src/services/api';
 import { getCurrentPosition, GpsError } from '../src/utils/gps';
 import { LocationApi } from '../src/services/locationApi';
+import { PlacesApi } from '../src/services/placesApi';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 jest.mock('../src/auth/AuthContext', () => ({
@@ -16,10 +17,13 @@ jest.mock('../src/utils/gps', () => {
 });
 
 jest.mock('../src/services/locationApi', () => ({
-  LocationApi: { list: jest.fn(), setRadius: jest.fn(), setCurrent: jest.fn(), setPrimary: jest.fn() },
+  LocationApi: { list: jest.fn(), setRadius: jest.fn(), setCurrent: jest.fn(), setPrimary: jest.fn(), add: jest.fn() },
 }));
+// "Search location" naming of GPS points; rejected by default (older backend) → /geo/reverse.
+jest.mock('../src/services/placesApi', () => ({ PlacesApi: { reverse: jest.fn() } }));
 
 const reverseGeocode = ApiService.reverseGeocode as jest.Mock;
+const placesReverse = PlacesApi.reverse as jest.Mock;
 const position = getCurrentPosition as jest.Mock;
 const locationApi = LocationApi as unknown as Record<string, jest.Mock>;
 
@@ -54,6 +58,8 @@ const render = async () => {
 
 beforeEach(() => {
   reverseGeocode.mockReset();
+  placesReverse.mockReset();
+  placesReverse.mockRejectedValue(new Error('Not found'));
   position.mockReset();
   Object.values(locationApi).forEach(m => m.mockReset());
   locationApi.list.mockResolvedValue(null);
@@ -169,4 +175,45 @@ test('backend down: keeps the coordinates with the phone country radius', async 
 
   expect(ctx.location).toMatchObject({ latitude: 17.385, city: null, countryCode: null, radiusUnit: 'mi' });
   expect(ctx.near).toBeDefined();
+});
+
+const kukatpallyPlace = {
+  placeId: 'ChIJ-kukatpally', formattedAddress: 'Kukatpally, Hyderabad, Telangana 500072, India', lat: 17.4948, lon: 78.3996,
+  label: 'Kukatpally, Hyderabad', area: 'Kukatpally', city: 'Hyderabad', state: 'Telangana', countryCode: 'IN', postcode: '500072',
+  supported: true, source: 'google',
+};
+
+test('GPS is named by "Search location": area + city ("Kukatpally, Hyderabad"), 200 km', async () => {
+  position.mockResolvedValue({ latitude: 17.4949, longitude: 78.3997 });
+  placesReverse.mockResolvedValue(kukatpallyPlace);
+
+  await render();
+
+  expect(placesReverse).toHaveBeenCalledWith(17.4949, 78.3997);
+  expect(reverseGeocode).not.toHaveBeenCalled();
+  expect(ctx.location).toMatchObject({ area: 'Kukatpally', city: 'Hyderabad', countryCode: 'IN', radiusValue: 200, radiusUnit: 'km' });
+});
+
+test('Home → Search location: a new place is saved and used with the radius in use; a saved one is chosen again', async () => {
+  position.mockResolvedValue(HOUSTON);
+  reverseGeocode.mockResolvedValue(houstonGeo);
+  locationApi.list.mockResolvedValue({ autoUpdatePrimary: true, locations: [gpsRow(25)] });
+  await render();
+  expect(ctx.location).toMatchObject({ radiusValue: 25, radiusUnit: 'mi' });
+
+  const katy = { ...kukatpallyPlace, placeId: 'ChIJ-katy', label: 'Katy', area: null, city: 'Katy', state: 'Texas', countryCode: 'US', lat: 29.7858, lon: -95.8245, postcode: null };
+  const saved = { id: 'k1', label: 'Katy', placeName: 'Katy', latitude: 29.7858, longitude: -95.8245, countryCode: 'US', isPrimary: true,
+    isCurrentLocation: false, radiusValue: 25, radiusUnit: 'mi', radiusKm: 40.23, placeId: 'ChIJ-katy', city: 'Katy' };
+  locationApi.add.mockResolvedValue({ autoUpdatePrimary: false, locations: [saved] });
+  await ReactTestRenderer.act(async () => ctx.choosePlace(katy as any));
+  expect(locationApi.add).toHaveBeenCalledWith(expect.objectContaining({
+    label: 'Katy', placeName: 'Katy', latitude: 29.7858, longitude: -95.8245, countryCode: 'US', placeId: 'ChIJ-katy', radiusValue: 25, makePrimary: true,
+  }));
+  expect(ctx.location).toMatchObject({ city: 'Katy', addressId: 'k1', radiusValue: 25 });
+
+  // The same place again: chosen, not saved twice.
+  locationApi.setPrimary.mockResolvedValue({ autoUpdatePrimary: false, locations: [saved] });
+  await ReactTestRenderer.act(async () => ctx.choosePlace(katy as any));
+  expect(locationApi.setPrimary).toHaveBeenCalledWith('k1');
+  expect(locationApi.add).toHaveBeenCalledTimes(1);
 });

@@ -1,16 +1,17 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Modal, ScrollView, TouchableOpacity, TextInput, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
 import { MarketApi } from '../services/marketApi';
-import { ServerError } from '../services/api';
+import { LISTING_GONE, ServerError } from '../services/api';
 import { CheckboxRow } from './CheckboxRow';
+import { PlaceSearch } from './PlaceSearch';
 import { countryName } from '../utils/geo';
 import { getCurrentPosition, GpsError } from '../utils/gps';
 import { useLocations } from '../location/LocationContext';
 import { shippingChargeText } from '../utils/delivery';
 import type { Address, FieldErrors, ShippingAddress, ShippingQuote } from '../types/listing';
-import type { CountryCode, SavedLocation } from '../types/location';
+import type { CountryCode, PlaceDetails, SavedLocation } from '../types/location';
 
 /** Where the item goes, for the distance: one of the buyer's saved locations or the phone's GPS. */
 type Spot = { key: string; label: string; latitude: number; longitude: number; saved?: SavedLocation };
@@ -20,6 +21,8 @@ export const addressText = (a: Address) =>
   [a.name, a.phone, [a.line1, a.line2, `${a.city} ${a.postcode}`.trim()].filter(Boolean).join(', ')].filter(Boolean).join(' · ');
 
 const POSTCODE_LABEL: Record<string, string> = { IN: 'PIN code', US: 'ZIP code', IE: 'Eircode', NG: 'Postcode (optional)' };
+
+const STATE_LABEL: Record<string, string> = { IN: 'State', US: 'State', IE: 'County', NG: 'State' };
 
 const EMPTY = (countryCode: string): Address => ({ name: '', phone: '', line1: '', line2: '', city: '', postcode: '', countryCode });
 
@@ -55,6 +58,7 @@ export const ShippingAddressSheet: React.FC<{
   const [errors, setErrors] = useState<FieldErrors>({});
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const submitting = useRef(false);
 
   // Start with the location the app is using (a chosen saved address, or GPS) when it's in the seller's country.
   useEffect(() => {
@@ -101,7 +105,8 @@ export const ShippingAddressSheet: React.FC<{
       ...f,
       line1: f.line1 || l.addressLine || '',
       line2: f.line2 || [l.area, l.landmark].filter(Boolean).join(', '),
-      city: f.city || l.placeName || '',
+      city: f.city || l.city || l.placeName || '',
+      state: f.state || l.state || f.state,
       postcode: f.postcode || l.postalCode || '',
     }));
   };
@@ -111,6 +116,7 @@ export const ShippingAddressSheet: React.FC<{
     setErrors({});
     setMessage(null);
     setForm(EMPTY(countryCode));
+    setFound(null);
     MarketApi.shippingAddresses()
       .then(list => {
         // Only addresses in the seller's country can be used.
@@ -127,9 +133,33 @@ export const ShippingAddressSheet: React.FC<{
 
   const set = (patch: Partial<Address>) => setForm(f => ({ ...f, ...patch }));
 
+  // "Search location": fills street, area, city, state and postcode (name, phone and house / flat stay editable) and
+  // makes the place the delivery location for the charge. Only places in the seller's country.
+  const [found, setFound] = useState<PlaceDetails | null>(null);
+  const pickSearched = (p: PlaceDetails) => {
+    if (p.countryCode?.toUpperCase() !== countryCode) {
+      setMessage(`The seller ships within ${countryName(countryCode as CountryCode) ?? countryCode} only. Choose a place there.`);
+      return;
+    }
+    setMessage(null);
+    setFound(p);
+    setForm(f => ({
+      ...f,
+      line1: p.street ?? f.line1,
+      line2: p.area ?? f.line2,
+      city: p.city ?? f.city,
+      state: p.state ?? f.state,
+      postcode: p.postcode ?? f.postcode,
+      placeId: p.placeId,
+    }));
+    setSpot({ key: 'search', label: p.label, latitude: p.lat, longitude: p.lon });
+  };
+
   const submit = async () => {
-    // Only with a location the backend can ship to (the button is disabled otherwise).
-    if (!spot || !quote?.available) return;
+    // Only with a location the backend can ship to (the button is disabled otherwise); one submit at a time (the
+    // disabled state only applies after the next render, so a quick second tap would send it twice).
+    if (!spot || !quote?.available || submitting.current) return;
+    submitting.current = true;
     setBusy(true);
     setErrors({});
     setMessage(null);
@@ -148,8 +178,9 @@ export const ShippingAddressSheet: React.FC<{
       }
     } catch (e) {
       if (e instanceof ServerError && Object.keys(e.fields).length > 0) setErrors(e.fields);
-      else setMessage(e instanceof ServerError ? e.message : "Couldn't save the address. Please try again.");
+      else setMessage(e instanceof ServerError ? (e.status === 404 ? LISTING_GONE : e.message) : "Couldn't save the address. Please try again.");
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   };
@@ -218,11 +249,20 @@ export const ShippingAddressSheet: React.FC<{
                 </>
               ) : (
                 <>
+                  <PlaceSearch
+                    label="Find the address"
+                    placeholder="Search street, area or landmark"
+                    value={found}
+                    onPick={pickSearched}
+                    near={spot}
+                    testID="shipping-place-search"
+                  />
                   {field('name', 'Full name', { placeholder: 'Who receives it', autoCapitalize: 'words' })}
                   {field('phone', 'Phone', { placeholder: 'For the courier', keyboardType: 'phone-pad' })}
                   {field('line1', 'Address line 1', { placeholder: 'House / flat, building, street' })}
                   {field('line2', 'Address line 2 (optional)', { placeholder: 'Area, landmark' })}
                   {field('city', 'City', { autoCapitalize: 'words' })}
+                  {field('state', `${STATE_LABEL[countryCode] ?? 'State / region'} (optional)`, { autoCapitalize: 'words' })}
                   {field('postcode', POSTCODE_LABEL[countryCode] ?? 'Postcode', { autoCapitalize: 'characters' })}
                   <View style={styles.field}>
                     <Text style={styles.label}>COUNTRY</Text>

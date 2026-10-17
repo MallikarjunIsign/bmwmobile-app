@@ -146,6 +146,8 @@ public static partial class ParcelDefaults
         (new Regex(@"alternator|starter|compressor", RegexOptions.IgnoreCase), new Parcel(15, 12, 10, 10)),
         (new Regex(@"bulb|fuse|relay|spark plug|key", RegexOptions.IgnoreCase), new Parcel(0.5m, 6, 4, 4)),
         (new Regex(@"brake pads|filter|sensor|ecu", RegexOptions.IgnoreCase), new Parcel(3, 10, 8, 4)),
+        // A set of seat covers: soft, folded – under one cubic foot, so the actual weight is charged.
+        (new Regex(@"seat\s*covers?", RegexOptions.IgnoreCase), new Parcel(4, 18, 14, 6)),
     ];
 
     private static readonly Dictionary<SizeClass, Parcel> BySize = new()

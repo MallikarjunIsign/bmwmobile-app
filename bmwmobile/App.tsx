@@ -7,6 +7,7 @@ import { LocationProvider } from './src/location/LocationContext';
 import { NotificationsProvider } from './src/services/notifications';
 import { GarageProvider } from './src/location/GarageContext';
 import { ChatProvider } from './src/chat/ChatContext';
+import { PaymentsProvider } from './src/payments/PaymentsProvider';
 
 export default function App() {
   return (
@@ -17,7 +18,10 @@ export default function App() {
           <GarageProvider>
             <NotificationsProvider>
               <ChatProvider>
-                <AppNavigator />
+                {/* Online payments (Stripe): USA / Ireland. */}
+                <PaymentsProvider>
+                  <AppNavigator />
+                </PaymentsProvider>
               </ChatProvider>
             </NotificationsProvider>
           </GarageProvider>

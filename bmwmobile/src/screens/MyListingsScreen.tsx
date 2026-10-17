@@ -16,10 +16,16 @@ import type { MyListing } from '../types/listing';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'MyListings'>;
 
-const FILTERS = ['All', 'Draft', 'Live', 'EndedNoBids', 'Sold', 'Completed', 'Cancelled'] as const;
+const FILTERS = ['All', 'Draft', 'Live', 'AwaitingPayment', 'EndedNoBids', 'Sold', 'Completed', 'Cancelled'] as const;
 const VARIANT: Record<MyListing['state'], 'primary' | 'success' | 'warning' | 'dark' | 'info'> = {
   Draft: 'info', Live: 'primary', EndedNoBids: 'warning', Sold: 'success', Completed: 'success', Cancelled: 'dark',
+  // Online payment (USA / Ireland): the winner pays first; nobody paid → relist.
+  AwaitingPayment: 'warning', OfferedToNextBidder: 'warning', UnsoldNotPaid: 'warning',
 };
+/** Filter pills: "Awaiting payment" also shows listings offered to the next bidder; "Ended – no bids" also unsold-not-paid. */
+const inFilter = (state: MyListing['state'], f: (typeof FILTERS)[number]) =>
+  f === 'All' || state === f ||
+  (f === 'AwaitingPayment' && state === 'OfferedToNextBidder') || (f === 'EndedNoBids' && state === 'UnsoldNotPaid');
 
 /** My Listings: Draft / Live / Ended – no bids / Sold / Completed / Cancelled. */
 export const MyListingsScreen: React.FC<Props> = ({ navigation }) => {
@@ -53,11 +59,12 @@ export const MyListingsScreen: React.FC<Props> = ({ navigation }) => {
 
   const open = (item: MyListing) => {
     if (item.state === 'Draft') navigation.navigate('SellWizard', { listingId: item.id });
-    else if ((item.state === 'Sold' || item.state === 'Completed') && item.orderId) navigation.navigate('MainTabs', { screen: 'MyPurchases' });
+    else if ((item.state === 'Sold' || item.state === 'Completed' || item.state === 'AwaitingPayment') && item.orderId)
+      navigation.navigate('MainTabs', { screen: 'MyPurchases' });
     else navigation.navigate('PartDetails', { auctionId: item.id });
   };
 
-  const shown = filter === 'All' ? items : items.filter(i => i.state === filter);
+  const shown = items.filter(i => inFilter(i.state, filter));
 
   return (
     <SafeAreaView style={styles.container}>
@@ -72,7 +79,7 @@ export const MyListingsScreen: React.FC<Props> = ({ navigation }) => {
         renderItem={({ item: f }) => (
           <TouchableOpacity style={[styles.pill, filter === f && styles.pillActive]} onPress={() => setFilter(f as any)}>
             <Text style={[styles.pillText, filter === f && styles.pillTextActive]}>
-              {label(f)} {f === 'All' ? `(${items.length})` : `(${items.filter(i => i.state === f).length})`}
+              {label(f)} ({items.filter(i => inFilter(i.state, f as (typeof FILTERS)[number])).length})
             </Text>
           </TouchableOpacity>
         )}
@@ -102,7 +109,7 @@ export const MyListingsScreen: React.FC<Props> = ({ navigation }) => {
                   {item.state === 'Live' ? <Countdown end={item.auctionEnd} /> : null}
                 </Text>
               )}
-              {item.state === 'EndedNoBids' ? (
+              {item.state === 'EndedNoBids' || item.state === 'UnsoldNotPaid' ? (
                 <TouchableOpacity style={styles.relist} onPress={() => relist(item)}>
                   <Text style={styles.relistText}>↻ Relist</Text>
                 </TouchableOpacity>

@@ -6,7 +6,7 @@ import { RootStackParamList } from '../types/navigation';
 import { COLORS, SPACING, RADIUS } from '../theme/colors';
 import { Header } from '../components/Header';
 import { Badge } from '../components/Badge';
-import { mapRawDtoToAuction, ServerError } from '../services/api';
+import { listingErrorMessage, mapRawDtoToAuction, ServerError } from '../services/api';
 import { MarketApi } from '../services/marketApi';
 import { isCurrentUser } from '../auth/session';
 import { useAuth } from '../auth/AuthContext';
@@ -22,6 +22,7 @@ import { formatDistance, formatRadius, haversineKm } from '../utils/geo';
 import { label, maskUsername } from '../utils/time';
 import { buyerDeliveryText, deliverySummary, receiveProblem, SHIPPING_NOT_AVAILABLE, shippingEstimateText, shipsWithinText } from '../utils/delivery';
 import { useShippingEstimate } from '../hooks/useShippingEstimate';
+import { usePaymentConfig } from '../payments/PaymentsProvider';
 import { ratingText } from '../utils/rating';
 import { ReviewApi } from '../services/reviewApi';
 import { ReviewCard } from '../components/ReviewCard';
@@ -54,6 +55,7 @@ export const PartDetailsScreen: React.FC<Props> = ({ route, navigation }) => {
   const sellerAccount = isSellerAccount(useAuth().user);
   const { country, location } = useLocations();
   const { auctionId, auction: initialAuction } = route.params;
+  const paymentConfig = usePaymentConfig();
   const [listing, setListing] = useState<Listing | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [bids, setBids] = useState<Bid[]>([]);
@@ -72,7 +74,7 @@ export const PartDetailsScreen: React.FC<Props> = ({ route, navigation }) => {
       setListing(await MarketApi.listingDetail(auctionId));
       setError(null);
     } catch (e) {
-      setError(e instanceof ServerError ? e.message : "Couldn't load this listing.");
+      setError(listingErrorMessage(e, "Couldn't load this listing."));
     }
     MarketApi.bidHistory(auctionId).then(setBids).catch(() => undefined);
     // Item reviews (sold items).
@@ -217,11 +219,21 @@ export const PartDetailsScreen: React.FC<Props> = ({ route, navigation }) => {
   };
 
   const qty = Math.min(Math.max(quantity, 1), Math.max(available, 1));
+  // USA / Ireland: paid online (Stripe) before there is an order. India / Nigeria: as before ("coming soon").
+  const online = paymentConfig.enabled && !!listing.countryCode && paymentConfig.countries.includes(listing.countryCode);
+  const reserved = isFixed && available === 0 && (listing.quantityReserved ?? 0) > 0 && listing.status === 'Live';
+  const checkout = () =>
+    navigation.navigate('Checkout', {
+      listingId: listing.id, title: listing.title ?? auction.title, imageUrl: images[0]?.thumbnailUrl ?? images[0]?.url ?? null,
+      price: listing.startingPrice, quantity: qty, deliveryOptions: listing.deliveryOptions, countryCode: listing.countryCode!,
+      pickupCity: listing.pickupCity ?? listing.locationName ?? null,
+    });
   const buy = () =>
     Alert.alert(
       `Buy ${qty > 1 ? `${qty} × ` : ''}for ${money(listing.startingPrice * qty)}?`,
       [
         'The seller is told at once. You arrange payment and handover with them in your Orders.',
+        'Online payment is coming soon in your country.',
         // Pickup is free; shipping is added at the exact, fixed charge when you choose it in Orders.
         [
           listing.deliveryOptions.includes('Pickup') ? 'Pickup: free.' : null,
@@ -248,7 +260,7 @@ export const PartDetailsScreen: React.FC<Props> = ({ route, navigation }) => {
               ]);
             } catch (e) {
               await load();
-              Alert.alert('Not bought', e instanceof ServerError ? e.message : 'Please try again.');
+              Alert.alert('Not bought', listingErrorMessage(e, 'Please try again.'));
             } finally {
               setBusy(false);
             }
@@ -338,7 +350,7 @@ export const PartDetailsScreen: React.FC<Props> = ({ route, navigation }) => {
               {isFixed ? (
                 <>
                   <View style={styles.bidBadge}>
-                    <Text style={styles.bidText}>{available > 0 ? `${available} available` : 'Sold out'}</Text>
+                    <Text style={styles.bidText}>{available > 0 ? `${available} available` : reserved ? 'Reserved' : 'Sold out'}</Text>
                   </View>
                   <Text style={styles.timeLeft}>Direct sale · no bidding</Text>
                 </>
@@ -522,6 +534,11 @@ export const PartDetailsScreen: React.FC<Props> = ({ route, navigation }) => {
                 : isLive ? "This is your listing – you can't bid on it." : `This listing is ${label(listing.status).toLowerCase()}.`}
             </Text>
           )
+        ) : reserved ? (
+          // Another buyer is paying for the last units (15 minutes); free again if they don't.
+          <View style={[styles.bidBarBtn, styles.reservedBar]} testID="listing-reserved">
+            <Text style={styles.bidBarText}>RESERVED – ANOTHER BUYER IS PAYING · CHECK AGAIN SOON</Text>
+          </View>
         ) : isLive && isFixed ? (
           <View style={styles.buyRow}>
             {available > 1 ? (
@@ -537,7 +554,7 @@ export const PartDetailsScreen: React.FC<Props> = ({ route, navigation }) => {
                 </TouchableOpacity>
               </View>
             ) : null}
-            <TouchableOpacity style={[styles.bidBarBtn, styles.buyBarBtn]} onPress={() => checkReceive(buy, 'Buy anyway')} disabled={busy}>
+            <TouchableOpacity style={[styles.bidBarBtn, styles.buyBarBtn]} onPress={() => checkReceive(online ? checkout : buy, 'Buy anyway')} disabled={busy}>
               <Text style={styles.bidBarText}>BUY NOW – {money(listing.startingPrice * qty)}</Text>
             </TouchableOpacity>
           </View>
@@ -653,6 +670,7 @@ const styles = StyleSheet.create({
   bottomBar: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: COLORS.surface, padding: SPACING.md, borderTopWidth: 1, borderTopColor: COLORS.border },
   bidBarBtn: { backgroundColor: COLORS.primary, paddingVertical: 14, borderRadius: RADIUS.md, alignItems: 'center' },
   winningBar: { backgroundColor: COLORS.success },
+  reservedBar: { backgroundColor: COLORS.cardSecondary },
   bidBarText: { color: COLORS.text, fontSize: 15, fontWeight: '900', letterSpacing: 1 },
   ownNote: { color: COLORS.textMuted, fontSize: 13, textAlign: 'center', paddingVertical: 8 },
   requestAltBtn: { backgroundColor: COLORS.cardSecondary, paddingVertical: 14, borderRadius: RADIUS.md, alignItems: 'center', borderWidth: 1, borderColor: COLORS.primary },

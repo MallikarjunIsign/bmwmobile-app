@@ -125,3 +125,11 @@ export function locationText(location: { area?: string | null; city: string | nu
   const parts = [location.area, location.city, countryName(location.countryCode)].filter(Boolean);
   return parts.length ? [...new Set(parts)].join(', ') : null;
 }
+
+/** "Kukatpally, Hyderabad" – the location label shown in the app: area + city, else the city. */
+export function placeLabel(location: { area?: string | null; city?: string | null } | null): string | null {
+  if (!location) return null;
+  const { area, city } = location;
+  if (area && city && !city.toLowerCase().includes(area.toLowerCase())) return `${area}, ${city}`;
+  return city || area || null;
+}

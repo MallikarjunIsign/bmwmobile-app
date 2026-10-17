@@ -44,6 +44,7 @@ import { ContainerTrackingScreen } from '../screens/ContainerTrackingScreen';
 
 import { PartDetailsScreen } from '../screens/PartDetailsScreen';
 import { PlaceBidModal } from '../screens/PlaceBidModal';
+import { CheckoutScreen } from '../screens/CheckoutScreen';
 import { HighestBidderScreen } from '../screens/HighestBidderScreen';
 import { OutbidScreen } from '../screens/OutbidScreen';
 import { EndingSoonScreen } from '../screens/EndingSoonScreen';
@@ -177,6 +178,7 @@ export function AppNavigator() {
             <Stack.Screen name="ProfilePreferences" component={ProfilePreferencesScreen} />
 
             <Stack.Screen name="PartDetails" component={PartDetailsScreen} />
+            <Stack.Screen name="Checkout" component={CheckoutScreen} />
             <Stack.Screen 
               name="PlaceBidModal" 
               component={PlaceBidModal} 

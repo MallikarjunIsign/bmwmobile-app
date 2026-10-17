@@ -135,6 +135,7 @@ public class AuctionMapper(ImageUrlBuilder urls)
             SellerName = auction.SellerName,
             QuantityAvailable = auction.QuantityAvailable,
             QuantitySold = auction.QuantitySold,
+            QuantityReserved = auction.QuantityReserved,
             SellerRating = auction.SellerRatingAverage,
             SellerRatingCount = auction.SellerRatingCount
         };

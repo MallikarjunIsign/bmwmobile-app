@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Runs the search / filter UI test (e2e/search-filters.yaml) on the emulator, as the test buyer and the test seller,
-# then the radius test (e2e/radius.yaml: who sees which listings, radius 200 → 25 mi) as the test buyer in Houston.
+# then "Search location" (e2e/place-search.yaml: add "Kukatpally" as the test buyer in Hyderabad), then the radius test (e2e/radius.yaml: who sees which listings, radius 200 → 25 mi) as the test buyer in Houston.
 # Needs: the backend (./start-backend.sh, started with the e2e seller seeded – see pre-demo-check.sh), Metro, an emulator,
 # and Maestro (~/.maestro/maestro/bin/maestro – see RUN_LOCAL.md "Pre-demo check").
 # Test accounts come from bmwapi/.run/e2e.env (git-ignored, created by pre-demo-check.sh). Passwords are never printed.
@@ -25,8 +25,9 @@ bash "$E2E_DIR/stop-stale-maestro.sh"
 
 # The e2e accounts start like new users: no saved locations, so the GPS location gets the default radius (200 km / 200 mi).
 # (Only these git-ignored test accounts are touched.)
+# On the database in use (local container or the cloud VM – DB_TARGET / the last start).
 reset_locations() {
-  docker exec -i bmwapi-postgres-1 psql -q -U postgres -d identity -v email="$1" > /dev/null <<'SQL'
+  bash "$E2E_DIR/../../bmwapi/db-psql.sh" identity -q -v email="$1" > /dev/null <<'SQL'
 DELETE FROM "UserLocations" WHERE "UserId" IN (SELECT "Id" FROM "AspNetUsers" WHERE "NormalizedEmail" = upper(:'email'));
 UPDATE "AspNetUsers" SET "AutoUpdatePrimaryLocation" = true WHERE "NormalizedEmail" = upper(:'email');
 SQL
@@ -67,6 +68,23 @@ for who in BUYER SELLER; do
     echo "   -> PASSED"
   fi
 done
+
+# ── "Search location" (Google Places): buyer in Hyderabad adds "Kukatpally" ──
+# Needs GoogleMaps:ApiKey in IdentityService user-secrets (else the city list is used and this test fails on purpose).
+echo "== Search location UI test as the test buyer (Hyderabad)"
+reset_locations "$E2E_BUYER_EMAIL"
+bash "$E2E_DIR/stop-stale-maestro.sh"
+rm -f "$OUT/place-search-buyer.xml"
+(cd "$OUT" && timeout 900 "$MAESTRO" test \
+    -e EMAIL="$E2E_BUYER_EMAIL" -e PASSWORD="$E2E_BUYER_PASSWORD" \
+    --format junit --output "$OUT/place-search-buyer.xml" \
+    "$E2E_DIR/place-search.yaml") 2>&1 | grep -vi "password" | grep -E "COMPLETED|FAILED|Element|Assert|not found|Passed|Failed" | tail -60
+if [ "${PIPESTATUS[0]}" -ne 0 ] || [ ! -f "$OUT/place-search-buyer.xml" ] || grep -q "<failure" "$OUT/place-search-buyer.xml"; then
+  failed=1; echo "   -> FAILED (screenshots: ~/.maestro/tests/<latest>)"
+else
+  echo "   -> PASSED"
+fi
+grep "Google Maps calls" "$E2E_DIR/../../bmwapi/.run/logs/identity.log" 2>/dev/null | tail -1 | sed 's/^/   /'
 
 # ── Radius test (USA): buyer in Houston ──
 timeout 20 adb emu geo fix -95.3698 29.7604 > /dev/null

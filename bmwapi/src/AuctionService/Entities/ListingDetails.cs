@@ -205,7 +205,22 @@ public enum OrderStatus
     Shipped = 4,
     ReadyForPickup = 6,
     /// <summary>Shipping: the buyer confirmed it arrived.</summary>
-    Delivered = 7
+    Delivered = 7,
+    /// <summary>USA / Ireland: won (or offered to the next bidder) – the buyer pays online before anything else happens.</summary>
+    AwaitingPayment = 8,
+    /// <summary>Not paid in time (or the seller / an admin cancelled it).</summary>
+    Cancelled = 9,
+}
+
+/// <summary>The online payment of an order (USA / Ireland). NotRequired: India / Nigeria – paid between buyer and seller.</summary>
+public enum OrderPaymentStatus
+{
+    NotRequired,
+    AwaitingPayment,
+    Paid,
+    /// <summary>The deadline passed without payment.</summary>
+    Expired,
+    Refunded,
 }
 
 /// <summary>One step of an order's tracking, with when it happened and who did it.</summary>
@@ -298,6 +313,29 @@ public class Order
     public DateTime? CompletedAt { get; set; }
     public List<OrderEvent> Events { get; set; } = [];
 
+    // ── Online payment (USA / Ireland) ──
+    public OrderPaymentStatus PaymentStatus { get; set; }
+    /// <summary>Auction win / second-chance offer: pay before this (Payments:PaymentDeadlineHours).</summary>
+    public DateTime? PaymentDueAt { get; set; }
+    public DateTime? PaidAt { get; set; }
+    public DateTime? CancelledAt { get; set; }
+    [MaxLength(200)]
+    public string? CancelReason { get; set; }
+    /// <summary>Reminders already sent: at half time and 2 hours before the deadline.</summary>
+    public DateTime? HalfwayReminderAt { get; set; }
+    public DateTime? FinalReminderAt { get; set; }
+    /// <summary>0 = the auction's winner; 1–3 = a second-chance offer to the next-highest bidders.</summary>
+    public int SecondChanceRound { get; set; }
+    /// <summary>
+    /// Paid online and picked up / shipped: completed automatically (and the seller paid) at this time unless the buyer
+    /// confirms first or the order is on hold (Payments:AutoCompleteDays after the handover).
+    /// </summary>
+    public DateTime? AutoCompleteAt { get; set; }
+    /// <summary>On hold: no auto-complete and no payout to the seller (the buyer reported a problem, a dispute, an admin).</summary>
+    public DateTime? OnHoldSince { get; set; }
+    [MaxLength(300)]
+    public string? HoldReason { get; set; }
+
     // Contact details, shown only to the other party of this sale (captured from each party's sign-in token).
     [MaxLength(200)]
     public string? SellerEmail { get; set; }
@@ -381,6 +419,12 @@ public class AddressInfo
     public string? Line2 { get; set; }
     [MaxLength(80)]
     public string City { get; set; } = "";
+    /// <summary>State / county / region, e.g. "Telangana", "TX" (optional; null on older addresses).</summary>
+    [MaxLength(80)]
+    public string? State { get; set; }
+    /// <summary>The Google place the address was picked from ("Search location"); null when typed by hand.</summary>
+    [MaxLength(300)]
+    public string? PlaceId { get; set; }
     /// <summary>Postcode / PIN / ZIP / Eircode.</summary>
     [MaxLength(20)]
     public string Postcode { get; set; } = "";
@@ -397,7 +441,7 @@ public class AddressInfo
 
     /// <summary>"Ravi Kumar, +91 98…, 12 MG Road, Kukatpally, Hyderabad 500072, IN".</summary>
     public string OneLine() =>
-        string.Join(", ", new[] { Name, Phone, Line1, Line2, $"{City} {Postcode}".Trim(), CountryCode }.Where(p => !string.IsNullOrWhiteSpace(p)));
+        string.Join(", ", new[] { Name, Phone, Line1, Line2, $"{City}{(string.IsNullOrWhiteSpace(State) ? "" : $", {State}")} {Postcode}".Trim(), CountryCode }.Where(p => !string.IsNullOrWhiteSpace(p)));
 }
 
 /// <summary>A buyer's saved shipping address ("address book"); one of them is the default.</summary>

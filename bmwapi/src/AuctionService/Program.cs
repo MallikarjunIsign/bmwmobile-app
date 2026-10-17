@@ -1,6 +1,7 @@
 using AuctionService.Data;
 using System.Text.Json.Serialization;
 using AuctionService.Errors;
+using AuctionService.Payments;
 using AuctionService.RequestHelpers;
 using AuctionService.Services;
 using AuctionService.Services.Geocoding;
@@ -109,6 +110,32 @@ builder.Services.AddScoped<ReviewService>();
 builder.Services.AddScoped<ShippingService>();
 // US shipping: USPS Ground Advantage retail prices (Data/Seed/usps-ground-advantage-retail.csv).
 builder.Services.AddSingleton(_ => UspsGroundAdvantage.FromFile());
+// Online payments (US, IE): Stripe Connect behind IPaymentProvider. Keys only from user-secrets / environment
+// (Stripe:SecretKey, Stripe:PublishableKey, Stripe:WebhookSecret); without them payments are off and the current flow
+// is used. Test mode only for now: live keys are refused.
+builder.Services.Configure<PaymentOptions>(builder.Configuration.GetSection(PaymentOptions.SectionName));
+builder.Services.Configure<StripeOptions>(builder.Configuration.GetSection(StripeOptions.SectionName));
+var stripeKeys = builder.Configuration.GetSection(StripeOptions.SectionName).Get<StripeOptions>() ?? new StripeOptions();
+if (stripeKeys.IsConfigured && stripeKeys.IsTestMode)
+{
+    builder.Services.AddSingleton<IPaymentProvider, StripePaymentProvider>();
+    Console.WriteLine("Online payments: Stripe (test mode)");
+}
+else
+{
+    if (stripeKeys.IsConfigured) Console.WriteLine("Online payments OFF: only Stripe TEST keys (sk_test_…) are allowed for now");
+    else Console.WriteLine("Online payments OFF: Stripe keys not set (see RUN_LOCAL.md, \"Payments (Stripe test mode)\")");
+    builder.Services.AddSingleton<IPaymentProvider, NotConfiguredPaymentProvider>();
+}
+builder.Services.AddScoped<SellerPaymentService>();
+builder.Services.AddScoped<PaymentWebhookService>();
+builder.Services.AddScoped<CheckoutService>();
+builder.Services.AddScoped<StrikeService>();
+builder.Services.AddScoped<PaymentDeadlineService>();
+builder.Services.AddScoped<SellerPayoutService>();
+builder.Services.AddHttpClient<IBidHistory, HttpBidHistory>(c => c.Timeout = TimeSpan.FromSeconds(10));
+// Reservations, reminders, deadlines and second-chance offers (only while payments are on).
+if (builder.Configuration.GetValue("Payments:RunJobs", true)) builder.Services.AddHostedService<PaymentJobs>();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddProblemDetails();
 
@@ -190,6 +217,9 @@ builder.Host.UseWolverine(opts =>
     // "How was your purchase?" 2 days after completion: scheduled, stored in Postgres until then.
     opts.PublishMessage<AuctionService.Handlers.ReviewReminder>().ToLocalQueue("review-reminders");
     opts.LocalQueue("review-reminders").UseDurableInbox();
+    // Checkout / reservations: the listing's full snapshot for Search and Bid is built after the request (durable).
+    opts.PublishMessage<AuctionService.Handlers.RefreshListingSnapshot>().ToLocalQueue("listing-snapshots");
+    opts.LocalQueue("listing-snapshots").UseDurableInbox();
     
     opts.ListenToRabbitQueue("wolverine-dead-letter-queue");
     opts.ListenToRabbitQueue("auction-auction-finished");

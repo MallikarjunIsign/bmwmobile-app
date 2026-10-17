@@ -222,7 +222,7 @@ describe('Home header: role badge before the location', () => {
     while (!(row.props.style && !Array.isArray(row.props.style) && row.props.style.flexDirection === 'row')) row = row.parent!;
     const location = row.find(n => (n.type as unknown) === 'Text' && textOf(n).startsWith('📍'));
     // The radius is at the end; a long place is cut in the middle so the radius stays visible.
-    expect(textOf(location)).toBe('📍 Kukatpally Housing Board Colony Phase 9 Near the Very Long Landmark Road, Hyderabad, India · 60 km ▾');
+    expect(textOf(location)).toBe('📍 Kukatpally Housing Board Colony Phase 9 Near the Very Long Landmark Road, Hyderabad · 60 km ▾');
     expect(location.props.numberOfLines).toBe(1);
     expect(location.props.ellipsizeMode).toBe('middle');
     // The badge never shrinks; the location takes the rest of the line.

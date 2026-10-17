@@ -16,6 +16,7 @@ import { OrderTrackingCard } from '../components/OrderTrackingCard';
 import { useLiveEvent } from '../services/notifications';
 import { useAuth } from '../auth/AuthContext';
 import { isSeller } from '../utils/roles';
+import { SecondChanceOffers } from '../components/SecondChanceOffers';
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<MainTabParamList, 'MyPurchases'>,
@@ -80,7 +81,7 @@ export const MyPurchasesScreen: React.FC<Props> = ({ navigation }) => {
 
   const showing: Side = seller ? side : 'purchases';
   const shown = orders.filter(o => (showing === 'sales' ? o.role === 'seller' : o.role !== 'seller'));
-  const salesToDo = orders.filter(o => o.role === 'seller' && o.status !== 'Completed').length;
+  const salesToDo = orders.filter(o => o.role === 'seller' && o.status !== 'Completed' && o.status !== 'Cancelled').length;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -116,6 +117,9 @@ export const MyPurchasesScreen: React.FC<Props> = ({ navigation }) => {
         contentContainerStyle={styles.scroll}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={COLORS.primaryGlow} />}
       >
+        {/* The winner didn't pay: offered to you at your own highest bid. */}
+        {showing === 'purchases' ? <SecondChanceOffers money={money} onAccepted={load} /> : null}
+
         <Text style={styles.sectionTitle}>{showing === 'sales' ? 'SALES TO FULFIL' : 'MY PURCHASES'}</Text>
         {shown.length === 0 && !loading ? (
           <View style={styles.emptyCard}>

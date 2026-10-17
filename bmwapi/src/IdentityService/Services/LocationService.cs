@@ -4,6 +4,7 @@ using IdentityService.Data;
 using IdentityService.Infrastructure;
 using IdentityService.Models;
 using IdentityService.Options;
+using IdentityService.Services.Places;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -17,7 +18,7 @@ namespace IdentityService.Services;
 ///  - choosing a primary by hand turns auto-update OFF so GPS never overwrites it;
 ///  - saved places never change by themselves, and the primary can't be deleted.
 /// </summary>
-public class LocationService(ApplicationDbContext db, IOptions<LocationOptions> options)
+public class LocationService(ApplicationDbContext db, IOptions<LocationOptions> options, PlacesService places)
 {
     private readonly LocationOptions _opt = options.Value;
 
@@ -43,7 +44,7 @@ public class LocationService(ApplicationDbContext db, IOptions<LocationOptions> 
             throw AppException.BadRequest($"You can save up to {_opt.MaxLocationsPerUser} locations. Delete one first.", "TOO_MANY_LOCATIONS");
 
         var now = DateTime.UtcNow;
-        var country = CleanCountry(req.CountryCode) ?? CityCatalog.Describe(lat, lon).CountryCode;
+        var country = Country(req.CountryCode, lat, lon);
         var row = new UserLocation
         {
             UserId = userId,
@@ -80,7 +81,7 @@ public class LocationService(ApplicationDbContext db, IOptions<LocationOptions> 
             row.PlaceName = CleanPlace(req.PlaceName);
             row.Latitude = lat;
             row.Longitude = lon;
-            country = CleanCountry(req.CountryCode) ?? CityCatalog.Describe(lat, lon).CountryCode;
+            country = Country(req.CountryCode, lat, lon);
             SetAddress(row, req);
         }
         // Not sent: the same number in the (possibly new) country's unit.
@@ -145,7 +146,9 @@ public class LocationService(ApplicationDbContext db, IOptions<LocationOptions> 
                 return await GetAsync(userId, ct);
         }
 
-        var place = CityCatalog.Describe(lat, lon);
+        // "Kukatpally, Hyderabad" from Google (cached), or the nearest listed city when Google can't be used.
+        var place = await places.NameAsync(lat, lon, ct);
+        var placeCountry = place.Supported ? CleanCountry(place.CountryCode) : null;
         var now = DateTime.UtcNow;
         if (current is null)
         {
@@ -154,8 +157,8 @@ public class LocationService(ApplicationDbContext db, IOptions<LocationOptions> 
             {
                 UserId = userId,
                 Label = CityCatalog.CurrentLocationName,
-                PlaceName = place.Name,
-                RadiusKm = RadiusKm(req.RadiusValue, req.RadiusKm, place.CountryCode),
+                PlaceName = place.Label,
+                RadiusKm = RadiusKm(req.RadiusValue, req.RadiusKm, placeCountry),
                 IsCurrentLocation = true,
                 CreatedAt = now,
             };
@@ -164,13 +167,19 @@ public class LocationService(ApplicationDbContext db, IOptions<LocationOptions> 
         }
         else if (req.RadiusValue is not null || req.RadiusKm is not null)
         {
-            current.RadiusKm = RadiusKm(req.RadiusValue, req.RadiusKm, place.CountryCode);
+            current.RadiusKm = RadiusKm(req.RadiusValue, req.RadiusKm, placeCountry);
         }
 
-        current.PlaceName = place.Name;
+        current.PlaceName = Optional(place.Label, 120) ?? CityCatalog.CurrentLocationName;
         current.Latitude = lat;
         current.Longitude = lon;
-        current.CountryCode = place.CountryCode;
+        current.CountryCode = placeCountry;
+        current.Area = Optional(place.Area, 100);
+        current.City = Optional(place.City, 100);
+        current.State = Optional(place.State, 100);
+        current.PostalCode = Optional(place.Postcode, 12);
+        current.FormattedAddress = Optional(place.FormattedAddress, 300);
+        current.PlaceId = Optional(place.PlaceId, 300);
         current.UpdatedAt = now;
         user.AutoUpdatePrimaryLocation = true;
         await db.SaveChangesAsync(ct);
@@ -271,12 +280,26 @@ public class LocationService(ApplicationDbContext db, IOptions<LocationOptions> 
         row.Area = Optional(req.Area, 100);
         row.Landmark = Optional(req.Landmark, 100);
         row.PostalCode = Optional(req.PostalCode, 12);
+        row.PlaceId = Optional(req.PlaceId, 300);
+        row.FormattedAddress = Optional(req.FormattedAddress, 300);
+        row.City = Optional(req.City, 100);
+        row.State = Optional(req.State, 100);
     }
 
     private static string? Optional(string? text, int max)
     {
         var t = text?.Trim();
         return string.IsNullOrEmpty(t) ? null : t.Length > max ? t[..max] : t;
+    }
+
+    /// <summary>
+    /// The sent country (IN / US / NG / IE), or the nearest listed city's when none was sent. Any other country:
+    /// 400 UNSUPPORTED_COUNTRY "We don't operate in this country yet".
+    /// </summary>
+    private static string? Country(string? sent, double lat, double lon)
+    {
+        if (string.IsNullOrWhiteSpace(sent)) return CityCatalog.Describe(lat, lon).CountryCode;
+        return CleanCountry(sent) ?? throw AppException.BadRequest(PlacesService.UnsupportedCountryMessage, "UNSUPPORTED_COUNTRY");
     }
 
     private static string? CleanCountry(string? code) =>
@@ -287,6 +310,6 @@ public class LocationService(ApplicationDbContext db, IOptions<LocationOptions> 
     {
         var radius = RegionRules.Radius(RegionRules.RadiusValue(l.RadiusKm, l.CountryCode), l.CountryCode);
         return new(l.Id, l.Label, l.PlaceName, l.Latitude, l.Longitude, radius.Km, l.CountryCode, l.IsPrimary, l.IsCurrentLocation,
-            l.AddressLine, l.Area, l.Landmark, l.PostalCode, radius.Value, radius.Unit);
+            l.AddressLine, l.Area, l.Landmark, l.PostalCode, radius.Value, radius.Unit, l.PlaceId, l.FormattedAddress, l.City, l.State);
     }
 }

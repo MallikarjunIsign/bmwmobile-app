@@ -5,6 +5,8 @@ package auction;
 
 service GrpcAuction {
   rpc GetAuction (GetAuctionRequest) returns (GrpcAuctionResponse);
+  // Online payments: a bidder with too many unpaid wins (non-payment strikes) can't bid.
+  rpc GetBidderStanding (BidderStandingRequest) returns (BidderStandingResponse);
 }
 
 message GetAuctionRequest {
@@ -27,4 +29,13 @@ message GrpcAuctionModel {
 
 message GrpcAuctionResponse {
   GrpcAuctionModel auction = 1;
+}
+
+message BidderStandingRequest {
+  string bidder = 1;
+}
+
+message BidderStandingResponse {
+  // Empty = may bid; otherwise why not (shown to the bidder).
+  string blockedReason = 1;
 }

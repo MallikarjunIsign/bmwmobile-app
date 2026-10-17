@@ -30,7 +30,7 @@ export const Field: React.FC<FieldProps> = ({ label, optional, suffix, style, ..
       {optional ? <Text style={styles.optional}> (OPTIONAL)</Text> : null}
     </Text>
     <View style={styles.inputRow}>
-      <TextInput style={[styles.input, style]} placeholderTextColor={COLORS.textMuted} {...rest} />
+      <TextInput style={[styles.input, style]} placeholderTextColor={COLORS.textMuted} accessibilityLabel={label} {...rest} />
       {suffix ? <Text style={styles.suffix}>{suffix}</Text> : null}
     </View>
   </View>

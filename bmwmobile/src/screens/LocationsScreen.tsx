@@ -20,7 +20,7 @@ export const addressIcon = (label: string) => (/^home$/i.test(label) ? '🏠' : 
 
 /** "Flat 4, Road 2 · Kukatpally · Hyderabad 500072, India" */
 export const addressLines = (a: SavedLocation) =>
-  [a.addressLine, a.area, [a.placeName, a.postalCode].filter(Boolean).join(' '), countryName(a.countryCode)].filter(Boolean).join(', ');
+  [a.addressLine, a.area, [a.city ?? a.placeName, a.postalCode].filter(Boolean).join(' '), countryName(a.countryCode)].filter(Boolean).join(', ');
 
 /**
  * My locations (opened from the location line on Home): use the phone's current location, or choose / add / edit

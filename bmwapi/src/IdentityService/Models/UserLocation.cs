@@ -24,6 +24,13 @@ public class UserLocation
     public string? Landmark { get; set; }
     public string? PostalCode { get; set; }
 
+    /// <summary>From "Search location" (Google): the place ID and full address. Null on older rows and the city list.</summary>
+    public string? PlaceId { get; set; }
+    public string? FormattedAddress { get; set; }
+    /// <summary>City and state / region, e.g. "Hyderabad", "Telangana" (null on older rows).</summary>
+    public string? City { get; set; }
+    public string? State { get; set; }
+
     public double Latitude { get; set; }
     public double Longitude { get; set; }
     public int RadiusKm { get; set; }

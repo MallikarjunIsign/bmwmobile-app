@@ -59,7 +59,13 @@ public class AppFixture : IAsyncLifetime
     private class NoGrpcAuctionClient(IConfiguration config) : GrpcAuctionClient(config)
     {
         public override Auction? GetAuction(string auctionId) => null;
+
+        // Non-payment strikes (AuctionService): a test puts a bidder here to block them.
+        public override string? BiddingBlockedReason(string bidder, Microsoft.Extensions.Logging.ILogger? logger = null) => BlockedBidders.GetValueOrDefault(bidder);
     }
+
+    /// <summary>Bidders AuctionService would block (too many unpaid wins), with the reason.</summary>
+    public static readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> BlockedBidders = new();
 }
 
 [CollectionDefinition("bid-service")]

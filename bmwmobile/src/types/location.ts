@@ -21,7 +21,7 @@ export interface AutoLocation {
   addressId?: string;
   /** Home / Work / … for a saved address. */
   label?: string;
-  /** Area / locality of a saved address, e.g. "Kukatpally". */
+  /** Area / locality, e.g. "Kukatpally" (saved address, or GPS named by "Search location"). */
   area?: string | null;
 }
 
@@ -58,6 +58,11 @@ export interface SavedLocation {
   area?: string | null;
   landmark?: string | null;
   postalCode?: string | null;
+  /** From "Search location" (null on older locations). */
+  placeId?: string | null;
+  formattedAddress?: string | null;
+  city?: string | null;
+  state?: string | null;
 }
 
 export interface MyLocations {
@@ -78,6 +83,10 @@ export interface SaveLocationRequest {
   area?: string | null;
   landmark?: string | null;
   postalCode?: string | null;
+  placeId?: string | null;
+  formattedAddress?: string | null;
+  city?: string | null;
+  state?: string | null;
 }
 
 /** A city from the catalog (GET /api/locations/cities). */
@@ -86,4 +95,41 @@ export interface City {
   countryCode: CountryCode;
   latitude: number;
   longitude: number;
+}
+
+/** One "Search location" suggestion (GET /places/autocomplete): main text bold, secondary text grey. */
+export interface PlaceSuggestion {
+  /** A Google place ID, or "city:IN:Hyderabad" from the built-in city list (when Google can't be used). */
+  placeId: string;
+  primaryText: string;
+  secondaryText: string;
+}
+
+/** GET /places/autocomplete. source "cities" = Google is not available, these come from the built-in city list. */
+export interface PlaceAutocomplete {
+  suggestions: PlaceSuggestion[];
+  source: 'google' | 'cities';
+}
+
+/** A chosen place (GET /places/{placeId}) or the phone's position (GET /places/reverse). */
+export interface PlaceDetails {
+  placeId: string | null;
+  formattedAddress: string;
+  lat: number;
+  lon: number;
+  /** "Kukatpally, Hyderabad" – area + city, else the city. */
+  label: string;
+  name?: string | null;
+  /** "12 Main Street" (street number + road) when the place is an address. */
+  street?: string | null;
+  area?: string | null;
+  city?: string | null;
+  state?: string | null;
+  stateCode?: string | null;
+  countryCode?: string | null;
+  postcode?: string | null;
+  /** False outside India, USA, Nigeria and Ireland (message: "We don't operate in this country yet"). */
+  supported: boolean;
+  message?: string | null;
+  source: 'google' | 'cache' | 'cities' | 'local';
 }

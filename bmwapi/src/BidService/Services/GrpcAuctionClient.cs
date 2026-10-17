@@ -43,6 +43,28 @@ public class GrpcAuctionClient(IConfiguration config)
         }
     }
 
+    /// <summary>
+    /// Why this bidder may not bid (non-payment strikes in AuctionService), or null. AuctionService not configured or
+    /// unreachable: null (bidding isn't blocked because of an outage; logged).
+    /// </summary>
+    public virtual string? BiddingBlockedReason(string bidder, ILogger? logger = null)
+    {
+        var url = config["GrpcAuctionServiceUrl"];
+        if (string.IsNullOrWhiteSpace(url)) return null;
+        try
+        {
+            using var channel = GrpcChannel.ForAddress(url);
+            var reply = new GrpcAuction.GrpcAuctionClient(channel)
+                .GetBidderStanding(new BidderStandingRequest { Bidder = bidder }, deadline: DateTime.UtcNow.AddSeconds(5));
+            return string.IsNullOrEmpty(reply.BlockedReason) ? null : reply.BlockedReason;
+        }
+        catch (RpcException e)
+        {
+            logger?.LogWarning("Bidder standing not checked ({Status}): AuctionService not reachable", e.StatusCode);
+            return null;
+        }
+    }
+
     private static DateTime? ParseDate(string value) =>
         string.IsNullOrEmpty(value)
             ? null

@@ -4,7 +4,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../auth/AuthContext';
 import { ApiService, type NearFilter } from '../services/api';
 import { LocationApi } from '../services/locationApi';
-import type { AutoLocation, CountryCode, MyLocations, SaveLocationRequest, SavedLocation } from '../types/location';
+import { PlacesApi } from '../services/placesApi';
+import { toSaveRequest } from '../utils/places';
+import type { AutoLocation, CountryCode, MyLocations, PlaceDetails, SaveLocationRequest, SavedLocation } from '../types/location';
 import {
   countryFromPhone, fallbackRadius, haversineKm, isCountryCode, MIN_MOVE_KM, MOVE_THRESHOLD_KM, radiusFor, savedRadius,
 } from '../utils/geo';
@@ -46,6 +48,11 @@ type LocationContextValue = {
   /** Add (and use) or edit an address. */
   saveAddress: (request: SaveLocationRequest, id?: string) => Promise<void>;
   removeAddress: (id: string) => Promise<void>;
+  /**
+   * Home → "Search location": use a searched place. A saved location of the same place is chosen again; otherwise it
+   * is saved (named after its area / city) and used, keeping the radius number in use.
+   */
+  choosePlace: (place: PlaceDetails) => Promise<void>;
 };
 
 const LocationContext = createContext<LocationContextValue | undefined>(undefined);
@@ -58,7 +65,8 @@ function fromAddress(a: SavedLocation, phoneCountry: CountryCode): AutoLocation 
   return {
     latitude: a.latitude,
     longitude: a.longitude,
-    city: a.placeName,
+    // Newer locations keep the city apart from the label ("Kukatpally, Hyderabad"); older ones: the place name.
+    city: a.city ?? a.placeName,
     countryCode: a.countryCode,
     ...savedRadius(a, phoneCountry),
     updatedAt: new Date().toISOString(),
@@ -77,9 +85,27 @@ async function readSaved(userId: string): Promise<AutoLocation | null> {
   }
 }
 
-/** Names the position through the backend; offline, keeps the coordinates with the phone number's country. */
+/**
+ * Names the position through the backend: area + city ("Kukatpally, Hyderabad") from "Search location" (Google,
+ * cached), else the city from /geo/reverse; offline, keeps the coordinates with the phone number's country.
+ */
 async function describe(latitude: number, longitude: number, phoneCountry: CountryCode): Promise<AutoLocation> {
   const now = new Date().toISOString();
+  try {
+    const place = await PlacesApi.reverse(latitude, longitude);
+    const countryCode = place.supported && isCountryCode(place.countryCode) ? (place.countryCode.toUpperCase() as CountryCode) : null;
+    return {
+      latitude,
+      longitude,
+      city: place.city ?? null,
+      area: place.area ?? null,
+      countryCode,
+      ...fallbackRadius(countryCode ?? phoneCountry),
+      updatedAt: now,
+    };
+  } catch {
+    // Older backend without /places, or the lookup limit: the city only.
+  }
   try {
     const geo = await ApiService.reverseGeocode(latitude, longitude);
     const countryCode = isCountryCode(geo.countryCode) ? (geo.countryCode.toUpperCase() as CountryCode) : null;
@@ -214,6 +240,8 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
   }, [failure, refresh]);
 
   const addresses = useMemo(() => (mine?.locations ?? []).filter(l => !l.isCurrentLocation), [mine]);
+  const addressesRef = useRef<SavedLocation[]>([]);
+  addressesRef.current = addresses;
   const chosen = addresses.find(l => l.isPrimary) ?? null;
 
   // The GPS row on the server ("Use my current location"), which keeps the radius chosen for the GPS location.
@@ -241,6 +269,22 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
   );
 
   const removeAddress = useCallback(async (id: string) => keepAddresses(await LocationApi.remove(id)), [keepAddresses]);
+
+  const choosePlace = useCallback(
+    async (place: PlaceDetails) => {
+      const same = place.placeId ? addressesRef.current.find(a => a.placeId === place.placeId) : undefined;
+      if (same) {
+        keepAddresses(await LocationApi.setPrimary(same.id));
+        return;
+      }
+      await saveAddress(toSaveRequest(place, {
+        label: (place.area || place.city || place.label).slice(0, 40),
+        radiusValue: activeRef.current?.radiusValue,
+        makePrimary: true,
+      }));
+    },
+    [keepAddresses, saveAddress],
+  );
 
   // A radius just chosen, shown at once (lists and counts update) until the server's answer arrives.
   const [pendingRadius, setPendingRadius] = useState<number | null>(null);
@@ -274,6 +318,9 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     [active, chosen, gpsRow, keepAddresses],
   );
 
+  const activeRef = useRef<AutoLocation | null>(null);
+  activeRef.current = active;
+
   const near = useMemo<NearFilter | undefined>(
     () => (active ? { latitude: active.latitude, longitude: active.longitude, radiusKm: active.radiusKm } : undefined),
     [active?.latitude, active?.longitude, active?.radiusKm], // eslint-disable-line react-hooks/exhaustive-deps
@@ -284,9 +331,9 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<LocationContextValue>(
     () => ({
       status, location: active, locationOff, near, country, refresh, turnOnLocation,
-      addresses, usingCurrentLocation: !chosen, switchToCurrentLocation, setRadius, chooseAddress, saveAddress, removeAddress,
+      addresses, usingCurrentLocation: !chosen, switchToCurrentLocation, setRadius, chooseAddress, saveAddress, removeAddress, choosePlace,
     }),
-    [status, active, locationOff, near, country, refresh, turnOnLocation, addresses, chosen, switchToCurrentLocation, setRadius, chooseAddress, saveAddress, removeAddress],
+    [status, active, locationOff, near, country, refresh, turnOnLocation, addresses, chosen, switchToCurrentLocation, setRadius, chooseAddress, saveAddress, removeAddress, choosePlace],
   );
 
   return <LocationContext.Provider value={value}>{children}</LocationContext.Provider>;

@@ -1,0 +1,77 @@
+# "Search location" (Google Places through the backend), run by e2e/run-search-e2e.sh as the test buyer in Hyderabad.
+# Env: EMAIL, PASSWORD. The buyer's saved locations are reset before and after.
+#   1. log in → Home → location line → "Manage locations / add an address" → "+ ADD NEW ADDRESS"
+#   2. type "Kukatpally" → Google suggestions with "powered by Google" → pick "Kukatpally / Hyderabad, Telangana, India"
+#   3. the place is filled in ("📍 Kukatpally, Hyderabad"), the radius picker is still there (200 km)
+#   4. house / flat → save → Home shows "Kukatpally, Hyderabad · 200 km ▾"
+# Uses about 3 Google calls (1–2 autocomplete, 1 details) plus the GPS naming at login.
+appId: com.bidmywork.app
+---
+- runFlow: subflows/login.yaml
+
+# 1. Add a location from Home.
+- extendedWaitUntil:
+    visible:
+      id: "home-location"
+    timeout: 30000
+- tapOn:
+    id: "home-location"
+- extendedWaitUntil:
+    visible: "Location and radius"
+    timeout: 10000
+- scrollUntilVisible:
+    element: "Manage locations / add an address →"
+    direction: DOWN
+- tapOn: "Manage locations / add an address →"
+- extendedWaitUntil:
+    visible: "\\+ ADD NEW ADDRESS"
+    timeout: 10000
+- tapOn: "\\+ ADD NEW ADDRESS"
+- extendedWaitUntil:
+    visible: "Add address"
+    timeout: 10000
+
+# 2. Search.
+- tapOn:
+    id: "place-search-input"
+- inputText: "Kukatpally"
+- extendedWaitUntil:
+    visible: "powered by Google"
+    timeout: 15000
+- assertVisible: "Hyderabad, Telangana, India"
+- takeScreenshot: place-search-suggestions
+- tapOn:
+    id: "place-search-suggestion"
+    index: 0
+
+# 3. Filled in; the radius picker stays on the same screen.
+- extendedWaitUntil:
+    visible: "📍 Kukatpally, Hyderabad"
+    timeout: 15000
+- scrollUntilVisible:
+    element:
+      id: "radius-picker"
+    direction: DOWN
+- assertVisible: "200 km"
+- takeScreenshot: place-search-picked
+
+# 4. House / flat, save, back to Home.
+- scrollUntilVisible:
+    element: "Flat 402, Sai Residency, Road No. 2"
+    direction: UP
+- tapOn: "Flat 402, Sai Residency, Road No. 2"
+- inputText: "Flat 12, Road 4"
+- hideKeyboard
+- scrollUntilVisible:
+    element: "SAVE AND USE THIS ADDRESS"
+    direction: DOWN
+- tapOn: "SAVE AND USE THIS ADDRESS"
+- extendedWaitUntil:
+    visible: "My locations"
+    timeout: 15000
+- assertVisible: ".*Kukatpally, Hyderabad.*"
+- back
+- extendedWaitUntil:
+    visible: "📍 Kukatpally, Hyderabad · 200 km ▾"
+    timeout: 15000
+- takeScreenshot: place-search-home

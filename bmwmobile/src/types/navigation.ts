@@ -21,6 +21,18 @@ export type RootStackParamList = {
   /** showOutcome: opened from a "You won" / "Auction lost" notification → go on to that screen once loaded. */
   PartDetails: { auctionId: string; auction?: Auction; showOutcome?: boolean };
   PlaceBidModal: { auction: Auction };
+  /** Buy now with online payment (USA / Ireland): delivery → total → payment sheet. */
+  Checkout: {
+    listingId: string;
+    title: string;
+    imageUrl?: string | null;
+    /** The price of one unit (whole currency units). */
+    price: number;
+    quantity: number;
+    deliveryOptions: ('Pickup' | 'Shipping')[];
+    countryCode: string;
+    pickupCity?: string | null;
+  };
   HighestBidder: { auction: Auction };
   Outbid: { auction: Auction };
   EndingSoon: { auction: Auction };

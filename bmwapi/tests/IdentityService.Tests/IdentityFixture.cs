@@ -6,6 +6,7 @@ using Alba;
 using Duende.IdentityServer.Configuration;
 using IdentityService.Models;
 using IdentityService.Services;
+using IdentityService.Services.Places;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -60,6 +61,8 @@ public class IdentityFixture : IAsyncLifetime
     public IAlbaHost Host { get; private set; } = null!;
     public CapturingOtpSender Emails { get; } = new();
     public CapturingMailSender Mail { get; } = new();
+    /// <summary>Google Maps in the tests: unanswered requests get 503, so the built-in city list is used.</summary>
+    public FakeGoogleHandler Google { get; } = new();
     public HttpClient Client { get; private set; } = null!;
 
     public async Task InitializeAsync()
@@ -78,12 +81,17 @@ public class IdentityFixture : IAsyncLifetime
             // Every test calls from the same address: the per-IP limits are for real phones, not this test run.
             builder.UseSetting("RateLimits:AccountPerMinute", "1000");
             builder.UseSetting("RateLimits:SellerApplicationsPerMinute", "1000");
+            // A fake key: requests go to FakeGoogleHandler, never to Google.
+            builder.UseSetting("GoogleMaps:ApiKey", "fixture-fake-key");
             builder.ConfigureServices(services =>
             {
                 services.RemoveAll<IOtpSender>();
                 services.AddSingleton<IOtpSender>(Emails);
                 services.RemoveAll<IMailSender>();
                 services.AddSingleton<IMailSender>(Mail);
+                services.AddHttpClient<GoogleMapsClient>()
+                    .ConfigurePrimaryHttpMessageHandler(() => Google)
+                    .SetHandlerLifetime(Timeout.InfiniteTimeSpan);
                 // Signing keys go to a temp folder, not the service's own keys folder.
                 services.PostConfigure<IdentityServerOptions>(o => o.KeyManagement.KeyPath = _keyPath);
             });

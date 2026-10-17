@@ -52,11 +52,25 @@ public static partial class ShippingRules
     [GeneratedRegex(@"engine assembly|^engine$|gearbox|transmission|cylinder head|differential|axle assembly", RegexOptions.IgnoreCase)]
     private static partial Regex Freight();
 
-    [GeneratedRegex(@"bumper|bonnet|hood|^door$|door glass|boot lid|tailgate|fender|wing|dashboard|seat|windscreen|windshield|alloy wheel|^tyre|^tire|roof", RegexOptions.IgnoreCase)]
+    // "Seat" is a whole seat (large); seat covers are a light, soft parcel (Small) – not matched here.
+    [GeneratedRegex(@"bumper|bonnet|hood|^door$|door glass|boot lid|tailgate|fender|wing|dashboard|seat(?!\s*covers?)|windscreen|windshield|alloy wheel|^tyre|^tire|roof", RegexOptions.IgnoreCase)]
     private static partial Regex Large();
 
-    [GeneratedRegex(@"bulb|led kit|filter|engine oil|coolant|fuse|sensor|spark plug|ecu|dash cam|brake pads|indicator|fog lamp|floor mat|jump starter|key|licence plate|wiper|car care|injector|relay", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"bulb|led kit|filter|engine oil|coolant|fuse|sensor|spark plug|ecu|dash cam|brake pads|indicator|fog lamp|floor mat|seat covers?|jump starter|key|licence plate|wiper|car care|injector|relay", RegexOptions.IgnoreCase)]
     private static partial Regex Small();
+
+    /// <summary>
+    /// Part types whose default size class was wrong before (seat covers were Large: a 30 lb, 40 × 24 × 16 in box, so
+    /// USPS's oversized price, ~$333 coast to coast). Listings that still have that old default and no package entered by
+    /// the seller get the corrected default (ShippingRateSeed.BackfillSizeClasses).
+    /// </summary>
+    public static readonly (Regex PartType, SizeClass WrongDefault)[] CorrectedDefaults =
+    [
+        (new Regex(@"seat\s*covers?", RegexOptions.IgnoreCase), SizeClass.Large),
+    ];
+
+    /// <summary>When the corrected defaults came in: listings made later have the right default already.</summary>
+    public static readonly DateTime CorrectedDefaultsSince = new(2026, 10, 18, 0, 0, 0, DateTimeKind.Utc);
 
     [GeneratedRegex(@"headlamp|tail ?lamp|radiator|condenser|compressor|alternator|starter|battery|brake disc|caliper|control arm|cv axle|clutch|catalytic|mirror|grille|shock|strut|infotainment|fuel pump", RegexOptions.IgnoreCase)]
     private static partial Regex Medium();
@@ -237,6 +251,17 @@ public static class ShippingRateSeed
             .ToList();
         foreach (var item in items) item.SizeClass = ShippingRules.DefaultSizeClass(item.Kind, item.PartType?.Name);
         if (items.Count > 0) context.SaveChanges();
+
+        // Corrected defaults (seat covers were Large): only listings made before the fix, still on the old default, with no
+        // package from the seller (a seller who picks Large later keeps it).
+        var withOldDefault = context.Set<Item>().Include(i => i.PartType)
+            .Where(i => i.Auction != null && i.Auction.CreatedAt < ShippingRules.CorrectedDefaultsSince)
+            .Where(i => i.SizeClass != null && i.PartType != null && i.WeightLb == null && i.LengthIn == null && i.WidthIn == null && i.HeightIn == null)
+            .AsEnumerable()
+            .Where(i => ShippingRules.CorrectedDefaults.Any(c => c.WrongDefault == i.SizeClass && c.PartType.IsMatch(i.PartType!.Name)))
+            .ToList();
+        foreach (var item in withOldDefault) item.SizeClass = ShippingRules.DefaultSizeClass(item.Kind, item.PartType!.Name);
+        if (withOldDefault.Count > 0) context.SaveChanges();
     }
 }
 

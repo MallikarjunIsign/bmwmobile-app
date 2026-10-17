@@ -18,10 +18,10 @@ function subscribe(listener: (now: number) => void) {
   };
 }
 
-/** The current time, updated every second. */
-export function useNow(): number {
+/** The current time, updated every second (only while `active`: no timer for cards that don't show a countdown). */
+export function useNow(active = true): number {
   const [now, setNow] = useState(Date.now);
-  useEffect(() => subscribe(setNow), []);
+  useEffect(() => (active ? subscribe(setNow) : undefined), [active]);
   return now;
 }
 

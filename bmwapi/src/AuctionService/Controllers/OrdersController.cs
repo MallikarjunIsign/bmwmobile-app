@@ -70,8 +70,18 @@ public class OrderDto
     public string? PickupAddress { get; set; }
     public string? Courier { get; set; }
     public string? TrackingNumber { get; set; }
-    /// <summary>SoldAwaitingHandover, ReadyForPickup, PickedUp, Shipped, Delivered, Completed.</summary>
+    /// <summary>SoldAwaitingHandover, ReadyForPickup, PickedUp, Shipped, Delivered, Completed; AwaitingPayment, Cancelled.</summary>
     public required string Status { get; set; }
+    /// <summary>NotRequired (India / Nigeria), AwaitingPayment, Paid, Expired, Refunded.</summary>
+    public string PaymentStatus { get; set; } = "NotRequired";
+    /// <summary>Pay before this (auction win / second-chance offer).</summary>
+    public DateTime? PaymentDueAt { get; set; }
+    public DateTime? PaidAt { get; set; }
+    /// <summary>The buyer can pay now ("Pay now").</summary>
+    public bool CanPay { get; set; }
+    /// <summary>"Waiting for payment – 31 h 5 min left", "Not paid in time" (both parties).</summary>
+    public string? PaymentLabel { get; set; }
+    public string? CancelReason { get; set; }
     /// <summary>The current step's name for this delivery method ("Shipped", "Picked up", …).</summary>
     public required string StatusLabel { get; set; }
     /// <summary>The tracking steps for this delivery method, in order.</summary>
@@ -89,7 +99,26 @@ public class OrderDto
     /// <summary>The buyer can review it now ("How was your purchase?") – until ReviewDeadline.</summary>
     public bool CanReview { get; set; }
     public DateTime? ReviewDeadline { get; set; }
+
+    // ── Online payment, after paying (Step 3) ──
+    /// <summary>Buyer: Stripe's receipt page for this payment.</summary>
+    public string? ReceiptUrl { get; set; }
+    /// <summary>Refunded to the buyer so far, in cents of the order's currency.</summary>
+    public long RefundedCents { get; set; }
+    /// <summary>Seller: their share and where the payout is ("You'll receive $118.80 when …", "Paid out about €94.05").</summary>
+    public PayoutDto? Payout { get; set; }
+    /// <summary>Completed automatically at this time unless the buyer confirms first (paid online, picked up / shipped).</summary>
+    public DateTime? AutoCompleteAt { get; set; }
+    /// <summary>On hold (a reported problem, a dispute, support): no auto-complete, no payout yet.</summary>
+    public bool OnHold { get; set; }
+    public string? HoldReason { get; set; }
+    /// <summary>Buyer: "Report a problem" (paid online, not completed yet, not already on hold).</summary>
+    public bool CanReportProblem { get; set; }
+    /// <summary>Seller: "Cancel and refund" (paid online, not picked up / shipped yet).</summary>
+    public bool CanCancelAndRefund { get; set; }
 }
+
+public record PayoutDto(long AmountCents, string Currency, bool Approximate, string Status, string Label, DateTime? TransferredAt);
 
 public record OrderStepDto(string Status, string Label, bool Done, bool Current, DateTime? At, string? Note);
 
@@ -114,7 +143,7 @@ public class OrderStatusDto
 [Authorize]
 [Route("api/orders")]
 public class OrdersController(AuctionDbContext context, IDbContextOutbox<AuctionDbContext> outbox, TimeProvider clock,
-    ShippingService shipping) : ControllerBase
+    ShippingService shipping, Payments.SellerPayoutService payouts) : ControllerBase
 {
     private string Username => User.Identity?.Name ?? throw new UnauthorizedAccessException();
     private DateTime Now => clock.GetUtcNow().UtcDateTime;
@@ -131,7 +160,8 @@ public class OrdersController(AuctionDbContext context, IDbContextOutbox<Auction
         if (orders.Count > 0 && RememberContact(orders, user)) await context.SaveChangesAsync();
 
         var reviews = await ReviewIdsAsync(orders.Select(o => o.Id));
-        return orders.Select(o => WithReview(ToDto(o, user), o, user, reviews)).ToList();
+        var payments = await payouts.InfoForAsync(orders, user, HttpContext.RequestAborted);
+        return orders.Select(o => WithReview(ToDto(o, user, payments.GetValueOrDefault(o.Id), Now), o, user, reviews)).ToList();
     }
 
     [HttpGet("{id}")]
@@ -140,7 +170,14 @@ public class OrdersController(AuctionDbContext context, IDbContextOutbox<Auction
         var (order, error) = await LoadAsync(id);
         if (error != null) return error;
         if (RememberContact([order!], Username)) await context.SaveChangesAsync();
-        return WithReview(ToDto(order!, Username), order!, Username, await ReviewIdsAsync([order!.Id]));
+        return await FullDtoAsync(order!);
+    }
+
+    /// <summary>The order with the caller's review state and online-payment details.</summary>
+    private async Task<OrderDto> FullDtoAsync(Order order)
+    {
+        var payments = await payouts.InfoForAsync([order], Username, HttpContext.RequestAborted);
+        return WithReview(ToDto(order, Username, payments.GetValueOrDefault(order.Id), Now), order, Username, await ReviewIdsAsync([order.Id]));
     }
 
     private Task<Dictionary<string, string>> ReviewIdsAsync(IEnumerable<string> orderIds)
@@ -167,42 +204,24 @@ public class OrdersController(AuctionDbContext context, IDbContextOutbox<Auction
         var (order, error) = await LoadAsync(id);
         if (error != null) return error;
         if (order!.Buyer != Username) return Forbidden.With("Only the buyer can choose how to get this order", "NOT_BUYER");
-        if (order.Status != OrderStatus.SoldAwaitingHandover)
+        // Online payment: chosen before paying (shipping is part of the amount).
+        if (order.Status is not (OrderStatus.SoldAwaitingHandover or OrderStatus.AwaitingPayment))
             return BadRequest(new { message = "The seller has already started on this order" });
+        if (await context.Payments.AnyAsync(p => p.OrderId == order.Id && p.Status == Payments.PaymentStatus.Succeeded))
+            return BadRequest(new { message = "This order is paid – the delivery can't be changed now" });
         if (OrderTracking.ParseMethod(dto.Method) is not { } method || !OrderTracking.Choices(order).Contains(method))
             return BadRequest(new { message = "Choose one of the delivery options of this listing" });
 
         if (method == DeliveryOptions.Shipping)
         {
-            AddressInfo address;
-            if (dto.AddressId is { Length: > 0 } addressId)
-            {
-                var saved = await context.ShippingAddresses.FirstOrDefaultAsync(a => a.Id == addressId && a.User == Username);
-                if (saved is null) return BadRequest(new { message = "That address isn't in your address book" });
-                address = Copy(saved.Address);
-            }
-            else
-            {
-                var errors = AddressRules.Validate(dto.Address);
-                if (errors.Count > 0) return Invalid(errors);
-                address = AddressRules.ToInfo(dto.Address!);
-                if (dto.SaveAddress) await ShippingAddressesController.AddToBookAsync(context, Username, address, Now);
-            }
-
-            if (order.CountryCode is { } country && !string.Equals(address.CountryCode, country, StringComparison.OrdinalIgnoreCase))
-                return BadRequest(new { message = $"The seller ships within {RegionRules.CountryName(country)} only" });
-
-            // The delivery location (saved location or GPS) gives the distance for the charge.
-            if (dto.Latitude is { } lat && dto.Longitude is { } lon && GeoMath.IsValidCoordinate(lat, lon))
-                (address.Latitude, address.Longitude) = (lat, lon);
-            if (address.Latitude is null || address.Longitude is null)
-                return BadRequest(new { message = "Choose your delivery location (a saved location or your current location) so we can work out the shipping charge", code = "LOCATION_REQUIRED" });
-
             // Calculated here and fixed on the order (the app never sends a price).
             var item = await context.Set<Item>().Include(i => i.PartType).FirstOrDefaultAsync(i => i.Id == order.AuctionId);
-            if (item is null) return BadRequest(new { message = "This listing no longer exists" });
-            var quote = await shipping.QuoteAsync(item, address.CountryCode, address.Latitude.Value, address.Longitude.Value, order.ShippingSizeClass);
-            if (!quote.Available) return BadRequest(new { message = quote.Reason, code = "SHIPPING_NOT_AVAILABLE" });
+            if (item is null) return BadRequest(new { message = "This listing is no longer available" });
+            var check = await DeliveryChoice.ShippingAsync(context, shipping, Username, dto, order.CountryCode, item, order.ShippingSizeClass, Now);
+            if (check.Errors is { } errors) return Invalid(errors);
+            if (check.Choice is not { } choice)
+                return BadRequest(check.Code is null ? new { message = check.Message } : new { message = check.Message, code = check.Code });
+            var (address, quote) = (choice.Address, choice.Quote);
 
             order.ShipTo = address;
             order.DeliveryAddress = address.OneLine();
@@ -283,12 +302,18 @@ public class OrdersController(AuctionDbContext context, IDbContextOutbox<Auction
     private async Task<ActionResult<OrderDto>> MoveAsync(Order order, OrderStatus next)
     {
         var now = Now;
+        var completed = false;
         foreach (var step in OrderTracking.StepsFor(next))
         {
             order.Status = step;
             if (step is OrderStatus.Shipped or OrderStatus.ReadyForPickup or OrderStatus.PickedUp) order.HandedOverAt ??= now;
+            // Paid online: completes by itself (and pays the seller) Payments:AutoCompleteDays after pickup / shipping.
+            if (step is OrderStatus.Shipped or OrderStatus.PickedUp) payouts.OnHandedOver(order, now);
             if (step == OrderStatus.Completed)
             {
+                completed = true;
+                // The seller's payout (paid online): created now, sent right after saving.
+                await payouts.OnCompletedAsync(order, Username, HttpContext.RequestAborted);
                 // The buyer may confirm even if the seller forgot to update the steps.
                 order.HandedOverAt ??= now;
                 order.CompletedAt = now;
@@ -305,7 +330,9 @@ public class OrdersController(AuctionDbContext context, IDbContextOutbox<Auction
 
         await PublishAsync(order, order.Seller == Username ? order.Buyer : order.Seller, OrderTracking.Label(order));
         await outbox.SaveChangesAndFlushMessagesAsync();
-        return WithReview(ToDto(order, Username), order, Username, await ReviewIdsAsync([order.Id]));
+        // A provider failure doesn't undo the completion: the payout stays Pending and the job retries it.
+        if (completed) await payouts.SendForOrderAsync(order.Id, HttpContext.RequestAborted);
+        return await FullDtoAsync(order);
     }
 
     /// <summary>The step names, plus the ones older apps send ("Dispatched", "HandedOver").</summary>
@@ -338,12 +365,6 @@ public class OrdersController(AuctionDbContext context, IDbContextOutbox<Auction
         return ValidationProblem(ModelState);
     }
 
-    private static AddressInfo Copy(AddressInfo a) => new()
-    {
-        Name = a.Name, Phone = a.Phone, Line1 = a.Line1, Line2 = a.Line2, City = a.City, Postcode = a.Postcode, CountryCode = a.CountryCode,
-        Latitude = a.Latitude, Longitude = a.Longitude,
-    };
-
     private static string? Clean(string? text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
 
     private bool RememberContact(IEnumerable<Order> orders, string user)
@@ -368,8 +389,10 @@ public class OrdersController(AuctionDbContext context, IDbContextOutbox<Auction
         return changed;
     }
 
-    public static OrderDto ToDto(Order o, string user)
+    public static OrderDto ToDto(Order o, string user, Payments.OrderPaymentInfo? payment = null, DateTime? now = null)
     {
+        // The service clock (tests move it); DateTime.UtcNow only for callers without one.
+        var at = now ?? DateTime.UtcNow;
         var isSeller = o.Seller == user;
         var steps = OrderTracking.Pipeline(o.DeliveryMethod);
         var position = OrderTracking.Position(o);
@@ -416,7 +439,20 @@ public class OrdersController(AuctionDbContext context, IDbContextOutbox<Auction
             Courier = o.Courier,
             TrackingNumber = o.TrackingNumber,
             Status = o.Status.ToString(),
-            StatusLabel = steps[position].Label,
+            StatusLabel = OrderTracking.Label(o),
+            PaymentStatus = o.PaymentStatus.ToString(),
+            PaymentDueAt = o.PaymentDueAt,
+            PaidAt = o.PaidAt,
+            CanPay = o.Buyer == user && o.Status == OrderStatus.AwaitingPayment && (o.PaymentDueAt is null || o.PaymentDueAt > at),
+            PaymentLabel = o.Status switch
+            {
+                OrderStatus.AwaitingPayment when o.PaymentDueAt is { } due =>
+                    due > at ? $"Waiting for payment – {Payments.PaymentDeadlineService.Left(due - at)} left" : "Payment time is up",
+                OrderStatus.AwaitingPayment => "Waiting for payment",
+                OrderStatus.Cancelled => o.CancelReason ?? "Cancelled",
+                _ => o.PaymentStatus == OrderPaymentStatus.Paid ? "Paid online" : null,
+            },
+            CancelReason = o.CancelReason,
             Tracking = steps.Select((s, i) =>
             {
                 var done = i <= position;
@@ -429,7 +465,17 @@ public class OrdersController(AuctionDbContext context, IDbContextOutbox<Auction
             HandedOverAt = o.HandedOverAt,
             CompletedAt = o.CompletedAt,
             ContactEmail = isSeller ? o.BuyerEmail : o.SellerEmail,
-            ContactPhone = isSeller ? o.BuyerPhone : o.SellerPhone
+            ContactPhone = isSeller ? o.BuyerPhone : o.SellerPhone,
+            ReceiptUrl = isSeller ? null : payment?.ReceiptUrl,
+            RefundedCents = payment?.RefundedAmount ?? 0,
+            Payout = isSeller && payment?.Payout is { } p ? new PayoutDto(p.Amount, p.Currency, p.Approximate, p.Status, p.Label, p.TransferredAt) : null,
+            AutoCompleteAt = o.Status is OrderStatus.Completed or OrderStatus.Cancelled ? null : o.AutoCompleteAt,
+            OnHold = o.OnHoldSince is not null,
+            HoldReason = o.HoldReason,
+            CanReportProblem = !isSeller && o.Buyer == user && o.PaymentStatus == OrderPaymentStatus.Paid && o.OnHoldSince is null &&
+                               o.Status is not (OrderStatus.Completed or OrderStatus.Cancelled or OrderStatus.AwaitingPayment),
+            CanCancelAndRefund = isSeller && o.PaymentStatus == OrderPaymentStatus.Paid &&
+                                 o.Status is OrderStatus.SoldAwaitingHandover or OrderStatus.ReadyForPickup,
         };
     }
 }

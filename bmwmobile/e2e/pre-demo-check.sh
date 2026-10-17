@@ -9,6 +9,8 @@
 # 6. Metro with a reset cache, the emulator, then the UI test on the emulator (Maestro) as buyer and seller:
 #    cleared app data → log in → type "bumper" → tap the suggestion → only bumpers; category suggestion; category tile;
 #    Market shows the same; counts match the API.
+#    Then "Search location" as the buyer in Hyderabad: Home → add a location → type "Kukatpally" → pick the Google
+#    suggestion ("powered by Google") → save → Home shows "Kukatpally, Hyderabad · 200 km" (needs GoogleMaps:ApiKey).
 #    Then the radius test as the buyer in Houston (USA): location shows 200 mi → the far shipping-only listing is shown
 #    with "Ships to you" → radius 25 mi on Home → the far pickup-only listing disappears, the shipping one stays
 #    (counts match the API at 200 and 25 mi) → back to 200 mi
@@ -32,6 +34,9 @@ finish() {
   if printf '%s\n' "${results[@]}" | grep -q '^FAILED'; then echo "=> NOT READY for the demo (logs: $OUT)"; exit 1; fi
   echo "=> READY for the demo"; exit 0
 }
+
+step "0/6 Disk space (stops below 3 GB free)"
+bash "$API_DIR/check-disk.sh" || { record "Disk space (at least 3 GB free)" 1; finish; }
 
 step "1/6 Stopping the backend services and Metro (data is kept)"
 bash "$API_DIR/stop-backend.sh" --keep-docker
@@ -88,9 +93,11 @@ curl -s -o /dev/null -m 600 "http://localhost:8081/index.bundle?platform=android
 # Every adb call has a time limit: a hung emulator must fail the check, not hang it.
 booted() { [ "$(timeout 20 adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; }
 if ! booted; then
+  bash "$API_DIR/check-disk.sh" || { record "Disk space before the emulator (at least 3 GB free)" 1; finish; }
+  # -no-snapshot-save: closing the emulator doesn't write a multi-GB snapshot to the disk.
   echo "  Starting the emulator $AVD (restarting adb)"
   timeout 20 adb kill-server > /dev/null 2>&1; timeout 20 adb start-server > /dev/null 2>&1
-  timeout 20 adb devices | grep -qE "emulator-[0-9]+\s+device" || ("$EMULATOR" -avd "$AVD" -no-boot-anim -no-snapshot-load > "$OUT/emulator.log" 2>&1 &)
+  timeout 20 adb devices | grep -qE "emulator-[0-9]+\s+device" || ("$EMULATOR" -avd "$AVD" -no-boot-anim -no-snapshot-load -no-snapshot-save > "$OUT/emulator.log" 2>&1 &)
   for _ in $(seq 1 90); do booted && break; sleep 3; done
 fi
 if ! booted; then
@@ -100,6 +107,6 @@ fi
 echo "  emulator ready"
 # The UI test clears the app's data itself when it starts the app; this is only a head start.
 timeout 60 adb shell pm clear com.bidmywork.app > /dev/null 2>&1 && echo "  app data cleared"
-bash "$APP_DIR/e2e/run-search-e2e.sh"; record "UI tests on the emulator (search: buyer + seller; radius: buyer in Houston)" $?
+bash "$APP_DIR/e2e/run-search-e2e.sh"; record "UI tests on the emulator (search: buyer + seller; search location: Kukatpally; radius: buyer in Houston)" $?
 
 finish

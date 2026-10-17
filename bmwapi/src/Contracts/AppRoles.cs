@@ -22,6 +22,12 @@ public static class AppRoles
     public const string SellerOnlyMessage =
         "Only seller accounts can list and manage items. Want to sell? Contact us and we'll set up a seller account.";
 
+    /// <summary>
+    /// The account's own country (set by an admin for sellers, IN / US / NG / IE), unlike location_country which
+    /// follows the user's chosen location. A seller's payment account is opened in this country.
+    /// </summary>
+    public const string AccountCountryClaim = "account_country";
+
     public const string AdminOnlyCode = "ADMIN_ONLY";
     public const string AdminOnlyMessage = "Only admins can do this.";
 

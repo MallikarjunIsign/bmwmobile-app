@@ -113,6 +113,10 @@ The `bid-auction-*` queues are also declared by AuctionService, so events publis
 
 Calls **AuctionService.GrpcAuction/GetAuction(auctionId)** when a bid (or next-min request) arrives for an auction not present in the local read model. Uses `id`, `auctionEnd`, `seller`, `reservePrice`, `startingPrice`, `bidIncrement`, `status`, `sellerDecisionDeadline` (falls back to `finished` and safe defaults for older servers). The result is persisted locally and its checks are scheduled. Returns `null` on `NOT_FOUND` (→ 404).
 
+Calls **AuctionService.GrpcAuction/GetBidderStanding(bidder)** on every bid (after the seller-block check). A non-empty
+`blockedReason` (the bidder has 2 unpaid auction wins in 12 months – payment Step 2) rejects the bid with 400 and that
+message ("You can't bid right now: …"). If AuctionService can't be reached the bid is allowed (fails open, logged).
+
 ## API Endpoints
 
 |POST|api/bids|Place a bid (`auctionId`, `amount` as query params)|Auth|

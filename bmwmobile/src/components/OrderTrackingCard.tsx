@@ -11,13 +11,21 @@ import { formatWhen } from '../utils/time';
 import { orderShippingText } from '../utils/delivery';
 import { formatDistance, formatRadius, haversineKm } from '../utils/geo';
 import { useLocations } from '../location/LocationContext';
+import { PaymentsApi, ONLINE_PAYMENT_COUNTRIES, centsText, timeLeftText } from '../services/paymentsApi';
+import { usePaymentSheet } from '../payments/PaymentsProvider';
+import { useNow } from './Countdown';
 
 export const methodLabel = (method?: string | null) =>
   method === 'Pickup' ? 'Pickup' : method === 'Shipping' ? 'Shipping' : 'Not chosen yet';
 
+/** Why the buyer reports a problem (they can add details). */
+export const PROBLEM_REASONS = ['Not received', 'Not as described', 'Damaged', 'Other'];
+
+const dayText = (iso: string) => new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+
 interface Props {
   order: Order;
-  money: (amount: number) => string;
+  money: (amount: number, decimals?: number) => string;
   onChange: (order: Order) => void;
   onOpenListing: () => void;
   /** "Message seller" / "Message buyer": the chat about this item. */
@@ -70,10 +78,15 @@ export const OrderTrackingCard: React.FC<Props> = ({ order, money, onChange, onO
     };
   }, [choosing, order.auctionId, location?.latitude, location?.longitude, location?.radiusKm]); // eslint-disable-line react-hooks/exhaustive-deps
   const pickupFar = awayKm != null && location != null && awayKm > location.radiusKm;
+  const paySheet = usePaymentSheet();
+  const now = useNow(order.status === 'AwaitingPayment');
   const [addressSheet, setAddressSheet] = useState(false);
   const [dispatch, setDispatch] = useState<{ status: OrderStatus; label: string } | null>(null);
   const [courier, setCourier] = useState('');
   const [trackingNo, setTrackingNo] = useState('');
+  const [problem, setProblem] = useState(false);
+  const [problemReason, setProblemReason] = useState(PROBLEM_REASONS[0]);
+  const [problemText, setProblemText] = useState('');
 
   const seller = order.role === 'seller';
   const done = order.status === 'Completed';
@@ -141,6 +154,46 @@ export const OrderTrackingCard: React.FC<Props> = ({ order, money, onChange, onO
     onChange(updated);
   };
 
+  // ── Online payment (USA / Ireland) ──
+  const awaitingPayment = order.status === 'AwaitingPayment';
+  const needsDelivery = !order.deliveryMethod || !!order.needsShippingAddress;
+  const onlineCountry = ONLINE_PAYMENT_COUNTRIES.includes((order.countryCode ?? '').toUpperCase());
+  const payNow = async () => {
+    setBusy(true);
+    try {
+      const session = await PaymentsApi.payOrder(order.id);
+      const result = await paySheet(session, order.countryCode ?? 'US');
+      if (result.status === 'paid' || result.status === 'processing') {
+        Alert.alert(result.status === 'paid' ? 'Paid ✓' : 'Payment received',
+          result.status === 'paid' ? 'The seller has been told to get it ready.' : 'Stripe is confirming it – the order updates in a moment.');
+        onChange(await MarketApi.order(order.id));
+      } else if (result.status === 'failed') {
+        Alert.alert('Payment not completed', result.message);
+      }
+    } catch (e) {
+      Alert.alert('Payment not started', e instanceof ServerError ? e.message : 'Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // ── After paying (Step 3) ──
+  const reportProblem = () => {
+    setProblem(false);
+    const text = [problemReason, problemText.trim()].filter(Boolean).join(': ');
+    run(async () => {
+      const updated = await PaymentsApi.reportProblem(order.id, text);
+      Alert.alert('Problem reported', 'The order is on hold and the seller isn’t paid until it’s sorted out. Message the seller – support will step in if needed.');
+      return updated;
+    });
+  };
+
+  const cancelAndRefund = () =>
+    Alert.alert('Cancel and refund?', `The buyer gets ${money(order.total ?? order.finalTotal)} back to their card and the order is cancelled. This can't be undone.`, [
+      { text: 'Keep order', style: 'cancel' },
+      { text: 'Cancel and refund', style: 'destructive', onPress: () => run(() => PaymentsApi.cancelAndRefund(order.id, 'The seller can’t fulfil the order')) },
+    ]);
+
   return (
     <View style={styles.card}>
       <TouchableOpacity style={styles.cardTop} onPress={onOpenListing}>
@@ -157,6 +210,50 @@ export const OrderTrackingCard: React.FC<Props> = ({ order, money, onChange, onO
         </View>
       </TouchableOpacity>
       <Text style={styles.metaSmall}>{totalBreakdown(order, money)}</Text>
+
+      {/* Online payment: pay before the deadline (buyer) / waiting for it (seller). */}
+      {awaitingPayment ? (
+        <View style={styles.payBox} testID="order-payment">
+          <Text style={styles.payTitle}>
+            💳 {seller
+              ? order.paymentLabel ?? 'Waiting for payment'
+              : order.paymentDueAt ? `Pay within ${timeLeftText(order.paymentDueAt, now)}` : 'Waiting for your payment'}
+          </Text>
+          {!seller && order.canPay ? (
+            needsDelivery ? (
+              <Text style={styles.metaSmall}>Choose pickup or shipping below first – the shipping charge is part of the total.</Text>
+            ) : (
+              <TouchableOpacity style={[styles.payBtn, busy && styles.disabled]} onPress={payNow} disabled={busy} accessibilityRole="button">
+                <Text style={styles.actionText}>PAY NOW – {money(order.total ?? order.finalTotal)}</Text>
+              </TouchableOpacity>
+            )
+          ) : null}
+          {!seller ? <Text style={styles.metaSmall}>Paid to ShopCarParts and held until you confirm you received it. No cash on delivery.</Text> : null}
+        </View>
+      ) : null}
+      {order.status === 'Cancelled' ? (
+        <Text style={styles.cancelled}>✕ {order.paymentLabel ?? order.cancelReason ?? 'Cancelled'}</Text>
+      ) : null}
+      {order.paymentStatus === 'Paid' ? <Text style={styles.paid}>✓ Paid online</Text> : null}
+      {/* After paying: hold, refunds, the seller's payout ("about €…" for Irish sellers), auto-complete, the receipt. */}
+      {order.onHold ? <Text style={styles.hold} testID="order-hold">⏸ On hold – {order.holdReason ?? 'being reviewed'}</Text> : null}
+      {order.refundedCents ? (
+        <Text style={styles.metaSmall}>↩ Refunded {centsText(order.refundedCents, money)} to {seller ? 'the buyer’s' : 'your'} card</Text>
+      ) : null}
+      {seller && order.payout ? <Text style={styles.payout} testID="order-payout">💰 {order.payout.label}</Text> : null}
+      {!seller && order.paymentStatus === 'Paid' && !done && !order.onHold && order.autoCompleteAt ? (
+        <Text style={styles.metaSmall}>
+          Completes automatically on {dayText(order.autoCompleteAt)} and the seller is paid – report a problem before then if something is wrong.
+        </Text>
+      ) : null}
+      {!seller && order.receiptUrl ? (
+        <TouchableOpacity onPress={() => Linking.openURL(order.receiptUrl!)} hitSlop={8} accessibilityRole="link">
+          <Text style={styles.link}>🧾 View receipt</Text>
+        </TouchableOpacity>
+      ) : null}
+      {!seller && order.paymentStatus === 'NotRequired' && !onlineCountry ? (
+        <Text style={styles.metaSmall}>Online payment is coming soon in your country – pay the seller directly.</Text>
+      ) : null}
 
       {/* Step bar: Sold ─ Shipped ─ Delivered ─ Completed (or the pickup steps) */}
       <View style={styles.bar} accessibilityLabel={`Order status: ${order.statusLabel}`}>
@@ -232,7 +329,8 @@ export const OrderTrackingCard: React.FC<Props> = ({ order, money, onChange, onO
       </View>
 
       {/* Buyer: Pickup or Shipping (when both were offered) – or the address for a shipping-only listing. */}
-      {order.deliveryChoices.length > 1 ? (
+      {/* (Waiting for payment with the delivery chosen: "Pay now" instead.) */}
+      {order.deliveryChoices.length > 1 && !(awaitingPayment && !needsDelivery) ? (
         <View style={styles.choose}>
           <Text style={styles.chooseTitle}>How do you want to receive it?</Text>
           {order.deliveryChoices.map(c => (
@@ -284,6 +382,43 @@ export const OrderTrackingCard: React.FC<Props> = ({ order, money, onChange, onO
             : ''}
         </Text>
       ) : null}
+
+      {!seller && order.canReportProblem ? (
+        <TouchableOpacity style={[styles.actionBtn, styles.secondaryBtn, busy && styles.disabled]} onPress={() => setProblem(true)} disabled={busy}>
+          <Text style={styles.actionText}>⚠️ Report a problem</Text>
+        </TouchableOpacity>
+      ) : null}
+      {seller && order.canCancelAndRefund ? (
+        <TouchableOpacity style={[styles.actionBtn, styles.secondaryBtn, busy && styles.disabled]} onPress={cancelAndRefund} disabled={busy}>
+          <Text style={styles.actionText}>Cancel and refund</Text>
+        </TouchableOpacity>
+      ) : null}
+
+      {/* Report a problem: the order goes on hold until it's sorted out. */}
+      <Modal visible={problem} transparent animationType="fade" onRequestClose={() => setProblem(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.chooseTitle}>What's wrong?</Text>
+            <Text style={styles.metaSmall}>The order goes on hold: it won't complete by itself and the seller isn't paid until it's sorted out.</Text>
+            {PROBLEM_REASONS.map(r => (
+              <TouchableOpacity key={r} style={[styles.option, problemReason === r && styles.optionActive]} onPress={() => setProblemReason(r)}
+                accessibilityState={{ selected: problemReason === r }}>
+                <Text style={styles.optionTitle}>{r}</Text>
+              </TouchableOpacity>
+            ))}
+            <TextInput style={styles.input} placeholder="Details (optional)" placeholderTextColor={COLORS.textMuted}
+              value={problemText} onChangeText={setProblemText} maxLength={200} />
+            <View style={styles.modalButtons}>
+              <TouchableOpacity onPress={() => setProblem(false)}>
+                <Text style={styles.cancel}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalConfirm} onPress={reportProblem}>
+                <Text style={styles.actionText}>Report problem</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {!seller ? (
         <ShippingAddressSheet visible={addressSheet} countryCode={order.countryCode ?? 'IN'} listingId={order.auctionId} money={money}
@@ -358,6 +493,13 @@ const styles = StyleSheet.create({
   optionTitle: { color: COLORS.text, fontSize: 13, fontWeight: '700' },
   actionBtn: { backgroundColor: COLORS.primary, paddingVertical: 10, borderRadius: RADIUS.md, alignItems: 'center', marginTop: 4 },
   actionText: { color: COLORS.text, fontWeight: '800', fontSize: 13 },
+  payBox: { backgroundColor: COLORS.card, borderRadius: RADIUS.md, padding: SPACING.sm, borderWidth: 1, borderColor: COLORS.warningGlow, gap: 6, marginTop: SPACING.xs },
+  payTitle: { color: COLORS.warningGlow, fontSize: 13, fontWeight: '800' },
+  payBtn: { backgroundColor: COLORS.success, paddingVertical: 11, borderRadius: RADIUS.md, alignItems: 'center' },
+  cancelled: { color: COLORS.danger, fontSize: 12, fontWeight: '700', marginTop: 4 },
+  paid: { color: COLORS.successGlow, fontSize: 12, fontWeight: '700', marginTop: 4 },
+  payout: { color: COLORS.text, fontSize: 12, fontWeight: '700' },
+  hold: { color: COLORS.warningGlow, fontSize: 12, fontWeight: '700' },
   secondaryBtn: { backgroundColor: COLORS.cardSecondary },
   disabled: { opacity: 0.5 },
   waiting: { color: COLORS.textMuted, fontSize: 12, fontStyle: 'italic' },

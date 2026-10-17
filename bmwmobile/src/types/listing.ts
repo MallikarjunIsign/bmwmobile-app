@@ -194,6 +194,8 @@ export interface Listing {
   /** FixedPrice: units still for sale / bought so far. */
   quantityAvailable?: number;
   quantitySold?: number;
+  /** Units held for buyers paying right now (15 minutes): "Reserved" when none are left. */
+  quantityReserved?: number;
   sellerRating?: number | null;
   sellerRatingCount?: number;
 }
@@ -241,8 +243,11 @@ export interface SaveListing {
 export interface MyListing {
   id: string;
   title: string;
-  /** Draft, Live, EndedNoBids, Sold, Completed, Cancelled. */
-  state: 'Draft' | 'Live' | 'EndedNoBids' | 'Sold' | 'Completed' | 'Cancelled';
+  /**
+   * Draft, Live, EndedNoBids, Sold, Completed, Cancelled; with online payment also AwaitingPayment (the winner hasn't
+   * paid yet), OfferedToNextBidder (the winner didn't pay) and UnsoldNotPaid (nobody paid – relist).
+   */
+  state: 'Draft' | 'Live' | 'EndedNoBids' | 'Sold' | 'Completed' | 'Cancelled' | 'AwaitingPayment' | 'OfferedToNextBidder' | 'UnsoldNotPaid';
   status: string;
   kind?: ListingKind | null;
   imageUrl?: string | null;
@@ -410,7 +415,13 @@ export interface MyBid {
 }
 
 /** Pickup: Sold → ReadyForPickup → PickedUp → Completed. Shipping: Sold → Shipped → Delivered → Completed. */
-export type OrderStatus = 'SoldAwaitingHandover' | 'ReadyForPickup' | 'PickedUp' | 'Shipped' | 'Delivered' | 'Completed';
+export type OrderStatus =
+  | 'SoldAwaitingHandover' | 'ReadyForPickup' | 'PickedUp' | 'Shipped' | 'Delivered' | 'Completed'
+  /** USA / Ireland: won – the buyer pays online first; Cancelled: not paid in time. */
+  | 'AwaitingPayment' | 'Cancelled';
+
+/** NotRequired: India / Nigeria (paid between buyer and seller). */
+export type OrderPaymentStatus = 'NotRequired' | 'AwaitingPayment' | 'Paid' | 'Expired' | 'Refunded';
 
 /** A shipping address (orders and the address book). */
 export interface Address {
@@ -419,6 +430,10 @@ export interface Address {
   line1: string;
   line2?: string | null;
   city: string;
+  /** State / county / region (optional; filled from "Search location"). */
+  state?: string | null;
+  /** The Google place the address was picked from (optional). */
+  placeId?: string | null;
   /** Postcode / PIN / ZIP / Eircode. */
   postcode: string;
   countryCode: string;
@@ -536,9 +551,47 @@ export interface Order {
   completedAt?: string | null;
   contactEmail?: string | null;
   contactPhone?: string | null;
+  /** Online payment (USA / Ireland). */
+  paymentStatus?: OrderPaymentStatus;
+  /** Auction win / second-chance offer: pay before this. */
+  paymentDueAt?: string | null;
+  paidAt?: string | null;
+  /** The buyer can pay now ("Pay now"). */
+  canPay?: boolean;
+  /** "Waiting for payment – 31 h 5 min left", "Not paid in time", "Paid online". */
+  paymentLabel?: string | null;
+  cancelReason?: string | null;
   /** The buyer's review of this order, if written. */
   reviewId?: string | null;
   /** The buyer can review it now ("How was your purchase?") – until reviewDeadline. */
   canReview?: boolean;
   reviewDeadline?: string | null;
+  // ── After the online payment (Step 3) ──
+  /** Buyer: Stripe's receipt page. */
+  receiptUrl?: string | null;
+  /** Refunded to the buyer so far (cents). */
+  refundedCents?: number;
+  /** Seller: their share and where the payout is. */
+  payout?: OrderPayout | null;
+  /** Completes by itself then (paid online, picked up / shipped) unless the buyer confirms or reports a problem. */
+  autoCompleteAt?: string | null;
+  onHold?: boolean;
+  holdReason?: string | null;
+  /** Buyer: "Report a problem" (paid online, not completed). */
+  canReportProblem?: boolean;
+  /** Seller: "Cancel and refund" (paid online, before pickup / shipping). */
+  canCancelAndRefund?: boolean;
+}
+
+/**
+ * The seller's payout: "You'll receive $118.80 when the buyer confirms …", "Paid out $118.80",
+ * "Paid out €94.04 (sent as $105.33)", "about €94.05" (Irish sellers: sent in USD, converted by Stripe).
+ */
+export interface OrderPayout {
+  amountCents: number;
+  currency: string;
+  approximate: boolean;
+  status: 'AfterCompletion' | 'Scheduled' | 'Sending' | 'WaitingForSetup' | 'OnHold' | 'Transferred' | 'Reversed' | 'Cancelled';
+  label: string;
+  transferredAt?: string | null;
 }

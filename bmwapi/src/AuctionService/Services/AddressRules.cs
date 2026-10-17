@@ -46,6 +46,8 @@ public static partial class AddressRules
         Line1 = Clean(dto.Line1, 150)!,
         Line2 = Clean(dto.Line2, 150),
         City = Clean(dto.City, 80)!,
+        State = Clean(dto.State, 80),
+        PlaceId = Clean(dto.PlaceId, 300),
         Postcode = Clean(dto.Postcode, 20)?.ToUpperInvariant() ?? "",
         CountryCode = dto.CountryCode.Trim().ToUpperInvariant(),
         Latitude = HasLocation(dto) ? dto.Latitude : null,
@@ -54,8 +56,8 @@ public static partial class AddressRules
 
     public static AddressDto ToDto(AddressInfo a) => new()
     {
-        Name = a.Name, Phone = a.Phone, Line1 = a.Line1, Line2 = a.Line2, City = a.City, Postcode = a.Postcode, CountryCode = a.CountryCode,
-        Latitude = a.Latitude, Longitude = a.Longitude,
+        Name = a.Name, Phone = a.Phone, Line1 = a.Line1, Line2 = a.Line2, City = a.City, State = a.State, PlaceId = a.PlaceId, Postcode = a.Postcode,
+        CountryCode = a.CountryCode, Latitude = a.Latitude, Longitude = a.Longitude,
     };
 
     /// <summary>The address has valid coordinates (needed for the shipping charge).</summary>

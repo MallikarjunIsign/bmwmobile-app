@@ -8,6 +8,10 @@ public class AddressDto
     public string Line1 { get; set; } = "";
     public string? Line2 { get; set; }
     public string City { get; set; } = "";
+    /// <summary>State / county / region (optional).</summary>
+    public string? State { get; set; }
+    /// <summary>The Google place ID when the address was filled from "Search location" (optional).</summary>
+    public string? PlaceId { get; set; }
     /// <summary>Postcode / PIN / ZIP / Eircode.</summary>
     public string Postcode { get; set; } = "";
     /// <summary>IN, US, NG or IE.</summary>

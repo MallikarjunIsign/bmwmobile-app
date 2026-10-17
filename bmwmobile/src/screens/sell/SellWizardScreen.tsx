@@ -15,6 +15,7 @@ import { REGIONS, distanceUnit } from '../../utils/geo';
 import { label } from '../../utils/time';
 import type { DeliveryOption, FieldErrors, Fitment, Listing, PartType, SaveListing, VehicleDetails } from '../../types/listing';
 import { CheckboxRow } from '../../components/CheckboxRow';
+import { PlaceSearch } from '../../components/PlaceSearch';
 import { PackageFields } from './PackageFields';
 import { ChipGroup, Field, FieldError, MakeModelPicker, PartTypePicker, PickerField, SectionTitle, styles as ui } from './sellUi';
 import { PhotosStep, PHOTO_LIMITS } from './PhotosStep';
@@ -621,6 +622,17 @@ export const SellWizardScreen: React.FC<Props> = ({ route, navigation }) => {
             <Text style={ui.hint}>Turn on location so buyers nearby can find it.</Text>
           )}
         </View>
+        {/* Any area, street or landmark: sets the exact point and the name ("Kukatpally, Hyderabad"). */}
+        <PlaceSearch
+          label="Search the item location"
+          value={null}
+          near={form.latitude != null && form.longitude != null ? { latitude: form.latitude, longitude: form.longitude } : location}
+          onPick={p => update({
+            latitude: p.lat, longitude: p.lon, locationName: p.label,
+            countryCode: p.countryCode ? p.countryCode.toUpperCase() : form.countryCode,
+          })}
+          testID="sell-place-search"
+        />
         <Field label="Area / city" value={form.locationName ?? ''} onChangeText={v => update({ locationName: v })} placeholder="Kukatpally, Hyderabad" />
         <FieldError messages={errorsFor('location', 'countryCode')} />
         <View style={ui.field}>

@@ -46,8 +46,8 @@ test('home: ShopCarParts header with the user and their location (tap to change)
   const t = texts(tree!);
   expect(t).toContain('SHOPCARPARTS');
   expect(t).toContain('Test User');
-  // The location (city, country) is shown under the name; tapping it opens My locations.
-  expect(t).toContain('Dublin, Ireland');
+  // The location label (area + city, else the city) is shown under the name; tapping it opens My locations.
+  expect(t).toMatch(/📍\s+Dublin\s/);
   const line = tree!.root.find(n => n.props.accessibilityLabel === 'Change location or radius' && n.props.onPress);
   expect(line).toBeTruthy();
   expect(t).not.toContain('SHOWING PARTS NEAR');

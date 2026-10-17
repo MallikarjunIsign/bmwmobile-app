@@ -11,6 +11,7 @@ import { useAuth } from '../auth/AuthContext';
 import { config } from '../config';
 import { isSeller, roleLabel } from '../utils/roles';
 import { SellerApplicationApi, type MySellerApplication } from '../services/sellerApplicationApi';
+import { SellerPaymentsCard } from '../components/SellerPaymentsCard';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Profile'>;
 
@@ -76,6 +77,9 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
 
         {seller ? (
           <>
+            <Text style={styles.sectionTitle}>PAYMENTS</Text>
+            <SellerPaymentsCard />
+
             <Text style={styles.sectionTitle}>SELLING</Text>
             <View style={styles.group}>
               <Row icon="➕" label="Sell an item" hint="Auction or direct sale" onPress={() => navigation.navigate('MainTabs', { screen: 'Sell' })} />

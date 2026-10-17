@@ -28,7 +28,8 @@ appId: com.bidmywork.app
 - tapOn: "LOG IN"
 - extendedWaitUntil:
     visible: "Test mode: your code is .*"
-    timeout: 20000
+    # Generous: with DB_TARGET=cloud every login step pays the database's distance.
+    timeout: 60000
 - copyTextFrom: "Test mode: your code is .*"
 - tapOn: "Verification code"
 # The 6th digit submits the code by itself. (No "VERIFY & CONTINUE" tap: it raced with the switch to Home and
@@ -36,4 +37,4 @@ appId: com.bidmywork.app
 - inputText: ${maestro.copiedText.replace(/\D/g, '')}
 - extendedWaitUntil:
     visible: "SHOP BY CATEGORY"
-    timeout: 30000
+    timeout: 90000

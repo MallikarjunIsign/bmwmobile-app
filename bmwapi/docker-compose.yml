@@ -109,6 +109,8 @@ services:
       - Seed__SellerPassword=${SEED_SELLER_PASSWORD:-}
       # Existing users with listings become sellers (asked once from auction-svc).
       - RoleBackfill__AuctionServiceUrl=http://auction-svc
+      # "Search location" (Google Places + Geocoding). Put GOOGLE_MAPS_API_KEY in .env; empty = built-in city list.
+      - GoogleMaps__ApiKey=${GOOGLE_MAPS_API_KEY:-}
     ports:
       - "5001:80"
     volumes:

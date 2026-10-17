@@ -61,6 +61,8 @@ public class BiddingService(
         if (auction.Seller == bidder) return new BidOutcome.Invalid(BidRules.OwnListingMessage);
         // The seller blocked this user (chat "Block user").
         if (await repository.IsBlockedAsync(auction.Seller, bidder)) return new BidOutcome.Invalid(BidRules.BlockedMessage);
+        // Too many won auctions not paid (online payments): no bidding until an admin clears it.
+        if (grpcClient.BiddingBlockedReason(bidder, logger) is { } notAllowed) return new BidOutcome.Invalid(notAllowed);
 
         await using var session = await repository.BeginAsync();
         await bus.EnlistInOutboxAsync(session.Transaction);

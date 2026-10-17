@@ -38,6 +38,11 @@ These are stored only on your PC (user-secrets), never in the repo.
 |---|---|---|---|
 | Auction | `Geocoding:Provider` | `BuiltIn` (offline city list for India, USA, Nigeria, Ireland – no key) | `appsettings.json`; switch to `Google` for exact cities |
 | Auction | `Geocoding:Google:ApiKey` | empty | only when `Provider = Google`: `cd /c/Bmwmobile/bmwapi/src/AuctionService && dotnet user-secrets set "Geocoding:Google:ApiKey" "<your-key>"`, or the env var `Geocoding__Google__ApiKey` (Docker/K8s) |
+| Identity | `GoogleMaps:ApiKey` | empty = **"Search location" uses the built-in city list** | **user-secrets only**: `cd /c/Bmwmobile/bmwapi/src/IdentityService && dotnet user-secrets set "GoogleMaps:ApiKey" "<your-key>"`; Docker: `GOOGLE_MAPS_API_KEY` in `bmwapi/.env`; K8s: env var `GoogleMaps__ApiKey` from a Secret. The key must be restricted to **Places API (New)** and **Geocoding API**. Never print or commit it |
+| Identity | `GoogleMaps:AutocompletePerMinute` / `AutocompletePerDay` | `30` / `300` | per user; over it → 429 `PLACES_RATE_LIMITED` with a friendly message (`appsettings.json`) |
+| Identity | `GoogleMaps:LookupsPerMinute` / `LookupsPerDay` | `30` / `300` | per user, place details + "Use my current location" |
+| Identity | `GoogleMaps:DailyCallLimit` | `5000` | all Google calls of the service per UTC day; above it the city list is used until midnight UTC (warning in the log) |
+| Identity | `GoogleMaps:CacheDays` / `ReverseRoundDecimals` | `30` / `3` | place details cached by place ID, reverse geocoding by point rounded to 3 decimals (~110 m) |
 | Identity | `Email:Username` / `Email:Password` | empty | user-secrets (see above) |
 | Auction | `ImageStorage:Provider` | `Local` (photos saved in `src/AuctionService/uploads`, served by the Gateway under `/images`) | `appsettings.json`; `GoogleCloudStorage` for the cloud bucket |
 | Auction | `ImageStorage:Gcs:Bucket` | empty | only with `GoogleCloudStorage`: `dotnet user-secrets set "ImageStorage:Gcs:Bucket" "<bucket-name>"` or env var `ImageStorage__Gcs__Bucket`. Optional `ImageStorage:Gcs:PublicBaseUrl` (CDN), `ImageStorage:Gcs:ObjectPrefix` (`listings`) |
@@ -49,17 +54,28 @@ These are stored only on your PC (user-secrets), never in the repo.
 | Identity | `RoleBackfill:AuctionServiceUrl` | `http://localhost:7001` | used once to make existing users with listings sellers (section 5A); empty = skip |
 | Identity | `SellerApplications:NotifyEmails` | `[]` | extra addresses told about new seller applications (every **admin account** is always emailed); `appsettings.json` or env var `SellerApplications__NotifyEmails__0=ops@…` |
 | Identity | `RateLimits:AccountPerMinute` / `RateLimits:SellerApplicationsPerMinute` | `20` / `5` | requests per minute per IP address for `/api/account` and the seller form |
+| Auction | `Stripe:SecretKey` / `Stripe:PublishableKey` / `Stripe:WebhookSecret` | empty = **online payments off** (current flow, no payment) | **user-secrets only**, TEST keys only (`sk_test_…`, `pk_test_…`, `whsec_…`) – see "Payments (Stripe test mode)" at the end. Live keys are refused |
+| Auction | `Payments:*` | commission 1 %, deadline 48 h, 3 second-chance offers, reservation 15 min, auto-complete 7 days, 2 strikes / 12 months; test-only `AllowInactiveSellersInTestMode` off, `PaymentDeadlineMinutes` empty | `appsettings.json` (`Payments` section) or env vars, e.g. `Payments__CommissionPercent=1.5` |
 | Auction | Shipping rates (table `ShippingRates`) | seeded **PLACEHOLDER** values per country and size class (`isPlaceholder = true`) | not a setting: an admin sets the real ones with `PUT /shipping/rates/{country}/{sizeClass}` (`src/AuctionService/Shipping.http`). Design doc §15 lists the placeholders |
 
 The Google key needs the **Geocoding API** enabled in Google Cloud Console (APIs & Services). Results are cached per
 ~1 km for `Geocoding:CacheHours` (24), so phones in the same area don't call Google again.
+
+**"Search location" (Google Places).** IdentityService proxies Google for the app (Gateway `/places/...`, signed-in users
+only; the app never calls Google). Each Google call writes one usage line to the identity log, e.g.
+`Google Maps calls 2026-10-16: autocomplete 12, details 3, reverse 2, total 17/5000, cache hits 4` (no key, user,
+text or coordinates). Watch it with `grep "Google Maps" bmwapi/.run/logs/identity.log`. A missing key, a Google error
+or the daily limit logs `Google Maps not available (…) – using the built-in city list` and the app keeps working.
+Live check (about 5 real calls, key from user-secrets):
+`cd /c/Bmwmobile/bmwapi && GOOGLE_MAPS_LIVE=1 dotnet test tests/IdentityService.Tests --filter PlacesLiveCheck --logger "console;verbosity=detailed"`
 
 ---
 
 ## 1. Start order (summary)
 
 1. Docker Desktop (wait for "Engine running")
-2. Backend – one command: `./start-backend.sh` (or by hand, one terminal per service – section 2B)
+2. Backend – one command: `./start-backend.sh` (or by hand, one terminal per service – section 2B).
+   Cloud database instead of the local one: `./db-tunnel.sh start` then `DB_TARGET=cloud ./start-backend.sh` (section 2C)
 3. Android emulator
 4. Metro (`npm start`)
 5. `adb reverse tcp:8081 tcp:8081`
@@ -121,6 +137,108 @@ Run `cd /c/Bmwmobile/bmwapi && dotnet build Carsties.sln` once first, then use `
 
 The app only needs Identity (5001) and Gateway (6001) to be reachable; the gateway forwards to Auction, Search, Bid and Notification.
 
+### 2C. Cloud database (Oracle VM) – `DB_TARGET=cloud`
+
+PostgreSQL can run on the Oracle Cloud VM (Ubuntu 22.04, US West – San Jose) instead of the local `postgres` container.
+Everything else (all .NET services, RabbitMQ, Meilisearch, the Stripe listener) still runs on this PC. The default is still
+the **local** database; use the cloud one only when you ask for it.
+
+- On the VM: `postgres:18` in Docker (`~/shopcarparts-db/docker-compose.yml`), volume `pgdata`, `restart: unless-stopped`,
+  port bound to **127.0.0.1 only** – the database port is never open to the internet, no Oracle security-list change.
+- This PC reaches it through an SSH tunnel: `localhost:5440` → VM `127.0.0.1:5432` (5440 so it never clashes with the local 5433).
+- Same databases as locally (`identity`, `auctions`, `bids`, `chat`), user `postgres`, its own strong password.
+- The connection strings are **not** in appsettings: `start-backend.sh` builds them from `bmwapi/.run/cloud-db.env` and passes
+  them as environment variables (`ConnectionStrings__…`) to Identity, Auction, Bid and Chat only.
+
+**Daily steps (cloud database):**
+
+```bash
+cd /c/Bmwmobile/bmwapi
+./db-tunnel.sh start                 # 1. tunnel (reconnects by itself if the connection drops)
+DB_TARGET=cloud ./start-backend.sh   # 2. backend: rabbitmq + meilisearch in Docker, services on the cloud DB
+# ... work / test as usual (Metro, emulator: section 3) ...
+./stop-backend.sh                    # 3. stop the services + containers
+./db-tunnel.sh stop                  # 4. close the tunnel (optional)
+```
+
+`start-backend.sh` starts the tunnel itself when it is not running, and prints `(database: cloud)`. Without `DB_TARGET`
+(or `DB_TARGET=local`) everything works exactly as before with the local container. `./db-tunnel.sh status` shows whether
+the tunnel is up; its log is `.run/logs/db-tunnel.log`. The pre-demo check (3B) also uses the cloud DB when you run it as
+`DB_TARGET=cloud bash e2e/pre-demo-check.sh`.
+
+**Two databases, one search index, one Stripe account.** Local and cloud are separate copies (they diverged on
+16 Oct 2026), but Meilisearch and the Stripe test account are shared. So when you switch:
+
+- **Search** – `start-backend.sh` remembers the last target (`bmwapi/.run/db-target`). When `DB_TARGET` changes it rebuilds
+  the search index from the database in use (adds its listings, removes listings only the other database has) and waits
+  for it: `Search index: re-syncing … done (75 listings, 2 removed)`. Force it any time with `RESYNC_SEARCH=1 ./start-backend.sh`.
+  Without this, Home shows listings the other database has and Buy now says "This listing is no longer available".
+- **Sellers' payment accounts** – a seller who finished Stripe setup on the other database is linked automatically when
+  they open Profile → Payments or tap "Set up payments" (the existing Stripe account is reused – never a second one).
+  To link everyone at once and see each status: `bash sync-seller-payments.sh` (admin endpoint
+  `POST /payments/admin/seller-accounts/sync`; uses the e2e admin from `.run/e2e.env`; creates nothing at Stripe).
+- **psql on the database in use** – `./db-psql.sh <database>` (local container, or the VM over SSH for cloud), e.g.
+  `echo 'select count(*) from "Auctions"' | ./db-psql.sh auctions -At`. The e2e scripts use it for the test accounts.
+
+The cloud connection strings keep a few connections open with keepalive (`Minimum Pool Size=3`, `Keepalive=15`,
+5 min idle lifetime): a new connection through the tunnel costs 2–4 s. The tunnel itself sends keep-alives every 10 s
+and reconnects by itself. Logs in `.run/logs` are rotated at 20 MB (3 files each); `start-backend.sh` and the pre-demo
+check stop when less than 3 GB of disk is free (`bash check-disk.sh`).
+
+**Checkout (Buy now → Pickup/Shipping → total), measured 17 Oct 2026:** local 0.86 s → 0.75 s; cloud 6.7 s → 2.5 s
+(median; the first one or two after a start take 7–12 s while connections and Stripe warm up). The app waits up to 45 s
+for checkout / payment calls (other calls 5 s).
+
+**Speed:** from Hyderabad the VM is ~220 ms away per network round trip, and every database query pays it. Measured
+(median, through the Gateway): auctions list 29 ms → ~2.0 s, auction by id 29 ms → ~2.2 s, catalog categories 14 ms → ~0.9 s,
+bids / makes 5–7 ms → ~0.4 s; search (Meilisearch, local) unchanged. Fine for checking the cloud DB, slow for daily UI work;
+the delay goes away once the services run in the same region as the database.
+
+**`bmwapi/.run/cloud-db.env`** (git-ignored, `chmod 600`, never commit or print it). To set it up on another PC:
+
+```bash
+CLOUD_DB_SSH_HOST=<VM public IP>
+CLOUD_DB_SSH_USER=ubuntu
+CLOUD_DB_SSH_KEY=$HOME/.ssh/bidmyparts
+CLOUD_DB_LOCAL_PORT=5440
+CLOUD_DB_USER=postgres
+CLOUD_DB_PASSWORD=<the password in ~/shopcarparts-db/.env on the VM>
+```
+
+**On the VM** (`ssh -i ~/.ssh/bidmyparts ubuntu@<VM IP>`, folder `~/shopcarparts-db`; copies of its `docker-compose.yml`
+and `backup.sh` are in `bmwapi/cloud-db/` – the password file `.env` exists only on the VM):
+
+| What | Command |
+|---|---|
+| status | `docker ps` (`shopcarparts-postgres … (healthy)`) |
+| psql | `docker exec -it shopcarparts-postgres psql -U postgres -d auctions` |
+| restart | `cd ~/shopcarparts-db && docker compose restart` (data stays in the `pgdata` volume) |
+| updates | `sudo apt-get update && sudo apt-get -y dist-upgrade`, then `sudo reboot` if `/var/run/reboot-required` exists – Postgres starts again by itself |
+
+**Nightly backup:** cron at **03:15 UTC** (08:45 IST) runs `~/shopcarparts-db/backup.sh`: one folder per night
+`~/shopcarparts-db/backups/<UTC date_time>/` with `identity.dump`, `auctions.dump`, `bids.dump`, `chat.dump`
+(`pg_dump -Fc`) and `globals.sql` (roles, no passwords). Folders older than 7 days are deleted. Log:
+`~/shopcarparts-db/backups/backup.log` (one `ok` line per night). Backup now: `~/shopcarparts-db/backup.sh`.
+The backups are on the same VM – copy one to your PC now and then:
+`scp -r -i ~/.ssh/bidmyparts ubuntu@<VM IP>:shopcarparts-db/backups/<folder> /c/Backups/`.
+
+**Restore** (on the VM; stop the backend on the PC first so nothing writes):
+
+```bash
+cd ~/shopcarparts-db/backups/<folder>
+# one database, e.g. auctions: replace it completely with the backup
+docker exec shopcarparts-postgres dropdb -U postgres --force auctions
+docker exec -i shopcarparts-postgres pg_restore -U postgres --create --exit-on-error -d postgres < auctions.dump
+# repeat for identity / bids / chat as needed
+```
+
+To look at a backup without touching the real data, restore it into a scratch database instead:
+`docker exec shopcarparts-postgres createdb -U postgres restore_test`, then
+`docker exec -i shopcarparts-postgres pg_restore -U postgres --no-owner -d restore_test < auctions.dump`, and
+`dropdb -U postgres restore_test` when done. To copy the cloud data back to the local container: on the PC
+`scp` the folder, then `docker compose exec -T postgres dropdb -U postgres --force auctions` and
+`docker compose exec -T postgres pg_restore -U postgres --create -d postgres < auctions.dump` (in `bmwapi`).
+
 ---
 
 ## 3. Mobile app (Android emulator)
@@ -129,11 +247,14 @@ The app only needs Identity (5001) and Gateway (6001) to be reachable; the gatew
 
 ```bash
 "$LOCALAPPDATA/Android/Sdk/emulator/emulator.exe" -list-avds
-"$LOCALAPPDATA/Android/Sdk/emulator/emulator.exe" -avd Pixel_8 &
+bash ../bmwapi/check-disk.sh     # stops when less than 3 GB is free
+"$LOCALAPPDATA/Android/Sdk/emulator/emulator.exe" -avd Pixel_8 -no-snapshot-save &
 adb wait-for-device
 ```
 
 (Or start it from Android Studio → Device Manager → ▶.) Wait until the emulator shows its home screen.
+`-no-snapshot-save`: closing the emulator doesn't write a new multi-GB snapshot (`~/.android/avd/Pixel_8.avd/snapshots`).
+Started from Android Studio, set the AVD's **Boot option → Cold boot** for the same effect.
 
 ### Terminal B – Metro (keep it open)
 
@@ -199,7 +320,12 @@ Market. Then, as the buyer in **Houston** (USA), the radius test `e2e/radius.yam
 shipping-only listing (Long Beach) is shown with "🚚 Ships to you" and the far pickup-only one (Round Rock) is shown → radius
 **25 mi** on Home → Round Rock disappears, Long Beach stays, "See All (N)" matches the API at 200 and 25 mi → back to 200 mi.
 The e2e accounts' saved locations are reset first (only these test accounts), so they start with the default radius.
-Flows: `e2e/search-filters.yaml`, `e2e/radius.yaml`, `e2e/subflows/login.yaml`. Screenshots of a failed run: `~/.maestro/tests/<latest>`.
+Between the two, as the buyer in **Hyderabad**, `e2e/place-search.yaml` ("Search location"): Home → location line → "Manage
+locations / add an address" → "+ ADD NEW ADDRESS" → type **Kukatpally** → the Google suggestions with "powered by Google" →
+pick "Kukatpally / Hyderabad, Telangana, India" → "📍 Kukatpally, Hyderabad" and the radius picker (200 km) → house / flat →
+save → Home shows **"📍 Kukatpally, Hyderabad · 200 km ▾"**. Needs `GoogleMaps:ApiKey` (section 0); about 3 Google calls per
+run – the runner prints the day's usage line from the identity log.
+Flows: `e2e/search-filters.yaml`, `e2e/place-search.yaml`, `e2e/radius.yaml`, `e2e/subflows/login.yaml`. Screenshots of a failed run: `~/.maestro/tests/<latest>`.
 
 Seller application form ("Want to sell?", signed out from Sign up → stored → admin API lists it → admins notified):
 `cd /c/Bmwmobile/bmwmobile && bash e2e/run-seller-application-e2e.sh` (needs the e2e admin – start the backend once with the pre-demo check below).
@@ -338,6 +464,9 @@ password → log in with email + password + OTP. Before that, logging in says "Y
 
 pgAdmin: right-click **Servers → Register → Server…**, name it e.g. `ShopCarParts local`, fill the **Connection** tab as above.
 
+Cloud database (section 2C): start the tunnel (`./db-tunnel.sh start`), then register a second server `ShopCarParts cloud`
+with host `localhost`, port `5440`, user `postgres` and the `CLOUD_DB_PASSWORD` from `bmwapi/.run/cloud-db.env`.
+
 New tables are created automatically when the Auction service starts (EF Core migrations `CustomOrders` and
 `ListingModel` – they only **add** tables and columns; existing data is untouched):
 
@@ -371,6 +500,7 @@ cd /c/Bmwmobile/bmwapi
 ```
 
 - Started by hand (section 2B)? Press `Ctrl+C` in each service terminal, then `docker compose stop` in `bmwapi`.
+- Cloud database (section 2C): `./db-tunnel.sh stop` closes the tunnel; the database on the VM keeps running.
 - Metro: `Ctrl+C` in its terminal. Emulator: close its window, or `adb emu kill`.
 - **Keeps your data:** `docker compose stop` / `./stop-backend.sh` only stop containers.
   **Never** run `docker compose down -v` (that deletes the database and search volumes).
@@ -403,6 +533,7 @@ Next time start again with section 1.
 | Google sign-in fails on the emulator | Add a Google account to the emulator (Settings → Accounts) and use an image with Google Play. |
 | Signed out after restarting the app | "Remember me" was off at login, or you logged out. Log in with Remember me ticked. |
 | `.NET 9 framework not found` when running the old test projects | Use `DOTNET_ROLL_FORWARD=Major dotnet test` (only .NET 10 is installed). |
+| `DB_TARGET=cloud`: `Tunnel … FAILED` / a service fails with `Failed to connect to 127.0.0.1:5440` | `./db-tunnel.sh status` and `.run/logs/db-tunnel.log`; check `ssh -i ~/.ssh/bidmyparts ubuntu@<VM IP>` works and the VM's `docker ps` shows `shopcarparts-postgres` healthy. `Port 5440 is already used` → set another `CLOUD_DB_LOCAL_PORT` in `.run/cloud-db.env`. |
 | `dotnet tool restore` says the file "came from another computer" | In PowerShell: `Unblock-File C:\Bmwmobile\bmwapi\dotnet-tools.json`. |
 
 ---
@@ -682,4 +813,254 @@ Accounts: B = the e2e buyer (`bmwapi/.run/e2e.env`) or a new buyer; S = the seed
 86. API: `PUT http://localhost:5001/api/me/locations/{id}/radius` `{ "radiusValue": 2000 }` → 400 `INVALID_RADIUS`
     "Choose a radius between 5 and 1,000 miles."
 87. India check: location Hyderabad → "· 200 km ▾"; 50 km → the Warangal radiator (pickup only) disappears, the Bengaluru alternator (ships) stays.
+
+
+### Search location (Google Places)
+
+Needs `GoogleMaps:ApiKey` in IdentityService user-secrets (section 0). JS only – Metro reload (`r`), no `npm run android`.
+
+1. Home → tap the location line → **Manage locations / add an address** → **+ ADD NEW ADDRESS**.
+2. Type `Ku` – nothing happens; type `Kukatpally` – after a short pause the list shows **Kukatpally** (bold) /
+   *Hyderabad, Telangana, India* (grey) and **powered by Google** underneath. Tap it with the keyboard still open.
+3. The card shows **📍 Kukatpally, Hyderabad** with the full address; Area = Kukatpally, PIN code = 500072; the search radius
+   (200 km) is still on the screen. Add the house / flat → **SAVE AND USE THIS ADDRESS** → Home: **📍 Kukatpally, Hyderabad · 200 km ▾**.
+4. Try `Main Street, Dublin`, `Lekki Phase 1, Lagos`, `Katy, TX` (units switch to miles in the USA). A place like `London`
+   shows **We don't operate in this country yet**.
+5. **🎯 Use my current location** (emulator ⋮ → Location, e.g. 17.4949, 78.3997) → **Kukatpally, Hyderabad**, India underneath.
+6. Home → location line → **SEARCH LOCATION** in the sheet → pick a place → Home switches to it without leaving the screen.
+7. Shipping: an order → 🚚 Ship it to me → + Add a new address → **Find the address** → pick a street → street, area, city,
+   state and postcode are filled; name, phone and house / flat stay editable; the charge uses that place.
+8. Sell flow step "Where is it?" and **Create a Custom Order** → "Where do you need it?": search a place; the custom order
+   also has its own radius.
+9. Fallback: `dotnet user-secrets remove "GoogleMaps:ApiKey"` (IdentityService) + restart → typing `Hyder` lists the built-in
+   cities (no "powered by Google"); set the key again afterwards.
+10. Usage: `grep "Google Maps calls" /c/Bmwmobile/bmwapi/.run/logs/identity.log | tail -3`.
+
+---
+
+## Payments (Stripe test mode)
+
+Online payments for the **USA (USD) and Ireland (EUR)** with Stripe Connect (Express-dashboard accounts created with
+Accounts v2, separate charges and transfers). India and Nigeria keep the current flow ("Online payment coming soon in your
+country"). **Test mode only** – no live keys, no real money. Design: `docs/PAYMENTS_DESIGN.md`.
+
+> **Stripe account:** the **Shopcarparts** sandbox (US, test mode, Connect enabled as a marketplace), used only by this app.
+> Everything the app creates is still tagged with metadata `app=shopcarparts`; webhook events without the tag (e.g. Stripe's
+> sample objects from `stripe trigger`) are ignored. The app never changes account-wide Stripe settings – ask the account
+> owner before changing anything in the Dashboard's settings.
+
+### 1. Keys (user-secrets – never in the repo, never printed)
+
+Stripe Dashboard → **Developers → API keys** (Test mode switch ON): the publishable key `pk_test_…` and the secret key
+`sk_test_…`.
+
+```bash
+cd /c/Bmwmobile/bmwapi/src/AuctionService
+dotnet user-secrets set "Stripe:SecretKey" "sk_test_..."
+dotnet user-secrets set "Stripe:PublishableKey" "pk_test_..."
+# Stripe:WebhookSecret is saved by stripe-listen.sh (step 2), or by hand from the "whsec_…" it prints:
+dotnet user-secrets set "Stripe:WebhookSecret" "whsec_..."
+```
+
+They are stored in `%APPDATA%\Microsoft\UserSecrets\bidmyparts-auction-svc\secrets.json`
+(`C:\Users\<you>\AppData\Roaming\Microsoft\UserSecrets\bidmyparts-auction-svc\secrets.json`) – you can also paste them there:
+
+```json
+{
+  "Stripe:SecretKey": "sk_test_...",
+  "Stripe:PublishableKey": "pk_test_...",
+  "Stripe:WebhookSecret": "whsec_..."
+}
+```
+
+Restart the backend (`./start-backend.sh`). `.run/logs/auction.log` says **"Online payments: Stripe (test mode)"**
+(without keys: "Online payments OFF"). Docker / Kubernetes: env vars `Stripe__SecretKey`, `Stripe__PublishableKey`,
+`Stripe__WebhookSecret` from a secret store.
+
+**Stripe Connect must be enabled** on the account (Dashboard → Connect). If creating a seller's account fails with
+"…signed up for Connect…" / "…platform profile…", that is an account-wide setting: decide with the account owner.
+Check which account the key belongs to (the name shows top left in the Dashboard):
+`curl -s -u "<sk_test_…>:" https://api.stripe.com/v1/account` → `settings.dashboard.display_name` = "Shopcarparts".
+New Stripe platforms can't create **v1** accounts ("Stripe no longer recommends Accounts v1…"): the app uses **Accounts v2**,
+so the Dashboard's "Accounts v1 support" setting stays off.
+
+### 2. Webhooks: Stripe CLI
+
+Install once: `scoop install stripe` (Scoop), or download `stripe_X.Y.Z_windows_x86_64.zip` from
+https://github.com/stripe/stripe-cli/releases and put `stripe.exe` on the PATH (or `STRIPE_CLI=/c/tools/stripe.exe`).
+On this PC it is in `C:\Users\malli\tools\stripe-cli\stripe.exe` (v1.53.1):
+`STRIPE_CLI=/c/Users/malli/tools/stripe-cli/stripe.exe bash stripe-listen.sh`. The script passes the `--events` list
+newer CLIs require, and masks the signing secret in its output.
+
+```bash
+cd /c/Bmwmobile/bmwapi
+bash stripe-listen.sh          # keep this terminal open while testing payments
+```
+
+It reads the key from user-secrets and runs
+`stripe listen --api-key <Stripe:SecretKey> --forward-to http://localhost:6001/payments/stripe/webhook --forward-connect-to …same URL`
+(`--forward-connect-to` brings the connected accounts' `account.updated`). The first time it saves the CLI's `whsec_…` as
+`Stripe:WebhookSecret` – restart AuctionService once after that. The webhook endpoint needs no sign-in; every event's
+signature is checked, each event is handled once (`PaymentWebhookEvents`), and events of the other project are ignored.
+
+### 3. Seller payment accounts (Step 1)
+
+- An admin creates a seller (`POST /api/admin/sellers`, country US or IE) or upgrades a buyer (`make-seller`) → AuctionService
+  opens the seller's Stripe account (Accounts v2, Express dashboard). Existing US / Irish sellers get one the first time they
+  open **Profile → Payments**.
+- US and Irish sellers: `card_payments` + `transfers` (Accounts v2 needs both). The US platform charges the buyer and sends the
+  seller's share as a transfer – to Irish sellers cross-border (US ↔ EEA is supported, no `on_behalf_of`).
+- Prefilled for the seller: e-mail, name, "Sells used and new car parts on the ShopCarParts marketplace", category automotive
+  parts (MCC 5533). Stripe's page asks for the rest; only the seller can accept Stripe's terms.
+- Status in the app: **Not started / Pending verification / Active / Action needed** (from Stripe, kept in sync by `account.updated`).
+- A seller in the USA / Ireland can't **publish** (or relist) until the status is **Active** ("Finish your payment setup first").
+  Existing listings stay.
+
+**Completing onboarding in test mode** (Stripe's hosted page, opened from the app):
+- Phone `000 000 0000`, SMS code `000000`; email: any.
+- USA: date of birth `01/01/1901`, SSN `000-00-0000` (or last 4 `0000`), address line `address_full_match`, bank: routing
+  `110000000`, account `000123456789`.
+- Ireland: date of birth `01/01/1901`, address line `address_full_match` (with a real city / postcode), IBAN
+  `IE29AIBK93115212345678`; if an ID document is asked for, use the test-document option Stripe offers in test mode.
+- Values from https://docs.stripe.com/connect/testing.
+
+**Onboarding from the PC's browser** (instead of the phone): `cd /c/Bmwmobile/bmwapi && bash stripe-onboarding-link.sh <seller
+username>` prints a fresh link (works once, expires after a few minutes – run it again for a new one). At the end Stripe shows
+the "Payment setup saved" page (its "Back to ShopCarParts" button only works on the phone).
+
+Manual test (emulator, **full rebuild once**: `npm run android` – the app now opens `shopcarparts://payments` links):
+
+1. Seller in the USA: an admin creates one – `POST http://localhost:5001/api/admin/sellers` with `"countryCode": "US"` (section 5A)
+   – or use a US seller account. Log in on the emulator (location Houston: `adb emu geo fix -95.3698 29.7604`).
+2. **Profile → PAYMENTS** shows **Not started** and "You can publish new listings once payments are active." **SET UP PAYMENTS**
+   → Stripe's page opens in the browser → fill it with the test data above → at the end Stripe returns to
+   "Payment setup saved" → **Back to ShopCarParts** (the app opens again).
+3. Profile → Payments: **Pending verification** → after a few seconds (the `stripe listen` terminal shows `account.updated`)
+   **Active**. "Payouts & bank account (Stripe) →" opens the Express dashboard.
+4. Sell → publish a US listing: works now. Before step 2 it said "Finish your payment setup first (Profile → Payments)".
+5. Irish seller (`"countryCode": "IE"`, location Dublin `adb emu geo fix -6.2603 53.3498`): the same, with the Irish test data.
+6. Indian seller (the seeded test seller): Profile → Payments says "Online payment is coming soon in your country"; publishing
+   works as before.
+7. Webhook check: `stripe trigger account.updated` → the backend log shows "ignored: not this app's object" (Stripe's sample
+   account isn't tagged), nothing changes.
+
+### 4. Buyers pay online (Step 2)
+
+The buyer pays the **platform** with Stripe's Payment Sheet (separate charges and transfers: the PaymentIntent has
+`transfer_group=order_<orderId>` and `metadata.app=shopcarparts`). An order is **Paid only when the verified webhook
+`payment_intent.succeeded` arrives** – never from the app's own answer. The seller's share is transferred later (Step 3).
+India / Nigeria: no online payment yet ("Online payment is coming soon in your country"), the old flow stays.
+
+- **Buy now** (fixed price, USA / Ireland): Checkout screen → Pickup or Shipping (address) → "Item $120 + Shipping $20 =
+  Total $140" → **PAY $140** → Payment Sheet. The units are **reserved for 15 min** (`Payments:ReservationMinutes`) –
+  other buyers see "Reserved". The order is created only when the payment succeeds. Declined card → message, try again
+  or leave (leaving cancels the reservation). Time up → the reservation ends and the PaymentIntent is cancelled; a payment
+  that still succeeds after that (stock gone) is refunded automatically.
+- **Auctions** (USA / Ireland): the winner's order is **Awaiting payment** with "Pay within 47 h 59 min" and **PAY NOW –
+  $X** (choose pickup / shipping first). Reminders at half time and 2 h before the end. Not paid in time → the order is
+  cancelled ("Not paid in time"), the winner gets a **strike**, and the item is offered to the **next highest bidder** at
+  their own highest bid (Orders → "Second-chance offers": Accept / Decline, same deadline). Up to 3 offers; then the listing
+  is "Unsold (not paid)" and the seller can relist it.
+- **Strikes:** 2 unpaid wins in 12 months block bidding ("You can't bid right now: 2 won auctions weren't paid …"). Bidders with strikes don't get
+  second-chance offers. An admin clears them: `POST http://localhost:6001/payments/admin/strikes/<username>/clear`
+  (admin token).
+
+**Test cards** (Payment Sheet, test mode; any future date, any CVC, any ZIP):
+
+| Card | Result |
+|---|---|
+| `4242 4242 4242 4242` | succeeds → order Paid |
+| `4000 0000 0000 9995` | declined, "Your card has insufficient funds" |
+| `4000 0025 0000 3155` | asks for 3-D Secure → tap "Complete" |
+| `4000 0000 0000 0259` | succeeds, then the buyer's bank **disputes** it (Step 3: payout on hold) |
+
+**Test settings** (all off by default; never in production):
+
+| Env var (when starting the backend) | Effect |
+|---|---|
+| `Payments__AllowInactiveSellersInTestMode=true` | sellers can publish and get paid **without an Active payment account**. Works only with `sk_test_` keys (ignored with live keys) |
+| `Payments__PaymentDeadlineMinutes=3` | auction payment deadline 3 min instead of 48 h (also the second-chance offers) |
+| `Payments__ReservationMinutes=2` | Buy now reservation 2 min instead of 15 |
+| `Payments__AutoCompleteMinutes=3` | picked-up / shipped orders complete by themselves (and the seller is paid) after 3 min instead of 7 days |
+| `Payments__JobIntervalSeconds=10` | deadlines / reminders / auto-complete / payouts are checked every 10 s (default 30) |
+
+With Active sellers (section 3) the first one isn't needed:
+
+```bash
+cd /c/Bmwmobile/bmwapi && ./stop-backend.sh --keep-docker
+export Payments__PaymentDeadlineMinutes=3 Payments__AutoCompleteMinutes=3 Payments__JobIntervalSeconds=10
+./start-backend.sh                                   # auction.log: "Online payments: Stripe (test mode)"
+STRIPE_CLI=/c/Users/malli/tools/stripe-cli/stripe.exe bash stripe-listen.sh    # second terminal, keep open
+```
+
+An order already waiting (an open offer, or a picked-up / shipped order waiting to complete) can be shortened at any time:
+`bash shorten-payment-deadline.sh 3` (all) or `bash shorten-payment-deadline.sh 2 <orderId>` – local database only.
+
+Manual test (emulator, **full rebuild once**: `npm run android` – the Stripe SDK is native). Accounts: US seller (section 3 or
+`.run/stripe-test.env`), US buyer (`.run/e2e.env`), a second buyer; location Houston `adb emu geo fix -95.3698 29.7604`.
+
+1. Seller: publish a US **fixed-price** listing (quantity 1) and a US **auction**.
+2. Buyer: open the fixed-price listing → **Buy now** → Checkout: Pickup → total → **PAY** → card `4242 4242 4242 4242`
+   → "Paid ✓" → **View order**: Orders shows **✓ Paid online**. The seller's Sales tab shows it too.
+3. Second listing, card `4000 0000 0000 9995` → the sheet says the card was declined (insufficient funds); close the sheet →
+   "Payment cancelled – the item is no longer reserved for you", the listing is for sale again. While the first buyer is on Checkout, the second buyer sees **Reserved**.
+4. Auction: two buyers bid; the seller accepts the high bid (or let it end). Winner: Orders → **Awaiting payment**, "Pay
+   within 2:59", **PAY NOW**. Don't pay: the reminders arrive, then "✕ Not paid in time"; the other bidder gets the
+   **second-chance offer** in Orders → Accept → pay with 4242 → Paid.
+5. Strikes: let the same buyer win and not pay twice → bidding shows "You can't bid right now …". Admin clears
+   (endpoint above) → bidding works again.
+6. Indian buyer / seller: Buy now as before, with "Online payment is coming soon in your country".
+
+### 5. After the payment: payouts, refunds, disputes (Step 3)
+
+- **The seller is paid when the order is completed**: the buyer confirms ("Confirm you picked it up" / "Confirm delivery"),
+  or it completes by itself **7 days after the seller marks it Picked up / Shipped** (`Payments:AutoCompleteDays`). The
+  payout is a Stripe transfer from the buyer's charge: item + shipping − 1 % commission − refunds.
+- **Irish sellers** are paid from the US platform's USD balance: the share is sent in USD at the rate the buyer's EUR payment
+  was converted with, and Stripe converts it back. Before: "You'll receive **about €94.05** …"; after: "Paid out €94.04
+  (sent as $105.44)".
+- Seller's order card: 💰 "You'll receive $118.80 once the buyer confirms they have it" → after Picked up "… or automatically on
+  23 Oct" → "Paid out $118.80". Not Active yet: "… is waiting – finish your payment setup" (sent once Active).
+- Buyer's order card: "Completes automatically on 23 Oct and the seller is paid – report a problem before then …",
+  **🧾 View receipt** (Stripe's receipt page), **⚠️ Report a problem** → the order goes **on hold** (no automatic completion, no
+  payout) until the buyer confirms or support releases it.
+- Seller: **Cancel and refund** (before Picked up / Shipped) → full refund to the card, order cancelled.
+- Refunds made in the Stripe Dashboard are picked up from the webhook (and lower the payout, or are taken back from it).
+- Disputes (`4000 0000 0000 0259`): payout on hold; won → paid out; lost → no payout.
+- **Admin** (admin token, via the Gateway `http://localhost:6001`):
+
+| Call | What |
+|---|---|
+| `GET /payments/admin/payments?status=Succeeded&user=<username>` | payments with their payout |
+| `GET /payments/admin/orders/<orderId>` | one order: payment, refunds, payout, dispute, Stripe ids |
+| `POST /payments/admin/orders/<orderId>/refund` `{ "amount": 2000, "reason": "…" }` | refund $20.00 (no amount = everything left) |
+| `POST /payments/admin/orders/<orderId>/hold` `{ "text": "…" }` / `…/release` `{ "complete": true }` | hold / release (and complete + pay now) |
+| `POST /payments/admin/transfers/<id>/retry`, `…/reverse` `{ "amount": 1000 }` | send a waiting payout now / take a payout back |
+| `POST /payments/admin/strikes/<username>/clear` | clear non-payment strikes |
+
+Manual test (emulator; backend started with `Payments__AutoCompleteMinutes=3`, sellers Active):
+
+1. US buyer buys a US fixed-price item (Pickup, 4242). Seller (Sales tab): 💰 "You'll receive $X once the buyer confirms …".
+2. Seller: **Mark as ready for pickup** → **Mark as picked up** → 💰 "… or automatically on …". Buyer: the "Completes
+   automatically on …" line, **🧾 View receipt** opens Stripe's receipt.
+3. Buyer: **Confirm you picked it up** → seller: 💰 **Paid out $X** (Stripe Dashboard → Connect → the seller → the transfer).
+4. Another order: the seller marks Picked up, nobody confirms → 3 min later it is Completed and paid out by itself.
+5. Another order: buyer **⚠️ Report a problem** → ⏸ On hold on both sides; wait past 3 min → still Picked up, no payout.
+   Admin: `…/release` `{ "complete": true }` → Completed, paid out.
+6. Another order (before pickup): seller **Cancel and refund** → buyer: ✕ Refunded – Cancelled by the seller, ↩ Refunded $X.
+7. Irish seller (Dublin, `adb emu geo fix -6.2603 53.3498`) sells for €95, buyer pays and confirms → seller: "Paid out €94.04
+   (sent as $105.44)" (the exact cents follow Stripe's rate that day).
+8. Card `4000 0000 0000 0259`: after paying, both sides see ⏸ On hold – "The buyer's bank is disputing the payment". In the
+   Stripe Dashboard → Payments → the payment → Dispute → submit evidence `winning_evidence` → won → paid out (or
+   `losing_evidence` → lost → no payout).
+
+### Switch to another Stripe account / sandbox later
+
+1. `cd /c/Bmwmobile/bmwapi && bash clear-stripe-test-data.sh --yes` – clears the local Stripe data: sellers' payment account
+   IDs and statuses, buyers' Stripe customer IDs, payments / transfers / refunds of test orders, handled webhook events, open
+   reservations. Listings, orders and users stay.
+2. Put the new account's test keys in user-secrets (section 1; `dotnet user-secrets remove "Stripe:WebhookSecret"` first).
+3. `bash stripe-listen.sh` (saves the new `whsec_…`), then `./start-backend.sh`.
+4. Sellers open Profile → Payments and complete onboarding again. With a separate account the `app=shopcarparts` tag is no
+   longer needed but stays harmless (`Payments:AppTag`).
 

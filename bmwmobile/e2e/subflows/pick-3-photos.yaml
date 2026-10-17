@@ -1,0 +1,18 @@
+# Picks 3 photos in the system photo picker (Google Photos on the emulator): the first 3 in the grid, then Done.
+# (Identical images are shown once, so the grid's sample photos are used too.)
+appId: com.bidmywork.app
+---
+- extendedWaitUntil:
+    visible: "Photo taken on.*"
+    timeout: 30000
+- tapOn:
+    text: "Photo taken on.*"
+    index: 0
+- tapOn:
+    text: "Photo taken on.*"
+    index: 1
+- tapOn:
+    text: "Photo taken on.*"
+    index: 2
+- assertVisible: "3 photos or videos selected"
+- tapOn: "Done"

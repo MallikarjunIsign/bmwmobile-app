@@ -56,6 +56,19 @@ jest.mock('@invertase/react-native-apple-authentication', () => ({
   AppleButton: () => null,
 }));
 
+// Stripe's payment sheet is native: tests set what it answers (global.__stripeSheet).
+jest.mock('@stripe/stripe-react-native', () => {
+  global.__stripeSheet = {
+    initPaymentSheet: jest.fn(async () => ({})),
+    presentPaymentSheet: jest.fn(async () => ({})),
+  };
+  return {
+    StripeProvider: ({ children }) => children,
+    useStripe: () => global.__stripeSheet,
+    initStripe: jest.fn(async () => undefined),
+  };
+});
+
 jest.mock('react-native-image-picker', () => ({
   launchCamera: jest.fn(async () => ({ didCancel: true })),
   launchImageLibrary: jest.fn(async () => ({ didCancel: true })),

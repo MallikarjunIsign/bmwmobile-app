@@ -1,4 +1,5 @@
 using AuctionService.Entities;
+using AuctionService.Payments;
 using Microsoft.EntityFrameworkCore;
 
 namespace AuctionService.Data;
@@ -37,9 +38,41 @@ public class AuctionDbContext(DbContextOptions options) : DbContext(options)
     public DbSet<ReviewReport> ReviewReports { get; set; }
     public DbSet<SellerRating> SellerRatings { get; set; }
 
+    // Online payments (Payments/): seller payout accounts, payments, transfers, refunds, webhook events, Buy-now
+    // reservations, second-chance offers and non-payment strikes.
+    public DbSet<SellerPaymentAccount> SellerPaymentAccounts { get; set; }
+    public DbSet<BuyerPaymentCustomer> BuyerPaymentCustomers { get; set; }
+    public DbSet<Payment> Payments { get; set; }
+    public DbSet<PaymentTransfer> PaymentTransfers { get; set; }
+    public DbSet<PaymentRefund> PaymentRefunds { get; set; }
+    public DbSet<ProcessedWebhookEvent> ProcessedWebhookEvents { get; set; }
+    public DbSet<StockReservation> StockReservations { get; set; }
+    public DbSet<SecondChanceOffer> SecondChanceOffers { get; set; }
+    public DbSet<NonPaymentStrike> NonPaymentStrikes { get; set; }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+
+        modelBuilder.Entity<SellerPaymentAccount>().HasIndex(x => x.Seller).IsUnique();
+        modelBuilder.Entity<SellerPaymentAccount>().HasIndex(x => x.ProviderAccountId).IsUnique();
+        modelBuilder.Entity<SellerPaymentAccount>().Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
+        modelBuilder.Entity<Payment>().HasIndex(x => x.OrderId);
+        modelBuilder.Entity<Payment>().HasIndex(x => x.ReservationId);
+        modelBuilder.Entity<Order>().Property(x => x.PaymentStatus).HasConversion<string>().HasMaxLength(20)
+            .HasDefaultValue(Entities.OrderPaymentStatus.NotRequired);
+        modelBuilder.Entity<Order>().HasIndex(x => new { x.Status, x.PaymentDueAt });
+        modelBuilder.Entity<StockReservation>().Property(x => x.DeliveryMethod).HasConversion<string>().HasMaxLength(20);
+        modelBuilder.Entity<Payment>().HasIndex(x => x.ProviderPaymentId).IsUnique();
+        modelBuilder.Entity<Payment>().Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
+        modelBuilder.Entity<PaymentTransfer>().HasIndex(x => x.OrderId).IsUnique();
+        modelBuilder.Entity<PaymentTransfer>().Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
+        modelBuilder.Entity<PaymentRefund>().HasIndex(x => x.PaymentId);
+        modelBuilder.Entity<StockReservation>().HasIndex(x => new { x.AuctionId, x.Status });
+        modelBuilder.Entity<StockReservation>().Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
+        modelBuilder.Entity<SecondChanceOffer>().HasIndex(x => new { x.AuctionId, x.Round });
+        modelBuilder.Entity<SecondChanceOffer>().Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
+        modelBuilder.Entity<NonPaymentStrike>().HasIndex(x => x.User);
 
         modelBuilder.Entity<Auction>()
             .HasOne(x => x.Item)

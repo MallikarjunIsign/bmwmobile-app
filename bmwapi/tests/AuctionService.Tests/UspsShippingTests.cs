@@ -109,6 +109,30 @@ public class UspsGroundAdvantageTests
         // Unknown part types: from the size class.
         Assert.Equal(new Parcel(2, 10, 8, 6), ParcelDefaults.For("Dash cam", SizeClass.Small));
     }
+
+    [Fact]
+    public void SeatCovers_AreASmallLightParcel_NotALargeSeat()
+    {
+        // Was Large ("seat"): a 30 lb, 40 × 24 × 16 in box → oversized $301.75 + $10 + $21 = $333 Los Angeles → New York.
+        Assert.Equal(SizeClass.Small, ShippingRules.DefaultSizeClass(ListingKind.CommonPart, "Seat covers"));
+        Assert.Equal(SizeClass.Large, ShippingRules.DefaultSizeClass(ListingKind.CommonPart, "Seat"));
+        var parcel = ParcelDefaults.For("Seat covers", SizeClass.Small);
+        Assert.Equal(new Parcel(4, 18, 14, 6), parcel);
+
+        // Los Angeles → New York: zone 8, 4 lb (1,512 in³ – no dimensional weight, no oversize, no fees) = $25.65 → $26.
+        var quote = ShippingService.UspsQuote(Usps, parcel, SizeClass.Small, 34.0522, -118.2437, "US", 40.7128, -74.0060)!;
+        Assert.Equal((8, 26, 4m), (quote.Zone, quote.Charge, quote.BillableWeightLb));
+        var price = Usps.Price(parcel, 2451)!;
+        Assert.Equal((25.65m, false, 0m), (price.Price, price.Oversized, price.Fees));
+    }
+
+    [Fact]
+    public void LargeDefaultBox_CoastToCoast_IsTheOversizedPricePlusFees()
+    {
+        // What the seat covers were charged: the calculation itself is right for a really large box.
+        var price = Usps.Price(new Parcel(30, 40, 24, 16), 2451)!;
+        Assert.Equal((301.75m + 10m + 21m, true, 31m), (price.Price, price.Oversized, price.Fees));
+    }
 }
 
 /// <summary>US shipping through the API: estimate, the fixed charge on the order, the seller's package, freight.</summary>
@@ -200,6 +224,44 @@ public class UsShippingApiTests(AppFixture fixture) : IAsyncLifetime
         var abroad = (await Estimate(listing.Id, 53.3498, -6.2603, "IE")).Shipping!;
         Assert.False(abroad.Available);
         Assert.Equal("Ships within USA only", abroad.Reason);
+    }
+
+    [Fact]
+    public async Task OlderSeatCoverListings_OnTheOldLargeDefault_AreCorrectedOnStart_ThenCost26CoastToCoast()
+    {
+        var old = await UsListing();
+        var chosenLater = await UsListing();
+        using (var scope = fixture.Host.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AuctionDbContext>();
+            var seatCovers = await db.PartTypes.FirstAsync(p => p.Name == "Seat covers");
+            foreach (var (id, created) in new[] { (old.Id, new DateTime(2026, 10, 15, 2, 39, 0, DateTimeKind.Utc)), (chosenLater.Id, DateTime.UtcNow.AddYears(1)) })
+            {
+                // What the "Seat Covers – Denso – New" listing had: Large (the old default), no package from the seller.
+                var auction = await db.Auctions.Include(a => a.Item).FirstAsync(a => a.Id == id);
+                auction.CreatedAt = created;
+                auction.Item.PartTypeId = seatCovers.Id;
+                auction.Item.SizeClass = SizeClass.Large;
+                (auction.Item.WeightLb, auction.Item.LengthIn, auction.Item.WidthIn, auction.Item.HeightIn) = (null, null, null, null);
+            }
+            await db.SaveChangesAsync();
+        }
+
+        // What AuctionService runs on every start (a real database: the query must translate).
+        using (var scope = fixture.Host.Services.CreateScope())
+            ShippingRateSeed.BackfillSizeClasses(scope.ServiceProvider.GetRequiredService<AuctionDbContext>());
+
+        using (var scope = fixture.Host.Services.CreateScope())
+        {
+            var items = scope.ServiceProvider.GetRequiredService<AuctionDbContext>().Auctions.AsNoTracking().Include(a => a.Item);
+            Assert.Equal(SizeClass.Small, (await items.FirstAsync(a => a.Id == old.Id)).Item.SizeClass);
+            // Made after the fix with Large: the seller's choice stays.
+            Assert.Equal(SizeClass.Large, (await items.FirstAsync(a => a.Id == chosenLater.Id)).Item.SizeClass);
+        }
+
+        // New York → Los Angeles: zone 8, the 4 lb seat-cover package → $25.65 → $26 (was $333).
+        var la = (await Estimate(old.Id, 34.0522, -118.2437)).Shipping!;
+        Assert.Equal((8, 26, "USPS Ground Advantage"), (la.Zone, la.Charge, la.Service));
     }
 
     [Fact]

@@ -1,4 +1,4 @@
-import { fixUrl, http, mapRawDtoToAuction, toServerError, type NearFilter } from './api';
+import { fixUrl, http, mapRawDtoToAuction, SLOW_REQUEST, toServerError, type NearFilter } from './api';
 import type { Auction, Bid } from '../types/models';
 import type {
   Address,
@@ -195,6 +195,8 @@ export const MarketApi = {
     call<Bid>(() => http.post('/bids/accept', { auctionId, bidId }), "Couldn't accept the bid"),
 
   // ── orders ──
+  order: (id: string) =>
+    call<Order>(() => http.get(`/orders/${id}`), "Couldn't load the order").then(o => ({ ...o, imageUrl: fixUrl(o.imageUrl) })),
   orders: () =>
     call<Order[]>(() => http.get('/orders'), "Couldn't load your orders").then(list =>
       list.map(o => ({ ...o, imageUrl: fixUrl(o.imageUrl) }))),
@@ -210,7 +212,7 @@ export const MarketApi = {
    * calculates the charge and fixes it on the order.
    */
   chooseDelivery: (id: string, method: DeliveryOption, to?: { addressId?: string; address?: Address; latitude?: number; longitude?: number }) =>
-    call<Order>(() => http.post(`/orders/${id}/delivery-method`, { method, ...to }), "Couldn't save the delivery choice"),
+    call<Order>(() => http.post(`/orders/${id}/delivery-method`, { method, ...to }, SLOW_REQUEST), "Couldn't save the delivery choice"),
 
   /** Sellers: open part requests from buyers, newest first (no buyer names, only their city). */
   openPartRequests: (country?: string) =>
@@ -219,7 +221,7 @@ export const MarketApi = {
   /** The shipping charge for a listing to a location (estimate on the listing; exact before confirming an order). */
   shippingEstimate: (listingId: string, latitude: number, longitude: number, country?: string | null) =>
     call<ShippingEstimate>(
-      () => http.get('/shipping/estimate', { params: { listingId, lat: latitude, lon: longitude, country: country ?? undefined } }),
+      () => http.get('/shipping/estimate', { ...SLOW_REQUEST, params: { listingId, lat: latitude, lon: longitude, country: country ?? undefined } }),
       "Couldn't work out the shipping charge",
     ),
 
@@ -231,9 +233,9 @@ export const MarketApi = {
     ),
 
   // ── shipping address book ──
-  shippingAddresses: () => call<ShippingAddress[]>(() => http.get('/shipping-addresses'), "Couldn't load your addresses"),
+  shippingAddresses: () => call<ShippingAddress[]>(() => http.get('/shipping-addresses', SLOW_REQUEST), "Couldn't load your addresses"),
   addShippingAddress: (a: Address & { isDefault?: boolean }) =>
-    call<ShippingAddress>(() => http.post('/shipping-addresses', a), "Couldn't save the address"),
+    call<ShippingAddress>(() => http.post('/shipping-addresses', a, SLOW_REQUEST), "Couldn't save the address"),
   updateShippingAddress: (id: string, a: Address & { isDefault?: boolean }) =>
     call<ShippingAddress>(() => http.put(`/shipping-addresses/${id}`, a), "Couldn't save the address"),
   setDefaultShippingAddress: (id: string) =>

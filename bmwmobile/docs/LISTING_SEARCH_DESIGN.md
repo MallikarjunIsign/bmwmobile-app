@@ -362,6 +362,34 @@ values at startup; rates an admin has set are left alone.
   in the USA – to 200. Those values were never a radius choice in the app; everything else (e.g. 50 km, which was both an
   older default and a chip) is kept.
 
+## 7.9 Search location (Google Places)
+
+Users can pick **any** place – area, neighbourhood, street, landmark or full address ("Kukatpally", "Gachibowli, Hyderabad",
+"Main Street, Dublin", "Lekki Phase 1, Lagos", "Katy, TX") – and get its exact latitude / longitude.
+
+- **One shared component** `src/components/PlaceSearch.tsx`, used wherever a location is chosen: Add / Edit location
+  (`AddressFormScreen`), the shipping address form (`ShippingAddressSheet` – fills street, area, city, state, postcode; name,
+  phone and house / flat stay editable; the place is also the delivery location for the charge), Home's location sheet
+  (change location without leaving Home: a new place is saved and used with the radius in use, a saved one is chosen again),
+  the sell flow's item location and the part-request location (with its own radius picker).
+- **Behaviour:** "🎯 Use my current location" at the top (GPS → `/places/reverse` → "Kukatpally, Hyderabad" with the country
+  underneath); suggestions after **3 characters** and a **300 ms** pause (main text bold, secondary grey), "Searching…",
+  "No places found", **"powered by Google"** under Google results (required when they are not shown on a Google map).
+  Picking keeps the radius picker on the same screen. Outside IN / US / NG / IE: "We don't operate in this country yet".
+  Every scroll view around it has `keyboardShouldPersistTaps="handled"` so taps on suggestions work with the keyboard open.
+- **Session tokens:** one UUID per search (typing → picking), sent on every autocomplete call and on the details call; a new
+  one after a pick.
+- **Backend proxy** (the app never calls Google): Gateway `/places/autocomplete|{placeId}|reverse` → IdentityService
+  (`specs/identity-service.md` → "Search location"): Places API (New) + Geocoding API, per-user limits, daily cap, 30-day
+  cache, usage log. **Fallback:** no key / Google error / daily cap → the server answers from the built-in city list; the
+  server can't be reached → the app searches the city list directly.
+- **Stored with each location:** `placeId`, `formattedAddress`, lat / lon, `area`, `city`, `state`, `countryCode`, `postalCode`
+  (migration `PlaceSearchFields`, nullable – older locations keep working). Shipping addresses also keep `state` and `placeId`
+  (AuctionService migration `AddressStatePlaceId`).
+- **Label shown in the app:** area + city ("Kukatpally, Hyderabad"), else the city (`placeLabel` in `src/utils/geo.ts`) –
+  Home's location line "📍 Kukatpally, Hyderabad · 200 km ▾". The GPS location is named the same way (also on the server's
+  GPS row).
+
 # 8. Data model
 
 (See the flow diagram in the Word version of this document.)

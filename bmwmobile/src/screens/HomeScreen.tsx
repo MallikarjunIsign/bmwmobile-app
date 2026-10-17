@@ -19,7 +19,8 @@ import { CategoryTiles } from '../components/CategoryTiles';
 import { useListingSearch } from '../hooks/useListingSearch';
 import { categoryChip, useBrowse } from '../search/BrowseContext';
 import { BrowseSearchBox } from '../search/BrowseSearchBox';
-import { REGIONS, formatRadius, locationText } from '../utils/geo';
+import { REGIONS, formatRadius, locationText, placeLabel } from '../utils/geo';
+import { PlaceSearch } from '../components/PlaceSearch';
 import { useChat } from '../chat/ChatContext';
 import { RadiusSheet } from '../components/RadiusSheet';
 import { errorMessage } from '../services/authApi';
@@ -33,10 +34,10 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
   const { user } = useAuth();
   const { unread } = useChat();
   // Listings within 60 km / 60 mi of the location (GPS or a chosen address), or country-wide while location is off.
-  const { country, location, locationOff, near, addresses, usingCurrentLocation, setRadius, chooseAddress, switchToCurrentLocation } = useLocations();
+  const { country, location, locationOff, near, addresses, usingCurrentLocation, setRadius, chooseAddress, switchToCurrentLocation, choosePlace } = useLocations();
   // Parts / Vehicles and All / Auction / Direct sale: shared with Market, so they apply to every search too.
   const browse = useBrowse();
-  const { itemType, saleType } = browse;
+  const { itemType } = browse;
   const parts = itemType === 'Part';
   const make = parts ? undefined : browse.filters.make;
 
@@ -101,7 +102,7 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
             >
               {/* "📍 Houston, USA · 200 mi ▾" – the radius is what pickup-only listings must be inside. */}
               <Text style={styles.locationLine} numberOfLines={1} ellipsizeMode="middle">
-                📍 {locationText(location) ?? (locationOff ? 'Location off – set your location' : 'Finding your location…')}
+                📍 {placeLabel(location) ?? (locationOff ? 'Location off – set your location' : 'Finding your location…')}
                 {location ? <Text style={styles.linkBold}> · {formatRadius(location.radiusKm, location.countryCode ?? country)} ▾</Text> : null}
               </Text>
             </TouchableOpacity>
@@ -262,6 +263,16 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
           onClose={() => setLocationSheet(false)}
         >
           <Text style={[styles.sectionHeader, styles.sheetHeader]}>CHANGE LOCATION</Text>
+          {/* Any area, street or landmark – used at once, without leaving Home. */}
+          <PlaceSearch
+            label="Search location"
+            value={null}
+            near={location}
+            showCurrentLocation={false}
+            onPick={place => switchTo('place', () => choosePlace(place))}
+            testID="home-place-search"
+          />
+          {switching === 'place' ? <ActivityIndicator color={COLORS.primaryGlow} /> : null}
           {!usingCurrentLocation ? (
             <TouchableOpacity style={styles.sheetRow} disabled={switching !== null}
               onPress={() => switchTo('gps', () => switchToCurrentLocation())}>

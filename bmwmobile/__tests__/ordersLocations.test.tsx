@@ -6,6 +6,7 @@ import { LocationsScreen } from '../src/screens/LocationsScreen';
 import { AddressFormScreen } from '../src/screens/AddressFormScreen';
 import { MarketApi } from '../src/services/marketApi';
 import { locationText } from '../src/utils/geo';
+import { PlacesApi } from '../src/services/placesApi';
 import type { Order } from '../src/types/listing';
 
 jest.setTimeout(20000);
@@ -37,6 +38,10 @@ jest.mock('../src/services/marketApi', () => ({
   MarketApi: { orderStep: jest.fn(), chooseDelivery: jest.fn(), shippingAddresses: jest.fn(), addShippingAddress: jest.fn(), shippingEstimate: jest.fn(), listingDetail: jest.fn() },
 }));
 jest.mock('../src/services/locationApi', () => ({ LocationApi: { searchCities: jest.fn().mockResolvedValue([]) } }));
+jest.mock('../src/services/placesApi', () => {
+  const actual = jest.requireActual('../src/services/placesApi');
+  return { ...actual, PlacesApi: { autocomplete: jest.fn(), details: jest.fn(), reverse: jest.fn() } };
+});
 
 const orderStep = MarketApi.orderStep as jest.Mock;
 const chooseDelivery = MarketApi.chooseDelivery as jest.Mock;
@@ -151,9 +156,10 @@ test('both offered: the buyer chooses Shipping and enters a new address (saved f
   const sheet = tree.root.findAll(n => (n.type as unknown) === 'Modal').find(m => m.props.visible)!;
   expect(texts(tree)).toContain('The seller ships within India only.');
   expect(texts(tree)).toContain('PIN CODE');
-  const inputs = sheet.findAll(n => (n.type as unknown) === 'TextInput');
-  const values = [aliceAddress.name, aliceAddress.phone, aliceAddress.line1, aliceAddress.line2, aliceAddress.city, aliceAddress.postcode];
-  for (const [i, v] of values.entries()) await ReactTestRenderer.act(async () => inputs[i].props.onChangeText(v));
+  // Typed by hand (the "Search location" box above the fields is left alone; the state is optional).
+  const inputs = sheet.findAll(n => (n.type as unknown) === 'TextInput' && n.props.accessibilityLabel !== 'Search location');
+  const values = [aliceAddress.name, aliceAddress.phone, aliceAddress.line1, aliceAddress.line2, aliceAddress.city, undefined, aliceAddress.postcode];
+  for (const [i, v] of values.entries()) if (v !== undefined) await ReactTestRenderer.act(async () => inputs[i].props.onChangeText(v));
   await press(tree, x => x === 'Ship here · ₹350');
 
   // The address and its coordinates – never a price.
@@ -284,4 +290,30 @@ test('the location line on Home', () => {
   expect(locationText({ area: 'Kukatpally', city: 'Hyderabad', countryCode: 'IN' })).toBe('Kukatpally, Hyderabad, India');
   expect(locationText({ city: 'New York', countryCode: 'US' })).toBe('New York, USA');
   expect(locationText(null)).toBeNull();
+});
+
+test('shipping address: "Search location" fills street, city, state and postcode; name and phone stay editable', async () => {
+  const places = PlacesApi as unknown as Record<string, jest.Mock>;
+  places.autocomplete.mockResolvedValue({ source: 'google', suggestions: [{ placeId: 'ChIJ-mg', primaryText: '12 MG Road', secondaryText: 'Kukatpally, Hyderabad' }] });
+  places.details.mockResolvedValue({
+    placeId: 'ChIJ-mg', formattedAddress: '12 MG Road, Kukatpally, Hyderabad, Telangana 500072, India', lat: 17.49, lon: 78.4,
+    label: 'Kukatpally, Hyderabad', street: '12 MG Road', area: 'Kukatpally', city: 'Hyderabad', state: 'Telangana', countryCode: 'IN',
+    postcode: '500072', supported: true, source: 'google',
+  });
+  shippingAddresses.mockResolvedValue([]);
+  shippingEstimate.mockResolvedValue(quote());
+  const tree = await renderCard(undecided);
+  await press(tree, x => x === '🚚 Ship it to me');
+  await press(tree, x => x === 'Next: shipping address');
+
+  const search = tree.root.find(n => (n.type as unknown) === 'TextInput' && n.props.accessibilityLabel === 'Search location');
+  await ReactTestRenderer.act(async () => search.props.onChangeText('12 MG Road'));
+  await ReactTestRenderer.act(async () => { await new Promise(r => setTimeout(r, 350)); });
+  expect(texts(tree)).toContain('powered by Google');
+  await press(tree, x => x === '12 MG Road');
+
+  const values = tree.root.findAll(n => (n.type as unknown) === 'TextInput').map(n => n.props.value);
+  expect(values).toEqual(expect.arrayContaining(['12 MG Road', 'Kukatpally', 'Hyderabad', 'Telangana', '500072']));
+  // The picked place is the delivery location for the charge.
+  expect(shippingEstimate).toHaveBeenLastCalledWith('a1', 17.49, 78.4, 'IN');
 });

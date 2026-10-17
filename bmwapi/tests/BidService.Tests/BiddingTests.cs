@@ -210,6 +210,24 @@ public class BiddingTests(AppFixture fixture)
     }
 
     [Fact]
+    public async Task PlaceBid_BlockedForUnpaidWins_IsRejected_UntilCleared()
+    {
+        var auction = await CreateAuctionAsync();
+        AppFixture.BlockedBidders["striker"] = "You can't bid right now: 2 won auctions weren't paid in the last 12 months.";
+        try
+        {
+            var blocked = await Bid(auction.Id, 6000, "striker", HttpStatusCode.BadRequest);
+            Assert.Contains("won auctions weren't paid", await blocked.ReadAsTextAsync());
+        }
+        finally
+        {
+            // An admin cleared the strikes.
+            AppFixture.BlockedBidders.TryRemove("striker", out _);
+        }
+        await Bid(auction.Id, 6000, "striker");
+    }
+
+    [Fact]
     public async Task PlaceBid_HighestBidderCannotOutbidThemselves()
     {
         var auction = await CreateAuctionAsync();

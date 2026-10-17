@@ -74,7 +74,26 @@ Like Home / Work in food-delivery apps. Each user has up to 10 locations (`UserL
 - Auto-update on: the primary is the "Current location" row, moved to the phone's GPS when the app opens and the phone moved more than 1 km.
 - Choosing a primary by hand (`/primary`, or adding with `makePrimary`) turns auto-update off and removes the GPS row, so GPS never overwrites the choice. "Use my current location" (`/current` with `explicit=true`) turns it back on.
 - Saved places never change by themselves. The primary can't be deleted.
-- GPS points are named after the nearest catalog city: the city within 40 km, "Near {city}" within 150 km, otherwise "Current location" (exact coordinates are kept).
+- GPS points are named by Google reverse geocoding: area + city ("Kukatpally, Hyderabad"), also storing area, city, state, postcode, formatted address and place ID on the GPS row. Without Google (no key / error / daily limit): the nearest catalog city – the city within 40 km, "Near {city}" within 150 km, otherwise "Current location" (exact coordinates are kept).
+- Migration `PlaceSearchFields` adds nullable `PlaceId`, `FormattedAddress`, `City`, `State` (older rows keep working). Add / edit accept them as `placeId`, `formattedAddress`, `city`, `state`; a `countryCode` outside IN / US / NG / IE → 400 `UNSUPPORTED_COUNTRY` "We don't operate in this country yet".
+
+### Search location (Google Places proxy)
+
+`PlacesController` → `PlacesService` → `GoogleMapsClient` (`Services/Places`). Signed-in users only (`IdentityServerApi` scope), reached through the Gateway as `/places/...`. Key: `GoogleMaps:ApiKey` from user-secrets / env only.
+
+|Method|Path|Returns|
+|---|---|---|
+|GET|`/api/places/autocomplete?q=&sessionToken=&lat=&lon=`|`{ suggestions: [{ placeId, primaryText, secondaryText }], source: google \| cities }` – fewer than 3 characters: empty, no Google call|
+|GET|`/api/places/{placeId}?sessionToken=`|`PlaceDto`; `city:IN:Hyderabad` IDs (city list) never call Google; 404 `PLACE_NOT_FOUND`; 503 `PLACES_UNAVAILABLE` when Google is down|
+|GET|`/api/places/reverse?lat=&lon=`|`PlaceDto` for a GPS point (falls back to the nearest catalog city)|
+
+`PlaceDto`: `placeId, formattedAddress, lat, lon, label ("Kukatpally, Hyderabad"), name, street, area, city, state, stateCode, countryCode, postcode, supported, message, source (google | cache | cities)`. `supported = false` + `message` "We don't operate in this country yet" outside IN / US / NG / IE.
+
+- Google: Places API (New) Autocomplete (`includedRegionCodes` in, us, ng, ie; `languageCode` en; `locationBias` circle 50 km around lat/lon) and Place Details with field mask `id,formattedAddress,location,addressComponents,displayName`; Geocoding API reverse (`language=en`).
+- Session tokens: the app makes one UUID per search; it is sent on every autocomplete call and on the closing details call (billed as one session). Invalid tokens are dropped.
+- Cost protection: per user 30 autocomplete / min and 300 / day, 30 lookups / min and 300 / day (429 `PLACES_RATE_LIMITED`); service-wide `DailyCallLimit` (5,000); details cached 30 days by place ID, reverse by point rounded to 3 decimals (in memory). Note: a cached details answer means the session's closing call isn't made, so that session is billed per request.
+- Usage log: one line per Google call with the day's counts; never the key, user, text or coordinates. The HttpClient's own logging is removed (the geocoding URL carries the key).
+- Fallback: no key, Google error/timeout or daily limit → built-in city list, with a warning (at most every 5 minutes per reason).
 
 **City catalog** (built in, no maps API): India (Hyderabad, Bangalore, Delhi, Mumbai, Chennai, Pune popular + 14 more), USA (10 cities), Nigeria (9 cities). Distances use the shared `Contracts.GeoMath` (Haversine + bounding box).
 
@@ -91,6 +110,7 @@ Like Home / Work in food-delivery apps. Each user has up to 10 locations (`UserL
 |POST|`/api/me/locations/{id}/primary`|Manual primary, auto-update off|
 |PUT|`/api/me/locations/current`|`{ latitude, longitude, radiusValue?, explicit }` — phone GPS → primary (new GPS row without a radius: 200)|
 |PUT|`/api/me/locations/settings`|`{ autoUpdatePrimary }`|
+|GET|`/api/places/...`|"Search location" – see above|
 
 The `/api/me/*` endpoints need an access token with the `IdentityServerApi` scope. Every change returns the full updated list. `UserDto.hasLocation` tells the app whether to show "Set your location".
 
@@ -165,3 +185,9 @@ None.
 
 `GET api/users/:username/public` (anonymous) → `{ username, displayName, memberSince, city, countryCode }` for the seller
 profile. The city comes from the primary location's place name (never an address; GPS rows like "Near Lagos" are left out).
+
+
+### Seller payment accounts
+Creating a seller (`POST /api/admin/sellers`) or upgrading a buyer (`make-seller`) also asks AuctionService to open the seller's
+Stripe payment account (USA / Ireland; `POST /api/internal/payment-accounts`, best effort – otherwise opened on the seller's first
+visit to Payments). Access tokens carry `account_country` (the account's own country) for this.

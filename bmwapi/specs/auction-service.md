@@ -147,7 +147,7 @@ Also listens on `wolverine-dead-letter-queue`: a `DeadLetterHandler` logs any `A
 |GET/POST|api/catalog/pending, makes/:id/approve, models/:id/approve|Approve requested makes/models|Auth (`Admin:Usernames`)|
 |GET|api/catalog/dictionary|Part types, synonyms, makes, models and aliases for SearchService's query parser|Anon|
 |GET|api/orders, api/orders/:id|The caller's orders as buyer or seller, with `tracking` steps, `statusLabel` and the caller's next `actions` (other party's contact only after the sale)|Auth|
-|POST|api/orders/:id/delivery-method|Buyer, while Sold: `{ method: Pickup \| Shipping, addressId? , address?: { name, phone, line1, line2?, city, postcode, countryCode }, saveAddress = true }`. Shipping needs an address-book entry or a valid new address (postcode format per country; Nigeria optional) **in the seller's country** (400 "ships within … only"); a new address is saved to the address book. Shipping-only orders start with method Shipping and `needsShippingAddress: true`|Auth (buyer)|
+|POST|api/orders/:id/delivery-method|Buyer, while Sold: `{ method: Pickup \| Shipping, addressId? , address?: { name, phone, line1, line2?, city, state?, placeId?, postcode, countryCode }, saveAddress = true }`. Shipping needs an address-book entry or a valid new address (postcode format per country; Nigeria optional) **in the seller's country** (400 "ships within … only"); a new address is saved to the address book. Shipping-only orders start with method Shipping and `needsShippingAddress: true`|Auth (buyer)|
 |POST|api/orders/:id/status|`{ status, courier?, trackingNumber? }` – seller: ReadyForPickup / PickedUp (Pickup) or Shipped (Shipping, needs the address; courier and tracking optional), forward only, may skip; buyer: Completed (Pickup) or Delivered (Shipping – also completes the order), any time. Older names Dispatched / HandedOver are accepted. Order DTO: `partPrice`, `winningBid`, `shippingFee`, `total`, `shipTo`, `pickupAddress` (exact address, buyer after the sale), `needsShippingAddress`|Auth (seller / buyer)|
 |GET/POST|api/shipping-addresses|The caller's address book (default first) / add one `{ …address, isDefault? }` (the first is the default; max 20)|Auth|
 |POST|api/media?purpose=chat\|review|1–5 photos (multipart) for chat messages / reviews: same checks and storage as listing photos (content, 5 MB, re-encoded without EXIF, thumbnail) → `[{ id, url, thumbnailUrl }]`; recorded with the uploader (MediaFiles)|Auth|
@@ -461,3 +461,114 @@ no review it publishes **ReviewRequested** (NotificationService in-app, ChatServ
 
 Reviews show the buyer partly hidden (`a***e`) to everyone but the buyer. `OrderDto` has `reviewId`, `canReview` and
 `reviewDeadline`.
+
+
+## Payments (Stripe, test mode) – Step 1
+
+Design: `bmwmobile/docs/PAYMENTS_DESIGN.md`. Package `Stripe.net` 53. Code: `Payments/` (`IPaymentProvider`, `StripePaymentProvider`,
+`NotConfiguredPaymentProvider`, `SellerPaymentService`, `PaymentWebhookService`, `PaymentAmounts`, entities), `Controllers/PaymentsController.cs`.
+Without `Stripe:SecretKey` (user-secrets) payments are off and nothing changes for sellers or buyers.
+
+| Method | Path (Gateway) | Who | Notes |
+|---|---|---|---|
+| GET | `/payments/config` | signed in | `{ enabled, publishableKey, countries, commissionPercent }` |
+| GET | `/payments/seller-account` | seller | status: `NotAvailable` / `NotStarted` / `Pending` / `Active` / `ActionNeeded`, `canPublish` |
+| POST | `/payments/seller-account` | seller | first visit: opens the Stripe Express account (US / IE) |
+| POST | `/payments/seller-account/onboarding-link` | seller | `{ url }` – Stripe-hosted onboarding |
+| POST | `/payments/seller-account/dashboard-link` | seller | `{ url }` – Stripe Express dashboard (after onboarding was submitted) |
+| GET | `/payments/stripe/onboarding-return`, `/payments/stripe/onboarding-refresh` | anyone | pages that send the browser back to `shopcarparts://payments` |
+| POST | `/payments/stripe/webhook` | Stripe | no sign-in; signature checked; idempotent; only `app=shopcarparts` objects |
+| POST | `/api/internal/payment-accounts` (not via Gateway) | IdentityService | `{ seller, country, email }` when an admin creates / upgrades a seller |
+
+Rules: publishing / relisting a listing in the USA or Ireland needs the seller's payment account **Active** (409 `PAYMENTS_NOT_READY`).
+Seller accounts are created with Stripe **Accounts v2** (`POST /v2/core/accounts`: Express dashboard, fees / losses =
+application, merchant `card_payments` + recipient `stripe_transfers`, MCC 5533, `metadata.app`); status, onboarding links,
+the Express dashboard link and transfers use the v1 APIs, which work with v2 accounts. `account.updated` (v1) keeps the
+status in sync.
+Settings `Payments:*` (commission %, deadline hours, second-chance offers, reservation minutes, auto-complete days, strikes); keys `Stripe:*`.
+Tables: `SellerPaymentAccounts`, `BuyerPaymentCustomers`, `Payments`, `PaymentTransfers`, `PaymentRefunds`, `PaymentWebhookEvents`,
+`StockReservations`, `SecondChanceOffers`, `NonPaymentStrikes` (migration `Payments`).
+## Payments – Step 2: buyers pay (Buy now, auction payment deadline, second-chance offers, strikes)
+
+Code: `Payments/CheckoutService.cs` (Buy now reservation, order payment, webhook outcomes), `Payments/PaymentDeadlines.cs`
+(`PaymentDeadlineService`, `StrikeService`, `PaymentJobs` background job, `IBidHistory`), `Services/DeliveryChoice.cs`.
+Separate charges and transfers: the PaymentIntent is created on the platform (`transfer_group=order_<orderId>`,
+`metadata.app`, `metadata.payment_id`, idempotency key `pi-<paymentId>`); the amount is always calculated by the backend
+(item price or winning bid × quantity + shipping, in cents). An order becomes `Paid` **only** from the verified
+`payment_intent.succeeded` webhook whose amount and currency match.
+
+| Method | Path (Gateway) | Who | Notes |
+|---|---|---|---|
+| POST | `/payments/checkout/buy-now` | buyer | `{ listingId, quantity, delivery: { method: Pickup \| Shipping, addressId?, address?, saveAddress } }` → **CheckoutSessionDto** `{ paymentId, clientSecret, customerId, ephemeralKey, publishableKey, currency, itemAmount, shippingAmount, totalAmount, reservedUntil, orderId }`. Reserves the units for `ReservationMinutes` (`QuantityReserved`); the order is created by the webhook |
+| POST | `/payments/orders/:orderId/pay` | buyer (winner) | auction / second-chance order `AwaitingPayment`; delivery chosen first (400 `DELIVERY_REQUIRED`) → CheckoutSessionDto. Reuses the open PaymentIntent |
+| POST | `/payments/:paymentId/cancel` | buyer | sheet closed / screen left: cancels the PaymentIntent, releases the reservation → 204 |
+| GET | `/payments/:paymentId` | buyer | `{ paymentId, status: Pending \| Succeeded \| Failed \| Canceled \| Refunded, orderId, failureMessage, reservedUntil }` (the app polls it after the sheet) |
+| GET | `/payments/offers` | bidder | open second-chance offers `{ id, listingId, title, amount, currency, expiresAt, round }` |
+| POST | `/payments/offers/:id/accept`, `/payments/offers/:id/decline` | bidder | accept → the order moves to this bidder (`AwaitingPayment`, due = the offer's end) → **OrderDto**; decline → next bidder |
+| GET | `/payments/strikes/me` | signed in | `{ strikes, limit, blockedReason }` |
+| POST | `/payments/admin/strikes/:username/clear` | admin | clears the user's active strikes → `{ cleared }` |
+| POST | `/api/listings/:id/buy` | – | USA / Ireland with payments on: 409 `PAYMENT_REQUIRED` (use checkout); India / Nigeria unchanged |
+
+Errors `{ message, code }`: `RESERVED` / `QUANTITY` (409, another buyer holds or took the units), `SELLER_NOT_READY` (409),
+`DEADLINE_PASSED` / `OFFER_ENDED` (409), `NOT_BUYER` (403), `BLOCKED`, `OWN_LISTING`, `NOT_FIXED_PRICE`,
+`SHIPPING_NOT_AVAILABLE`, `ADDRESS_INVALID`, `PAYMENTS_NOT_AVAILABLE`, `NOT_FOUND` (404).
+
+Order states: `AwaitingPayment` (8) and `Cancelled` (9); `OrderDto` adds `paymentStatus` (`NotRequired` / `AwaitingPayment` /
+`Paid` / `Refunded`), `paymentDueAt`, `paidAt`, `canPay`, `paymentLabel`, `cancelReason`. My Listings states
+`AwaitingPayment`, `OfferedToNextBidder`, `UnsoldNotPaid` (relist allowed).
+
+Background job `PaymentJobs` (every `JobIntervalSeconds`): releases expired reservations (cancels the PaymentIntent),
+sends the halfway and the last reminder (2 h before, or the last quarter of a shortened deadline), cancels unpaid orders
+("Not paid in time") with a **strike** for the auction winner, offers the item to the next-highest bidder at their own highest
+bid (bids from BidService `GET /api/bids/:auctionId`; skips the seller, users already asked, users blocked from bidding and
+users the seller blocked), and expires offers. After `SecondChanceOffers` rounds the listing is `UnsoldNotPaid`.
+A payment that succeeds after its reservation / order closed is refunded (`refund-<pi>` idempotency key).
+
+gRPC **GetBidderStanding(bidder) → { blockedReason }**: BidService refuses bids while the user has `StrikeLimit` strikes in
+`StrikeWindowMonths` (empty = may bid; errors fail open).
+
+Settings added: `Payments:PaymentDeadlineMinutes` (null; demo override of the 48 h), `JobIntervalSeconds` (30), `RunJobs`
+(true), `BidServiceUrl` (`http://localhost:7003`), **`AllowInactiveSellersInTestMode` (false)** – test only: sellers may publish
+and be paid without an Active payment account; ignored unless the key is a test key. Migration `PaymentsBuyers`:
+reservation delivery fields, `Payments.OrderId` nullable + `ReservationId` / `AuctionId`, order payment columns,
+`Auctions.QuantityReserved` (concurrency token).
+
+
+## Payments – Step 3: payouts, auto-complete, refunds, disputes, receipts, admin
+
+Code: `Payments/SellerPayouts.cs` (`SellerPayoutService`), `OrdersController` (handover → `AutoCompleteAt`; Completed → payout),
+`PaymentJobs` (auto-complete + payout retries), `PaymentWebhookService` (refunds / disputes / transfers). Migration `PaymentsPayouts`.
+
+| Method | Path (Gateway) | Who | Notes |
+|---|---|---|---|
+| GET | `/payments/orders/:orderId/receipt` | buyer / seller | **ReceiptDto**: buyer – item, shipping, total, currency, paidAt, card ("visa •••• 4242"), `receiptUrl` (Stripe), refunds; seller – commission %, commission, `payout` |
+| POST | `/payments/orders/:orderId/problem` | buyer | `{ text }` – paid online, not completed: order on hold (no auto-complete, no payout), seller notified → **OrderDto** |
+| POST | `/payments/orders/:orderId/cancel-and-refund` | seller | `{ text }` – paid online, before Picked up / Shipped: full refund, order `Cancelled` ("Refunded – Cancelled by the seller: …"); 409 after the handover or when already refunded |
+| GET | `/payments/admin/payments?status=&user=&take=50` | admin | payments with their order, hold, auto-complete and payout (**AdminPaymentDto**) |
+| GET | `/payments/admin/orders/:orderId` | admin | one order's payment, refunds, payout, dispute, with the Stripe ids (`pi_`, `ch_`, `tr_`, `dp_`) and the exchange rate |
+| POST | `/payments/admin/orders/:orderId/refund` | admin | `{ amount? (cents), reason }` – all that is left (no amount) or part of it |
+| POST | `/payments/admin/orders/:orderId/hold` / `release` | admin | hold `{ text }`; release `{ complete }` – complete = also complete the order now and pay the seller |
+| POST | `/payments/admin/transfers/:transferId/retry` | admin | send a Pending / Frozen payout again now (409 otherwise) |
+| POST | `/payments/admin/transfers/:transferId/reverse` | admin | `{ amount? (cents of the transfer's currency), reason }` – take a sent payout (partly) back |
+
+Rules:
+- **Payout** when the order becomes Completed (buyer, job, support): transfer = item + shipping − commission − refunds,
+  `source_transaction` = the buyer's charge, `transfer_group=order_<id>`, idempotency `tr-<transferId>`. EUR orders: sent in
+  `Payments:PlatformCurrency` (USD) at the charge's balance exchange rate (never more than the charge brought in); what arrived in
+  the seller's account (EUR) is read back from their balance transaction. Not Active / Stripe error → Pending, retried by the
+  job (1, 4, 9 … min, at most hourly). On hold / disputed → Frozen.
+- **Auto-complete** `Payments:AutoCompleteDays` (7) after Picked up / Shipped (`AutoCompleteAt`), paid online, not on hold;
+  event by `system`, "Completed automatically 7 days after …".
+- **Refunds** to the card, idempotency `refund-<refundRowId>`; `charge.refunded` records Dashboard refunds ("Refunded in the
+  Stripe Dashboard", by `stripe`). After a payout the seller's part of the refund is reversed (`rev-<refundRowId>`). A full refund
+  sets the order's payment `Refunded` and cancels an order that wasn't completed.
+- **Disputes** (`charge.dispute.*`, matched by charge – disputes have no metadata): created / updated → payment `Disputed`, order
+  on hold, payout Frozen; closed won → released (paid if completed); lost → payout Cancelled (already sent: admin reverse).
+
+`OrderDto` adds `receiptUrl` (buyer), `refundedCents`, `payout` `{ amountCents, currency, approximate, status, label, transferredAt }`
+(seller; status AfterCompletion / Scheduled / Sending / WaitingForSetup / OnHold / Transferred / Reversed / Cancelled; label
+e.g. "You'll receive about €94.05 when the buyer confirms, or automatically on 23 Oct", "Paid out €94.04 (sent as $105.44)"),
+`autoCompleteAt`, `onHold`, `holdReason`, `canReportProblem`, `canCancelAndRefund`. Payment statuses add `PartiallyRefunded`,
+`Disputed`; transfer statuses add `Cancelled`.
+
+Settings: `Payments:AutoCompleteMinutes` (null; demo override of the 7 days), `Payments:PlatformCurrency` (`USD`).
